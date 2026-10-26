@@ -5,7 +5,7 @@ Notes for whoever continues this port on another machine. The user-facing docume
 
 ## Branch and layout
 
-Branch `linux-port` on top of adafruit/circuitpython `main` (246a7abe44). Everything of the port
+Branch `desktop` of MakerClassCZ/cp-desktop-lab, rebased on adafruit/circuitpython `main`. Everything of the port
 is under `ports/desktop/`; the shared code carries small `CIRCUITPY-CHANGE` edits for the host
 (clang, MinGW, `supervisor_vfs` host directories, `sys.settrace` with `frame.f_locals`, the
 `port_before_user_code()` hook). Commits carry no Co-Authored-By or similar trailers.

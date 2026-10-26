@@ -1,0 +1,47 @@
+# cp-desktop-lab
+
+**Unofficial.** CircuitPython as a program for Linux and Windows: the supervisor, the VM and the
+CIRCUITPY drive run on your computer, the terminal is the serial console, and a window is the
+display. Code written for a board runs as it is, with the same libraries, without a board, or with
+real pins through a USB adapter or a Raspberry Pi's header.
+
+This is a fork of [adafruit/circuitpython](https://github.com/adafruit/circuitpython) with one
+port added, [`ports/desktop`](../ports/desktop). It is not made or supported by Adafruit; the
+rest of the tree is CircuitPython as it is upstream.
+
+![Four displays: the window, an ST7789 on SPI, an SSD1306 on I2C and a HUB75 matrix](../ports/desktop/docs/images/displays.gif)
+
+## What it does
+
+- **The virtual board:** the window as the display (`displayio`, `terminalio`, `picogame`), the
+  keyboard and game controllers as buttons, sound. A board panel shows NeoPixels, buttons,
+  switches, sliders and LEDs; virtual I2C sensors (BME280, LIS3DH, SHT31D…) and SPI and I2C
+  displays (ST7789, ILI9341, SSD1306…) come from a board file.
+- **Real pins:** an FT232H or an MCP2221A on USB, or a Raspberry Pi's own GPIO, I2C and SPI
+  (`--board gpiochip`).
+- **CIRCUITPY is a folder:** save a file and `code.py` reloads, as on a board. The web workflow
+  serves it too.
+- **The computer's network** as `socketpool`, `wifi` and `ssl`; a serial port as `busio.UART`.
+- **Debugging:** a VS Code extension with breakpoints and stepping, `--trace-bus` for the I2C and
+  SPI traffic, a control API and an MCP server for AI assistants.
+
+![The board panel: a slider as a potentiometer, an encoder, a servo and a NeoPixel strip](../ports/desktop/docs/images/panel.gif)
+
+## Get it
+
+Builds for Linux (x86_64, aarch64) and Windows are on the
+[Releases](https://github.com/MakerClassCZ/cp-desktop-lab/releases) page. On Linux, SDL2 must be
+installed (`libsdl2-2.0-0` on Debian and Ubuntu).
+
+```
+./circuitpython                       # ./CIRCUITPY is created on the first start
+./circuitpython --drive path/to/project
+./circuitpython --board ft232h        # real pins through an FT232H
+```
+
+How to build it, every option and what is missing: [`ports/desktop/README.md`](../ports/desktop/README.md).
+
+## Status
+
+Experimental. It follows CircuitPython's `main` branch. Problems and ideas go to this repository's
+issues, not to Adafruit's.
