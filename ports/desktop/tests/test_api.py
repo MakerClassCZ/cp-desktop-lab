@@ -354,16 +354,17 @@ with launch(BURST) as b:
         r["lost"] and r["start"] > 0,
         (r["lost"], r["start"]),
     )
-    since, last = r["start"], ""
+    # What follows "burst done" (Code done running...) may come as a read of its own.
+    since, read = r["start"], ""
     for _ in range(10):
         r = b.console(since=since)
         if not r["data"]:
             break
-        last, since = r["data"], r["next"]
+        read, since = read + r["data"], r["next"]
     check(
         "following next reaches the end",
-        "burst done" in last and "line 03999" in last,
-        last[-200:],
+        "burst done" in read and "line 03999" in read,
+        read[-200:],
     )
 
 # Clients that misbehave: idle connections, cut bodies
