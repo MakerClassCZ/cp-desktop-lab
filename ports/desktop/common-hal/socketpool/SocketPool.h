@@ -1,0 +1,18 @@
+// This file is part of the CircuitPython project: https://circuitpython.org
+//
+// SPDX-FileCopyrightText: Copyright (c) 2020 Scott Shawcroft for Adafruit Industries
+//
+// SPDX-FileCopyrightText: Copyright (c) 2026 Vladimir Smitka (POSIX sockets)
+//
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "py/obj.h"
+
+typedef struct {
+    mp_obj_base_t base;
+} socketpool_socketpool_obj_t;

@@ -51,6 +51,9 @@
 #if CIRCUITPY_PICODVI
 #include "bindings/picodvi/Framebuffer.h"
 #endif
+#if CIRCUITPY_SDL
+#include "bindings/sdl/Framebuffer.h"
+#endif
 
 #pragma once
 
@@ -77,6 +80,9 @@ typedef struct {
         #endif
         #if CIRCUITPY_PICODVI
         picodvi_framebuffer_obj_t picodvi;
+        #endif
+        #if CIRCUITPY_SDL
+        sdl_framebuffer_obj_t sdl;
         #endif
         #if CIRCUITPY_DOTCLOCKFRAMEBUFFER
         dotclockframebuffer_framebuffer_obj_t dotclock;

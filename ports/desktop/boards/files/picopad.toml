@@ -1,0 +1,15 @@
+# A PicoPad's buttons on the board panel: circuitpython --board-file boards/files/picopad.toml
+# The virtual board already names them as PicoPad does (SW_UP ... SW_SELECT); this shows them as
+# a gamepad to click, and sets the keys that press them.
+#
+# Each line gives a button its keys, comma separated, by their SDL names (Space, W, Up, Return,
+# Left Shift, Keypad 8, ...); a key named here leaves the button it had by default. Without a
+# line a button keeps its default:
+#   UP, DOWN, LEFT, RIGHT  the arrows
+#   A, B, X, Y             Z, X, A, S
+#   START, SELECT          Return, Backspace
+#   L, R, MENU             Q, W, Escape (keys only, not drawn)
+
+[gamepad]
+# A = "Space, Z"
+# UP = "W, Up"

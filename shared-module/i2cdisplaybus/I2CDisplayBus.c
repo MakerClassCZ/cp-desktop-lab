@@ -18,6 +18,12 @@
 #include "shared-bindings/time/__init__.h"
 #include "shared-module/displayio/display_core.h"
 
+// A port can put a model of the display at the address (one it emulates) before the probe.
+MP_WEAK void i2cdisplaybus_port_attach(busio_i2c_obj_t *i2c, uint16_t device_address) {
+    (void)i2c;
+    (void)device_address;
+}
+
 void common_hal_i2cdisplaybus_i2cdisplaybus_construct(i2cdisplaybus_i2cdisplaybus_obj_t *self,
     busio_i2c_obj_t *i2c, uint16_t device_address, const mcu_pin_obj_t *reset) {
 
@@ -34,6 +40,7 @@ void common_hal_i2cdisplaybus_i2cdisplaybus_construct(i2cdisplaybus_i2cdisplaybu
     }
 
     // Probe the bus to see if a device acknowledges the given address.
+    i2cdisplaybus_port_attach(i2c, device_address);
     if (!common_hal_busio_i2c_probe(i2c, device_address)) {
         self->base.type = &mp_type_NoneType;
         common_hal_i2cdisplaybus_i2cdisplaybus_deinit(self);

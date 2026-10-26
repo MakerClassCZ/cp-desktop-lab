@@ -52,7 +52,13 @@ static const MP_DEFINE_STR_OBJ(os_uname_info_sysname_obj, MICROPY_HW_MCU_NAME);
 static const MP_DEFINE_STR_OBJ(os_uname_info_nodename_obj, MICROPY_HW_MCU_NAME);
 static const MP_DEFINE_STR_OBJ(os_uname_info_release_obj, MICROPY_VERSION_STRING);
 static const MP_DEFINE_STR_OBJ(os_uname_info_version_obj, MICROPY_GIT_TAG " on " MICROPY_BUILD_DATE);
+// A port that picks its board at run time may name the machine then.
+#ifdef CIRCUITPY_OS_UNAME_MACHINE_OBJ
+extern mp_obj_str_t CIRCUITPY_OS_UNAME_MACHINE_OBJ;
+#define os_uname_info_machine_obj CIRCUITPY_OS_UNAME_MACHINE_OBJ
+#else
 static const MP_DEFINE_STR_OBJ(os_uname_info_machine_obj, MICROPY_HW_BOARD_NAME " with " MICROPY_HW_MCU_NAME);
+#endif
 
 
 static MP_DEFINE_ATTRTUPLE(

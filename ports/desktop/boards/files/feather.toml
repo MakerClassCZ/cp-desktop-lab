@@ -1,0 +1,56 @@
+# A Feather's names on the virtual board: circuitpython --board-file boards/files/feather.toml
+# Pins 0-12 are the keyboard's buttons (pressed = low), 13 the speaker, 14-27 free virtual pins.
+# TX and RX are the board's own (--uart); SCL, SDA and board.I2C() are its virtual I2C bus,
+# with the sensors a Feather project often has at their default addresses; SCK, MOSI, MISO and
+# board.SPI() its virtual SPI bus. The board panel shows the NeoPixel, the LED, the analog pins
+# as sliders, the button and the sensors' values.
+
+[pins]
+NEOPIXEL = "GPIO14"
+LED = "GPIO15"
+D13 = "GPIO15"
+D5 = "GPIO16"
+D6 = "GPIO17"
+D9 = "GPIO18"
+D10 = "GPIO19"
+D11 = "GPIO20"
+D12 = "GPIO21"
+A0 = "GPIO22"
+A1 = "GPIO23"
+A2 = "GPIO24"
+A3 = "GPIO25"
+A4 = "GPIO26"
+A5 = "GPIO27"
+BUTTON = "SW_A"          # the Z key, or the panel
+# Outputs a program sets and leaves, on keys' pins (no free ones are left): an output wins
+# over the key.
+NEOPIXEL_POWER = "GPIO9" # ESP32-S2/S3 Feathers power their NeoPixel through it
+EXTERNAL_POWER = "GPIO10" # the RP2040 Prop-Maker Feather's
+D4 = "GPIO11"
+# The SPI pins as pins too, on the arrows: code that drives a NeoPixel or a servo on them, and
+# busio.SPI on them reaches the virtual bus all the same.
+SCK = "GPIO0"
+MOSI = "GPIO1"
+MISO = "GPIO2"
+
+[neopixel]
+NEOPIXEL = "1"
+
+[led]
+LED = "red"
+
+[button]
+BUTTON = ""
+
+[analog]
+A0 = ""
+A1 = ""
+A2 = ""
+
+[i2c]
+ENV = "bme280"           # 0x77
+ACCEL = "lis3dh"         # 0x18, adafruit_lis3dh's default
+TEMP = "mcp9808 0x19"    # its 0x18 is the LIS3DH's; it answers 0x18-0x1f
+RTC = "ds3231"           # 0x68
+BATTERY = "lc709203f"    # 0x0b
+CRICKIT = "crickit"      # 0x49: a Crickit FeatherWing (adafruit_crickit)

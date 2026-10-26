@@ -93,6 +93,10 @@ typedef struct _mp_raw_code_t {
     // a function. Required to properly implement "call" trace event.
     uint32_t line_of_definition;
     mp_bytecode_prelude_t prelude;
+    // CIRCUITPY-CHANGE: the names of the local variable slots, for frame.f_locals. NULL for
+    // code from a .mpy file, which has no names.
+    const qstr *local_names;
+    uint16_t n_local_names;
     #endif
     #endif
     #if MICROPY_EMIT_INLINE_ASM
@@ -122,6 +126,10 @@ typedef struct _mp_raw_code_truncated_t {
     #if MICROPY_PY_SYS_SETTRACE
     uint32_t line_of_definition;
     mp_bytecode_prelude_t prelude;
+    // CIRCUITPY-CHANGE: the names of the local variable slots, for frame.f_locals. NULL for
+    // code from a .mpy file, which has no names.
+    const qstr *local_names;
+    uint16_t n_local_names;
     #endif
     #endif
 } mp_raw_code_truncated_t;

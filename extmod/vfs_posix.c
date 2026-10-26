@@ -50,12 +50,10 @@
 #include <windows.h>
 #endif
 
-typedef struct _mp_obj_vfs_posix_t {
-    mp_obj_base_t base;
-    vstr_t root;
-    size_t root_len;
-    bool readonly;
-} mp_obj_vfs_posix_t;
+// CIRCUITPY-CHANGE: mp_obj_vfs_posix_t is in vfs_posix.h.
+#if defined(CIRCUITPY_FILESYSTEM_POSIX) && CIRCUITPY_FILESYSTEM_POSIX
+#include "supervisor/filesystem.h"
+#endif
 
 static const char *vfs_posix_get_path_str(mp_obj_vfs_posix_t *self, mp_obj_t path) {
     const char *path_str = mp_obj_str_get_str(path);
@@ -110,6 +108,10 @@ static mp_obj_t vfs_posix_make_new(const mp_obj_type_t *type, size_t n_args, siz
     mp_arg_check_num(n_args, n_kw, 0, 1, false);
 
     mp_obj_vfs_posix_t *vfs = mp_obj_malloc(mp_obj_vfs_posix_t, type);
+    // CIRCUITPY-CHANGE
+    #if defined(CIRCUITPY_FILESYSTEM_POSIX) && CIRCUITPY_FILESYSTEM_POSIX
+    memset(&vfs->blockdev, 0, sizeof(vfs->blockdev));
+    #endif
     vstr_init(&vfs->root, 0);
     if (n_args == 1) {
         const char *root = mp_obj_str_get_str(args[0]);
@@ -160,7 +162,29 @@ static mp_obj_t vfs_posix_umount(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(vfs_posix_umount_obj, vfs_posix_umount);
 
+// CIRCUITPY-CHANGE
+#if defined(CIRCUITPY_FILESYSTEM_POSIX) && CIRCUITPY_FILESYSTEM_POSIX
+void mp_vfs_posix_init_static(mp_obj_vfs_posix_t *vfs, const char *root, char *buf, size_t buf_len) {
+    memset(vfs, 0, sizeof(*vfs));
+    vfs->base.type = &mp_type_vfs_posix;
+    vstr_init_fixed_buf(&vfs->root, buf_len, buf);
+    vstr_add_str(&vfs->root, root);
+    if (vfs->root.len == 0 || vfs->root.buf[vfs->root.len - 1] != '/') {
+        vstr_add_char(&vfs->root, '/');
+    }
+    vfs->root_len = vfs->root.len;
+    vfs->readonly = !MICROPY_VFS_POSIX_WRITABLE;
+}
+#endif
+
 static inline bool vfs_posix_is_readonly(mp_obj_vfs_posix_t *self) {
+    // CIRCUITPY-CHANGE: a supervisor-managed directory follows the same write protection as a
+    // FAT CIRCUITPY (read-only to Python while the host owns it, unless remounted).
+    #if defined(CIRCUITPY_FILESYSTEM_POSIX) && CIRCUITPY_FILESYSTEM_POSIX
+    if (!filesystem_is_writable_by_python((supervisor_vfs_t *)self)) {
+        return true;
+    }
+    #endif
     return !MICROPY_VFS_POSIX_WRITABLE || self->readonly;
 }
 
@@ -387,6 +411,9 @@ static MP_DEFINE_CONST_FUN_OBJ_2(vfs_posix_stat_obj, vfs_posix_stat);
 
 #ifdef __ANDROID__
 #define USE_STATFS 1
+// CIRCUITPY-CHANGE: CircuitPython builds with -Wundef.
+#else
+#define USE_STATFS 0
 #endif
 
 #if USE_STATFS

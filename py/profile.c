@@ -39,6 +39,9 @@
 
 #define prof_trace_cb MP_STATE_THREAD(prof_trace_callback)
 
+// CIRCUITPY-CHANGE: objcell.c defines it, no header declares it
+extern const mp_obj_type_t mp_type_cell;
+
 uint mp_prof_bytecode_lineno(const mp_raw_code_t *rc, size_t bc) {
     const mp_bytecode_prelude_t *prelude = &rc->prelude;
     return mp_bytecode_get_source_line(prelude->line_info, prelude->line_info_top, bc);
@@ -112,6 +115,30 @@ static void frame_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         case MP_QSTR_f_lineno:
             dest[0] = MP_OBJ_NEW_SMALL_INT(o->lineno);
             break;
+        // CIRCUITPY-CHANGE: the locals by name, for code compiled from source (a .mpy keeps no
+        // names). Local n lives in state[n_state - 1 - n]; a variable shared with an inner
+        // function sits there as a cell.
+        case MP_QSTR_f_locals: {
+            const mp_raw_code_t *rc = o->code_state->fun_bc->rc;
+            mp_obj_t locals = mp_obj_new_dict(rc->n_local_names);
+            const mp_obj_t *state = o->code_state->state;
+            size_t n_state = rc->prelude.n_state;
+            for (size_t i = 0; i < rc->n_local_names && i < n_state; i++) {
+                mp_obj_t value = state[n_state - 1 - i];
+                if (rc->local_names[i] == MP_QSTRnull || value == MP_OBJ_NULL) {
+                    continue;
+                }
+                if (mp_obj_is_type(value, &mp_type_cell)) {
+                    value = mp_obj_cell_get(value);
+                    if (value == MP_OBJ_NULL) {
+                        continue;
+                    }
+                }
+                mp_obj_dict_store(locals, MP_OBJ_NEW_QSTR(rc->local_names[i]), value);
+            }
+            dest[0] = locals;
+            break;
+        }
     }
 }
 

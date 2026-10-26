@@ -34,7 +34,8 @@
 static void get_pin_name(const mcu_pin_obj_t *self, qstr *package, qstr *module, qstr *name) {
     const mp_map_t *board_map = &board_module_globals.map;
     for (uint8_t i = 0; i < board_map->alloc; i++) {
-        if (board_map->table[i].value == MP_OBJ_FROM_PTR(self)) {
+        // CIRCUITPY-CHANGE: a mutable board may have names that are strings, not qstrs.
+        if (board_map->table[i].value == MP_OBJ_FROM_PTR(self) && mp_obj_is_qstr(board_map->table[i].key)) {
             *package = 0;
             *module = MP_QSTR_board;
             *name = MP_OBJ_QSTR_VALUE(board_map->table[i].key);

@@ -8,6 +8,7 @@
 #include "shared-bindings/framebufferio/FramebufferDisplay.h"
 
 #include "py/gc.h"
+#include "py/mphal.h"
 #include "py/runtime.h"
 #include "shared-bindings/microcontroller/Pin.h"
 #include "shared-bindings/time/__init__.h"
@@ -276,8 +277,11 @@ bool common_hal_framebufferio_framebufferdisplay_refresh(framebufferio_framebuff
         }
         uint32_t remaining_time = target_ms_per_frame - (current_ms_since_real_refresh % target_ms_per_frame);
         // We're ahead of the game so wait until we align with the frame rate.
-        while (supervisor_ticks_ms64() - self->last_refresh_call < remaining_time) {
+        uint64_t waited;
+        while ((waited = supervisor_ticks_ms64() - self->last_refresh_call) < remaining_time) {
             RUN_BACKGROUND_TASKS;
+            // A port may wait out the rest in its own way; elsewhere a no-op.
+            MICROPY_INTERNAL_WFE((int)(remaining_time - waited));
         }
     }
     self->first_manual_refresh = false;

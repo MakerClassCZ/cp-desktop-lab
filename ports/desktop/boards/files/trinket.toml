@@ -1,0 +1,33 @@
+# A Trinket M0's or a Gemma M0's names on the virtual board: circuitpython --board-file boards/files/trinket.toml
+# The two name their pads alike (a Gemma has no D3 and D4). Pins 0-12 are the keyboard's buttons,
+# 13 the speaker, 14-27 free virtual pins. The virtual board has no I2C, SPI or UART on these
+# pads, so SDA, SCL, TX, RX, SCK, MOSI and MISO are left out, and the DotStar's pins are only
+# names: a strip of APA102s is not drawn. The board panel shows the LED and the analog pads as
+# sliders.
+
+[pins]
+D0 = "GPIO14"
+A2 = "GPIO14"
+D1 = "GPIO15"
+A0 = "GPIO15"
+D2 = "GPIO16"
+A1 = "GPIO16"
+D3 = "GPIO17"
+A3 = "GPIO17"
+D4 = "GPIO18"
+A4 = "GPIO18"
+LED = "GPIO19"
+D13 = "GPIO19"
+L = "GPIO19"
+APA102_MOSI = "GPIO20"
+DOTSTAR_DATA = "GPIO20"
+APA102_SCK = "GPIO21"
+DOTSTAR_CLOCK = "GPIO21"
+
+[led]
+LED = "red"
+
+[analog]
+A0 = ""
+A1 = ""
+A2 = ""

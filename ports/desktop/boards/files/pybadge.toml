@@ -1,0 +1,40 @@
+# A PyBadge's (or an EdgeBadge's) names on the virtual board:
+#   circuitpython --board-file boards/files/pybadge.toml
+# Its eight buttons sit behind a shift register (keypad.ShiftRegisterKeys, as adafruit_pybadger
+# reads them): the gamepad's, so the arrows, Z X, Return and Backspace press them. The light
+# sensor is a slider, the accelerometer a LIS3DH on the virtual I2C bus. The virtual board's
+# display stands in for the 160x128 TFT (board.DISPLAY).
+
+[pins]
+NEOPIXEL = "GPIO14"
+D8 = "GPIO14"
+LED = "GPIO15"
+D13 = "GPIO15"
+LIGHT = "GPIO16"
+A7 = "GPIO16"
+ACCELEROMETER_INTERRUPT = "GPIO17"
+SPEAKER_ENABLE = "GPIO18"
+BUTTON_OUT = "GPIO19"
+BUTTON_CLOCK = "GPIO20"
+BUTTON_LATCH = "GPIO21"
+A0 = "GPIO22"
+A1 = "GPIO23"
+A2 = "GPIO24"
+
+[neopixel]
+NEOPIXEL = "5"
+
+[led]
+LED = "red"
+
+[analog]
+LIGHT = ""
+
+[shiftreg]
+BUTTON_OUT = "clock=BUTTON_CLOCK latch=BUTTON_LATCH keys=B,A,START,SELECT,RIGHT,DOWN,UP,LEFT"
+
+[i2c]
+ACCEL = "lis3dh 0x19"
+
+[board]
+machine = "Adafruit Pybadge with samd51j19"   # adafruit_pybadger picks the PyBadge by it

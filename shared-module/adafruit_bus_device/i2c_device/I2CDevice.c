@@ -36,7 +36,14 @@ void common_hal_adafruit_bus_device_i2cdevice_unlock(adafruit_bus_device_i2cdevi
     mp_call_method_n_kw(0, 0, dest);
 }
 
+// A port can put a model of the device a driver looks for at its address (one it emulates).
+MP_WEAK void i2cdevice_port_attach(mp_obj_t i2c, uint8_t device_address) {
+    (void)i2c;
+    (void)device_address;
+}
+
 void common_hal_adafruit_bus_device_i2cdevice_probe_for_device(adafruit_bus_device_i2cdevice_obj_t *self) {
+    i2cdevice_port_attach((mp_obj_t)self->i2c, self->device_address);
     common_hal_adafruit_bus_device_i2cdevice_lock(self);
 
     mp_obj_t dest[3];

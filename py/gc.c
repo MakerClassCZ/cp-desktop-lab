@@ -1484,7 +1484,9 @@ void *gc_realloc(void *ptr_in, size_t n_bytes, bool allow_move) {
             ATB_FREE_TO_TAIL(area, bl);
         }
 
-        area->gc_last_used_block = MAX(area->gc_last_used_block, end_block);
+        // CIRCUITPY-CHANGE: end_block is one past the last block; the sweeps read the tables up
+        // to gc_last_used_block inclusive, so storing end_block reads one block past the area.
+        area->gc_last_used_block = MAX(area->gc_last_used_block, end_block - 1);
 
         GC_EXIT();
 

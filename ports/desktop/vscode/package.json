@@ -1,0 +1,180 @@
+{
+  "name": "circuitpython-host-debug",
+  "displayName": "CircuitPython host debugger",
+  "description": "Debug CircuitPython code running in the Linux and Windows build of CircuitPython: breakpoints, stepping, variables.",
+  "version": "0.2.0",
+  "publisher": "makerclass",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Debuggers"
+  ],
+  "activationEvents": [
+    "onDebugResolve:circuitpython",
+    "onDebugDynamicConfigurations:circuitpython",
+    "onCommand:circuitpython.selectBoard",
+    "onCommand:circuitpython.showBusTrace",
+    "onCommand:circuitpython.installLibrary",
+    "onCommand:circuitpython.installFromCode",
+    "workspaceContains:code.py"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "breakpoints": [
+      {
+        "language": "python"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "circuitpython",
+        "label": "CircuitPython (host)",
+        "languages": [
+          "python"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "program"
+            ],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "The circuitpython executable.",
+                "default": "circuitpython"
+              },
+              "drive": {
+                "type": "string",
+                "description": "The CIRCUITPY directory (or FAT image).",
+                "default": "${workspaceFolder}"
+              },
+              "board": {
+                "type": "string",
+                "enum": [
+                  "ask",
+                  "auto",
+                  "virtual",
+                  "ft232h",
+                  "mcp2221",
+                  "gpiochip"
+                ],
+                "enumDescriptions": [
+                  "The board chosen with CircuitPython: Select board (the status bar), asked the first time",
+                  "The one adapter that is plugged in; asked when none or several are",
+                  "The window, the keyboard and game controllers as buttons",
+                  "Real pins through an FT232H: digitalio, busio.SPI, busio.I2C",
+                  "Real pins through an MCP2221A: digitalio, busio.I2C, busio.UART, analogio",
+                  "This computer's own GPIO, I2C, SPI and UART (a Raspberry Pi and the like)"
+                ],
+                "default": "ask",
+                "description": "The board CircuitPython runs as (--board)."
+              },
+              "port": {
+                "type": "number",
+                "description": "The debug adapter's TCP port.",
+                "default": 5678
+              },
+              "boardFile": {
+                "type": "string",
+                "description": "A board file (--board-file): pin names such as NEOPIXEL, D5, LED added to the board, and NeoPixel layouts. Example: ${workspaceFolder}/feather.toml"
+              },
+              "traceBus": {
+                "type": "boolean",
+                "description": "Show every I2C, SPI and UART transfer in the CircuitPython bus panel (--trace-bus). Default: on for a board with real pins."
+              },
+              "args": {
+                "type": "array",
+                "description": "More command line arguments, such as --ram 32.",
+                "default": []
+              }
+            }
+          },
+          "attach": {
+            "properties": {
+              "port": {
+                "type": "number",
+                "description": "The port the program was started with (--debug PORT).",
+                "default": 5678
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "circuitpython",
+            "request": "launch",
+            "name": "CircuitPython: run code.py",
+            "program": "circuitpython",
+            "drive": "${workspaceFolder}",
+            "port": 5678,
+            "board": "ask"
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "CircuitPython: run code.py",
+            "description": "Run the CIRCUITPY folder in the host build of CircuitPython under the debugger",
+            "body": {
+              "type": "circuitpython",
+              "request": "launch",
+              "name": "CircuitPython: run code.py",
+              "program": "^\"\\${workspaceFolder}/circuitpython\"",
+              "drive": "^\"\\${workspaceFolder}\"",
+              "board": "ask",
+              "port": 5678
+            }
+          },
+          {
+            "label": "CircuitPython: attach",
+            "description": "Attach to a program started with circuitpython --debug",
+            "body": {
+              "type": "circuitpython",
+              "request": "attach",
+              "name": "CircuitPython: attach",
+              "port": 5678
+            }
+          }
+        ]
+      }
+    ],
+    "commands": [
+      {
+        "command": "circuitpython.selectBoard",
+        "title": "Select board",
+        "category": "CircuitPython"
+      },
+      {
+        "command": "circuitpython.showBusTrace",
+        "title": "Show bus trace",
+        "category": "CircuitPython"
+      },
+      {
+        "command": "circuitpython.installLibrary",
+        "title": "Install library…",
+        "category": "CircuitPython"
+      },
+      {
+        "command": "circuitpython.installFromCode",
+        "title": "Install libraries used by code.py",
+        "category": "CircuitPython"
+      }
+    ],
+    "configuration": {
+      "title": "CircuitPython host debugger",
+      "properties": {
+        "circuitpython.program": {
+          "type": "string",
+          "default": "",
+          "description": "The circuitpython executable, used to list the boards and see which adapters are plugged in. Empty: the program of the last launch."
+        },
+        "circuitpython.reconnectAfterReload": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reconnect the debugger when a saved file reloaded the program and it waits for the editor again. Stop in the editor never reconnects."
+        }
+      }
+    }
+  }
+}

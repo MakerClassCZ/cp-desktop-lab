@@ -12,16 +12,25 @@
 #include "py/runtime.h"
 #include "py/gc.h"
 
+// The TLSF defaults only where TLSF is built; a port without it has its own heap.
+#if CIRCUITPY_LIB_TLSF
 #include "lib/tlsf/tlsf.h"
+#endif
 
 #ifdef CIRCUITPY_BOOT_BUTTON
 #include "shared-bindings/digitalio/DigitalInOut.h"
 #include "shared-bindings/time/__init__.h"
 #endif
 
+#if CIRCUITPY_LIB_TLSF
 static tlsf_t heap;
+#endif
 
 MP_WEAK void reset_port_early(void) {
+}
+
+MP_WEAK const char *port_board_id(void) {
+    return CIRCUITPY_BOARD_ID;
 }
 
 MP_WEAK void port_wake_main_task(void) {
@@ -40,6 +49,10 @@ MP_WEAK void port_task_sleep_ms(uint32_t msecs) {
 MP_WEAK void port_boot_info(void) {
 }
 
+MP_WEAK void port_before_user_code(void) {
+}
+
+#if CIRCUITPY_LIB_TLSF
 MP_WEAK void port_heap_init(void) {
     uint32_t *heap_bottom = port_heap_get_bottom();
     uint32_t *heap_top = port_heap_get_top();
@@ -51,6 +64,7 @@ MP_WEAK void *port_malloc(size_t size, bool dma_capable) {
     void *block = tlsf_malloc(heap, size);
     return block;
 }
+#endif
 
 // Ensure allocated memory is zero.
 MP_WEAK void *port_malloc_zero(size_t size, bool dma_capable) {
@@ -61,9 +75,11 @@ MP_WEAK void *port_malloc_zero(size_t size, bool dma_capable) {
     return ptr;
 }
 
+#if CIRCUITPY_LIB_TLSF
 MP_WEAK void port_free(void *ptr) {
     tlsf_free(heap, ptr);
 }
+#endif
 
 // Safely free an object that may have been allocated from either the GC heap or port heap.
 // If the pointer is on the GC heap, it will be freed by the GC automatically, so we do nothing.
@@ -81,6 +97,7 @@ void circuitpy_free_obj(mp_obj_t obj) {
     }
 }
 
+#if CIRCUITPY_LIB_TLSF
 MP_WEAK void *port_realloc(void *ptr, size_t size, bool dma_capable) {
     return tlsf_realloc(heap, ptr, size);
 }
@@ -99,6 +116,7 @@ MP_WEAK size_t port_heap_get_largest_free_size(void) {
     // IDF does this. Not sure why.
     return tlsf_fit_size(heap, max_size);
 }
+#endif
 
 MP_WEAK bool port_boot_button_pressed(void) {
     #if defined(CIRCUITPY_BOOT_BUTTON)

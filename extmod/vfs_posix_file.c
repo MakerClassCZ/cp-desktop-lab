@@ -46,6 +46,14 @@ typedef struct _mp_obj_vfs_posix_file_t {
     int fd;
 } mp_obj_vfs_posix_file_t;
 
+// CIRCUITPY-CHANGE
+#if defined(CIRCUITPY_FILESYSTEM_POSIX) && CIRCUITPY_FILESYSTEM_POSIX
+int mp_vfs_posix_file_fd(mp_obj_t file_in) {
+    mp_obj_vfs_posix_file_t *file = MP_OBJ_TO_PTR(file_in);
+    return file->fd;
+}
+#endif
+
 #if MICROPY_CPYTHON_COMPAT
 static void check_fd_is_open(const mp_obj_vfs_posix_file_t *o) {
     if (o->fd < 0) {
@@ -347,8 +355,12 @@ MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &vfs_posix_rawfile_locals_dict
     );
 
+// CIRCUITPY-CHANGE: a CircuitPython port with a directory CIRCUITPY keeps the supervisor's
+// console as sys.stdin, sys.stdout and sys.stderr.
+#if !(defined(CIRCUITPY_FILESYSTEM_POSIX) && CIRCUITPY_FILESYSTEM_POSIX)
 mp_obj_vfs_posix_file_t mp_sys_stdin_obj = {{&mp_type_vfs_posix_textio}, STDIN_FILENO};
 mp_obj_vfs_posix_file_t mp_sys_stdout_obj = {{&mp_type_vfs_posix_textio}, STDOUT_FILENO};
 mp_obj_vfs_posix_file_t mp_sys_stderr_obj = {{&mp_type_vfs_posix_textio}, STDERR_FILENO};
+#endif
 
 #endif // MICROPY_VFS_POSIX

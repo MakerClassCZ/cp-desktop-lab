@@ -1,0 +1,51 @@
+# A MagTag's names on the virtual board: circuitpython --board-file boards/files/magtag.toml
+# Its four buttons are the Z, X, A and S keys (pressed = low, as on the MagTag); the light sensor,
+# the battery and A1 are sliders; the accelerometer is a LIS3DH on the virtual I2C bus. The
+# virtual board's display stands in for the 296x128 e-paper (board.DISPLAY), so a layout drawn
+# for the MagTag sits in its top-left corner.
+
+[pins]
+NEOPIXEL = "GPIO14"
+D1 = "GPIO14"
+NEOPIXEL_POWER = "GPIO15"
+NEOPIXEL_POWER_INVERTED = "GPIO15"
+LED = "GPIO16"
+D13 = "GPIO16"
+BUTTON_A = "SW_A"
+D15 = "SW_A"
+BUTTON_B = "SW_B"
+D14 = "SW_B"
+BUTTON_C = "SW_X"
+D12 = "SW_X"
+BUTTON_D = "SW_Y"
+D11 = "SW_Y"
+LIGHT = "GPIO17"
+A3 = "GPIO17"
+BATTERY = "GPIO18"
+VOLTAGE_MONITOR = "GPIO18"
+A1 = "GPIO19"
+AD1 = "GPIO19"
+D10 = "GPIO20"
+SPEAKER_ENABLE = "GPIO21"
+ACCELEROMETER_INTERRUPT = "GPIO22"
+EPD_BUSY = "GPIO23"
+EPD_RESET = "GPIO24"
+EPD_DC = "GPIO25"
+EPD_CS = "GPIO26"
+
+[neopixel]
+NEOPIXEL = "4"
+
+[led]
+LED = "red"
+
+[analog]
+LIGHT = ""
+BATTERY = ""
+A1 = ""
+
+[i2c]
+ACCEL = "lis3dh 0x19"
+
+[board]
+machine = "Adafruit MagTag with ESP32S2"    # adafruit_pybadger and the MagTag library pick by it

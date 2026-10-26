@@ -410,6 +410,25 @@ bool mp_emit_bc_end_pass(emit_t *emit) {
             emit->emit_common->ct_cur_child,
             #endif
             emit->scope->scope_flags);
+
+        #if MICROPY_PY_SYS_SETTRACE
+        // CIRCUITPY-CHANGE: keep the name of each local slot, so a trace function can show the
+        // locals. Locals, cells and the free variables of a closure all have a slot.
+        mp_raw_code_t *rc = emit->scope->raw_code;
+        size_t n_locals = emit->scope->num_locals;
+        if (n_locals > 0) {
+            qstr *names = m_new0(qstr, n_locals);
+            for (size_t i = 0; i < emit->scope->id_info_len; ++i) {
+                id_info_t *id = &emit->scope->id_info[i];
+                if ((id->kind == ID_INFO_KIND_LOCAL || id->kind == ID_INFO_KIND_CELL || id->kind == ID_INFO_KIND_FREE)
+                    && id->local_num < n_locals) {
+                    names[id->local_num] = id->qst;
+                }
+            }
+            rc->local_names = names;
+            rc->n_local_names = n_locals;
+        }
+        #endif
     }
 
     return true;

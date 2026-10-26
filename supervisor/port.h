@@ -111,6 +111,13 @@ void port_task_sleep_ms(uint32_t msecs);
 // A default weak implementation is provided that does nothing.
 void port_boot_info(void);
 
+// The board's id for boot_out.txt and the web workflow: CIRCUITPY_BOARD_ID unless a port
+// chooses its board at run time.
+const char *port_board_id(void);
+
+// Called in the fresh VM right before code.py runs; a port can set a debugger up there.
+void port_before_user_code(void);
+
 // Some ports want to mark additional pointers as gc roots.
 // A default weak implementation is provided that does nothing.
 void port_gc_collect(void);

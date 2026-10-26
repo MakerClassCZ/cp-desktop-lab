@@ -23,6 +23,17 @@
 #include "lib/oofatfs/ff.h"
 #include "py/objarray.h"
 #include "py/objlist.h"
+#if CIRCUITPY_FILESYSTEM_POSIX
+#include <errno.h>
+#include <sys/stat.h>
+#include "extmod/vfs_posix.h"
+#ifdef _WIN32
+#include <io.h>
+#include <windows.h>
+#else
+#include <sys/mman.h>
+#endif
+#endif
 #endif
 
 #if CIRCUITPY_USB_DEVICE
@@ -292,8 +303,71 @@ void common_hal_storage_erase_filesystem(bool extended) {
 // until reload.
 MP_REGISTER_ROOT_POINTER(mp_obj_t storage_mapped_files);
 
+#if CIRCUITPY_FILESYSTEM_POSIX
+// A file in a host directory maps with mmap() as one run. The mappings last until the VM ends, like
+// the views into flash; there is room for this many.
+#define POSIX_MAPS_MAX (32)
+static struct {
+    void *addr;
+    size_t len;
+} _posix_maps[POSIX_MAPS_MAX];
+static size_t _posix_map_count;
+
+static int map_posix_file(mp_obj_t file_in, storage_map_run_fn_t fn, void *ctx) {
+    int fd = mp_vfs_posix_file_fd(file_in);
+    struct stat st;
+    if (fd < 0) {
+        return MP_EINVAL;                       // closed
+    }
+    if (fstat(fd, &st) != 0) {
+        return errno;
+    }
+    if (st.st_size == 0) {
+        return 0;
+    }
+    if (_posix_map_count == POSIX_MAPS_MAX) {
+        return MP_ENOMEM;
+    }
+    #ifdef _WIN32
+    HANDLE mapping = CreateFileMappingA((HANDLE)_get_osfhandle(fd), NULL, PAGE_READONLY, 0, 0, NULL);
+    if (mapping == NULL) {
+        return MP_EIO;
+    }
+    void *addr = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, st.st_size);
+    CloseHandle(mapping);
+    if (addr == NULL) {
+        return MP_EIO;
+    }
+    #else
+    void *addr = mmap(NULL, st.st_size, PROT_READ, MAP_SHARED, fd, 0);
+    if (addr == MAP_FAILED) {
+        return errno;
+    }
+    #endif
+    _posix_maps[_posix_map_count].addr = addr;
+    _posix_maps[_posix_map_count].len = st.st_size;
+    _posix_map_count++;
+    fn(ctx, addr, st.st_size);
+    return 0;
+}
+
+static bool is_posix_file(mp_obj_t file_in) {
+    return mp_obj_is_type(file_in, &mp_type_vfs_posix_fileio) || mp_obj_is_type(file_in, &mp_type_vfs_posix_textio);
+}
+#endif
+
 void storage_map_file_reset(void) {
     MP_STATE_VM(storage_mapped_files) = MP_OBJ_NULL;
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    while (_posix_map_count > 0) {
+        _posix_map_count--;
+        #ifdef _WIN32
+        UnmapViewOfFile(_posix_maps[_posix_map_count].addr);
+        #else
+        munmap(_posix_maps[_posix_map_count].addr, _posix_maps[_posix_map_count].len);
+        #endif
+    }
+    #endif
 }
 
 static bool mapped_files_contain(DWORD sclust) {
@@ -337,6 +411,11 @@ void storage_map_file_check_writable(fs_user_mount_t *vfs, const char *path) {
 
 #if CIRCUITPY_STORAGE_MAP_FILE
 int storage_map_runs(mp_obj_t file_in, storage_map_run_fn_t fn, void *ctx) {
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    if (is_posix_file(file_in)) {
+        return map_posix_file(file_in, fn, ctx);
+    }
+    #endif
     if (!mp_obj_is_type(file_in, &mp_type_vfs_fat_fileio)) {
         return MP_EOPNOTSUPP;                   // only a FAT volume stores a file as flash bytes
     }
@@ -407,8 +486,14 @@ mp_obj_t common_hal_storage_map_file(mp_obj_t file_in) {
     if (views->len == 0) {
         return mp_const_empty_tuple;            // an empty file has no clusters to protect
     }
-    pyb_file_obj_t *file = MP_OBJ_TO_PTR(file_in);
-    mapped_files_add(file->fp.obj.sclust);
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    // The host may still change a mapped file; only FAT refuses writes to one.
+    if (!is_posix_file(file_in))
+    #endif
+    {
+        pyb_file_obj_t *file = MP_OBJ_TO_PTR(file_in);
+        mapped_files_add(file->fp.obj.sclust);
+    }
     return mp_obj_new_tuple(views->len, views->items);
     #else
     (void)file_in;

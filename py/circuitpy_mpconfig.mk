@@ -65,6 +65,7 @@ CIRCUITPY_MESSAGE_COMPRESSION_LEVEL ?= 9
 # By default, use our copy of TLSF. Some vendor SDKs may provide their own
 # implementation of TLSF, which can be used instead by setting CIRCUITPY_LIB_TLSF=0.
 CIRCUITPY_LIB_TLSF ?= 1
+CFLAGS += -DCIRCUITPY_LIB_TLSF=$(CIRCUITPY_LIB_TLSF)
 
 # By default, use our copy of string0 (memcpy and friends) because it is optimized. Some vendor SDKs
 # or ROMs may provide their own implementation of string0, which can be used instead by setting
@@ -397,8 +398,9 @@ CFLAGS += -DCIRCUITPY_HASHLIB_MBEDTLS_ONLY=$(CIRCUITPY_HASHLIB_MBEDTLS_ONLY)
 CIRCUITPY_HMAC ?= $(call enable-if-all,$(CIRCUITPY_HASHLIB_MBEDTLS) $(call enable-if-not,$(CIRCUITPY_HASHLIB_MBEDTLS_ONLY)))
 CFLAGS += -DCIRCUITPY_HMAC=$(CIRCUITPY_HMAC)
 
-# Always zero because it is for Zephyr only
-CFLAGS += -DCIRCUITPY_HOSTNETWORK=0
+# Networking through the host's sockets: the Zephyr native_sim and Linux ports.
+CIRCUITPY_HOSTNETWORK ?= 0
+CFLAGS += -DCIRCUITPY_HOSTNETWORK=$(CIRCUITPY_HOSTNETWORK)
 
 CIRCUITPY_I2CTARGET ?= $(CIRCUITPY_FULL_BUILD)
 CFLAGS += -DCIRCUITPY_I2CTARGET=$(CIRCUITPY_I2CTARGET)
@@ -504,6 +506,10 @@ CFLAGS += -DCIRCUITPY_PEW=$(CIRCUITPY_PEW)
 # Only for RP2 chips. Assume not a raspberrypi build.
 CIRCUITPY_PICODVI ?= 0
 CFLAGS += -DCIRCUITPY_PICODVI=$(CIRCUITPY_PICODVI)
+
+# Linux port: display through SDL2
+CIRCUITPY_SDL ?= 0
+CFLAGS += -DCIRCUITPY_SDL=$(CIRCUITPY_SDL)
 CIRCUITPY_PICODVI_AUDIOOUT ?= 0
 CFLAGS += -DCIRCUITPY_PICODVI_AUDIOOUT=$(CIRCUITPY_PICODVI_AUDIOOUT)
 

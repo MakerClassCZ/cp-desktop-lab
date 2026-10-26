@@ -24,6 +24,27 @@
 #include "supervisor/shared/tick.h"
 #endif
 
+#if CIRCUITPY_FILESYSTEM_POSIX
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#ifdef _WIN32
+#include <direct.h>
+#include <io.h>
+#include <windows.h>
+#ifndef O_CLOEXEC
+#define O_CLOEXEC O_NOINHERIT
+#endif
+#else
+#include <sys/statvfs.h>
+#endif
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif
+#endif
+
 #if CIRCUITPY_SDCARDIO
 #include "shared-module/sdcardio/__init__.h"
 #endif
@@ -44,12 +65,223 @@ static mp_vfs_mount_t _saves_vfs;
 static fs_user_mount_t _saves_usermount;
 #endif
 
+#if CIRCUITPY_FILESYSTEM_POSIX
+// The directory's path, and room for the paths VfsPosix joins to it; not on the GC heap.
+static char _posix_root_buf[PATH_MAX + 512];
+static uint8_t _posix_lock_count;
+
+MP_WEAK const char *supervisor_filesystem_posix_root(void) {
+    return NULL;
+}
+
+static bool is_posix(supervisor_vfs_t *vfs) {
+    return vfs->common.base.type == &mp_type_vfs_posix;
+}
+
+static supervisor_fs_err_t posix_error(int err) {
+    switch (err) {
+        case 0:
+            return SUPERVISOR_FS_OK;
+        case ENOENT:
+            return SUPERVISOR_FS_NO_FILE;
+        case ENOTDIR:
+            return SUPERVISOR_FS_NO_PATH;
+        case EEXIST:
+            return SUPERVISOR_FS_EXIST;
+        case EROFS:
+        case EACCES:
+        case EPERM:
+            return SUPERVISOR_FS_WRITE_PROTECTED;
+        case ENOSPC:
+            return SUPERVISOR_FS_NO_SPACE;
+        default:
+            return SUPERVISOR_FS_IO;
+    }
+}
+
+// The host path of path on vfs in buf, NULL if it does not fit or would leave the directory
+// (a ".." component, or on Windows a '\\' or ':'): the web workflow's password is the drive's,
+// not the computer's. The root ends in the '/' that VfsPosix overwrites with the leading '/' of
+// the paths it joins, so it is left out here.
+static const char *posix_path(supervisor_vfs_t *vfs, const char *path, char *buf, size_t len) {
+    while (*path == '/') {
+        path++;
+    }
+    for (const char *c = path; *c != '\0'; c++) {
+        #ifdef _WIN32
+        if (*c == '\\' || *c == ':') {
+            return NULL;
+        }
+        #endif
+        if ((c == path || c[-1] == '/') && c[0] == '.' && c[1] == '.' && (c[2] == '/' || c[2] == '\0')) {
+            return NULL;
+        }
+    }
+    int n = snprintf(buf, len, "%.*s/%s", (int)(vfs->posix.root_len - 1), vfs->posix.root.buf, path);
+    return n < 0 || (size_t)n >= len ? NULL : buf;
+}
+
+#ifdef _WIN32
+// Times, directories, renames and free space: the C runtime's versions lack what the supervisor
+// needs (sub-second times, replacing renames), so these go to Win32.
+#define FILETIME_EPOCH (116444736000000000ULL)      // 1970 in 100 ns units since 1601
+
+static uint64_t filetime_ns(FILETIME t) {
+    uint64_t v = ((uint64_t)t.dwHighDateTime << 32) | t.dwLowDateTime;
+    return v < FILETIME_EPOCH ? 0 : (v - FILETIME_EPOCH) * 100;
+}
+
+static void set_handle_mtime(HANDLE h, uint64_t ns) {
+    uint64_t v = ns / 100 + FILETIME_EPOCH;
+    FILETIME t = { (DWORD)v, (DWORD)(v >> 32) };
+    SetFileTime(h, NULL, NULL, &t);
+}
+
+static supervisor_fs_err_t win_error(DWORD err) {
+    switch (err) {
+        case ERROR_FILE_NOT_FOUND:
+            return SUPERVISOR_FS_NO_FILE;
+        case ERROR_PATH_NOT_FOUND:
+            return SUPERVISOR_FS_NO_PATH;
+        case ERROR_FILE_EXISTS:
+        case ERROR_ALREADY_EXISTS:
+            return SUPERVISOR_FS_EXIST;
+        case ERROR_ACCESS_DENIED:
+        case ERROR_WRITE_PROTECT:
+        case ERROR_SHARING_VIOLATION:
+            return SUPERVISOR_FS_WRITE_PROTECTED;
+        case ERROR_DISK_FULL:
+        case ERROR_HANDLE_DISK_FULL:
+            return SUPERVISOR_FS_NO_SPACE;
+        default:
+            return SUPERVISOR_FS_IO;
+    }
+}
+
+static uint64_t posix_mtime_ns(const char *host, const struct stat *st) {
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    if (GetFileAttributesExA(host, GetFileExInfoStandard, &data)) {
+        return filetime_ns(data.ftLastWriteTime);
+    }
+    return (uint64_t)st->st_mtime * 1000000000ULL;
+}
+
+static void posix_set_fd_mtime(int fd, uint64_t ns) {
+    if (ns != 0) {
+        set_handle_mtime((HANDLE)_get_osfhandle(fd), ns);
+    }
+}
+
+static void posix_set_path_mtime(const char *host, uint64_t ns) {
+    if (ns == 0) {
+        return;
+    }
+    HANDLE h = CreateFileA(host, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    if (h != INVALID_HANDLE_VALUE) {
+        set_handle_mtime(h, ns);
+        CloseHandle(h);
+    }
+}
+
+static supervisor_fs_err_t posix_mkdir(const char *host) {
+    return _mkdir(host) == 0 ? SUPERVISOR_FS_OK : posix_error(errno);
+}
+
+static supervisor_fs_err_t posix_rename(const char *old_host, const char *new_host) {
+    return MoveFileExA(old_host, new_host, MOVEFILE_REPLACE_EXISTING) ? SUPERVISOR_FS_OK : win_error(GetLastError());
+}
+
+// A file or an empty directory, like f_unlink().
+static supervisor_fs_err_t posix_remove(const char *host) {
+    struct stat st;
+    if (stat(host, &st) != 0) {
+        return posix_error(errno);
+    }
+    int result = S_ISDIR(st.st_mode) ? _rmdir(host) : _unlink(host);
+    return result == 0 ? SUPERVISOR_FS_OK : posix_error(errno);
+}
+
+static supervisor_fs_err_t posix_statfs(const char *host, size_t *block_size, size_t *total_blocks, size_t *free_blocks) {
+    ULARGE_INTEGER available, total, unused;
+    if (!GetDiskFreeSpaceExA(host, &available, &total, &unused)) {
+        return SUPERVISOR_FS_IO;
+    }
+    if (block_size != NULL) {
+        *block_size = 4096;
+    }
+    if (total_blocks != NULL) {
+        *total_blocks = total.QuadPart / 4096;
+    }
+    if (free_blocks != NULL) {
+        *free_blocks = available.QuadPart / 4096;
+    }
+    return SUPERVISOR_FS_OK;
+}
+#else
+static uint64_t posix_mtime_ns(const char *host, const struct stat *st) {
+    (void)host;
+    return (uint64_t)st->st_mtim.tv_sec * 1000000000ULL + st->st_mtim.tv_nsec;
+}
+
+static void posix_set_fd_mtime(int fd, uint64_t ns) {
+    if (ns != 0) {
+        struct timespec times[2] = {
+            { .tv_nsec = UTIME_OMIT },
+            { .tv_sec = ns / 1000000000ULL, .tv_nsec = ns % 1000000000ULL },
+        };
+        futimens(fd, times);
+    }
+}
+
+static void posix_set_path_mtime(const char *host, uint64_t ns) {
+    if (ns != 0) {
+        struct timespec times[2] = {
+            { .tv_nsec = UTIME_OMIT },
+            { .tv_sec = ns / 1000000000ULL, .tv_nsec = ns % 1000000000ULL },
+        };
+        utimensat(AT_FDCWD, host, times, 0);
+    }
+}
+
+static supervisor_fs_err_t posix_mkdir(const char *host) {
+    return mkdir(host, 0755) == 0 ? SUPERVISOR_FS_OK : posix_error(errno);
+}
+
+static supervisor_fs_err_t posix_rename(const char *old_host, const char *new_host) {
+    return rename(old_host, new_host) == 0 ? SUPERVISOR_FS_OK : posix_error(errno);
+}
+
+// A file or an empty directory, like f_unlink().
+static supervisor_fs_err_t posix_remove(const char *host) {
+    return remove(host) == 0 ? SUPERVISOR_FS_OK : posix_error(errno);
+}
+
+static supervisor_fs_err_t posix_statfs(const char *host, size_t *block_size, size_t *total_blocks, size_t *free_blocks) {
+    struct statvfs st;
+    if (statvfs(host, &st) != 0) {
+        return SUPERVISOR_FS_IO;
+    }
+    if (block_size != NULL) {
+        *block_size = st.f_frsize;
+    }
+    if (total_blocks != NULL) {
+        *total_blocks = st.f_blocks;
+    }
+    if (free_blocks != NULL) {
+        *free_blocks = st.f_bavail;
+    }
+    return SUPERVISOR_FS_OK;
+}
+#endif
+#endif
+
 static volatile uint32_t filesystem_flush_interval_ms = CIRCUITPY_FILESYSTEM_FLUSH_INTERVAL_MS;
 volatile bool filesystem_flush_requested = false;
 
 // Mapping between FatFS and littlefs results and the supervisor filesystem
 // error codes.
-#if CIRCUITPY_FILESYSTEM_LITTLEFS
+#if CIRCUITPY_FILESYSTEM_LITTLEFS || CIRCUITPY_FILESYSTEM_POSIX
 static supervisor_fs_err_t fat_error(FRESULT res) {
     switch (res) {
         case FR_OK:
@@ -256,11 +488,55 @@ static bool lfs_write_boot_file(const char *path, const char *contents, size_t s
 
 #endif  // CIRCUITPY_FILESYSTEM_LITTLEFS
 
+#if CIRCUITPY_FILESYSTEM_POSIX
+// CIRCUITPY is a host directory. A reformat leaves it alone: it is the host's.
+static bool posix_filesystem_init(const char *root, bool create_allowed) {
+    mp_obj_vfs_posix_t *circuitpy = &_circuitpy_mount.posix;
+    mp_vfs_posix_init_static(circuitpy, root, _posix_root_buf, sizeof(_posix_root_buf));
+    _posix_lock_count = 0;
+    struct stat st;
+    if (stat(root, &st) != 0) {
+        if (!create_allowed || posix_mkdir(root) != SUPERVISOR_FS_OK) {
+            return false;
+        }
+        // A new directory gets what a freshly formatted drive gets.
+        #if CIRCUITPY_SETTINGS_TOML
+        make_empty_file(&_circuitpy_mount, "/settings.toml");
+        #endif
+        MAKE_FILE_WITH_OPTIONAL_CONTENTS(&_circuitpy_mount, "/code.py", "print(\"Hello World!\")\n");
+        supervisor_vfs_mkdir(&_circuitpy_mount, "/lib", 0);
+    } else if (!S_ISDIR(st.st_mode)) {
+        return false;
+    }
+    // The host owns the directory as a computer owns a board's drive over USB: Python gets it
+    // read-only unless boot.py remounts it.
+    filesystem_set_internal_writable_by_usb(true);
+    filesystem_set_concurrent_write_protection(&_circuitpy_mount, true);
+
+    mp_vfs_mount_t *circuitpy_vfs = &_circuitpy_vfs;
+    circuitpy_vfs->str = "/";
+    circuitpy_vfs->len = 1;
+    circuitpy_vfs->obj = MP_OBJ_FROM_PTR(circuitpy);
+    circuitpy_vfs->next = NULL;
+    MP_STATE_VM(vfs_mount_table) = circuitpy_vfs;
+    MP_STATE_PORT(vfs_cur) = circuitpy_vfs;
+    return true;
+}
+#endif
+
 // we don't make this function static because it needs a lot of stack and we
 // want it to be executed without using stack within main() function
 bool filesystem_init(bool create_allowed, bool force_create) {
     mp_vfs_mount_t *circuitpy_vfs = &_circuitpy_vfs;
     circuitpy_vfs->len = 0;
+
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    // A port on a host can serve CIRCUITPY from a directory instead of its flash.
+    const char *posix_root = supervisor_filesystem_posix_root();
+    if (posix_root != NULL) {
+        return posix_filesystem_init(posix_root, create_allowed);
+    }
+    #endif
 
     #if CIRCUITPY_FILESYSTEM_LITTLEFS
     // init the vfs object. The VM (and its GC) is not running yet, so
@@ -495,6 +771,13 @@ void PLACE_IN_ITCM(filesystem_flush)(void) {
 }
 
 void filesystem_set_internal_writable_by_usb(bool writable) {
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    // The host can always write a directory CIRCUITPY, with or without USB; only
+    // storage.remount() hands it to Python.
+    if (is_posix(&_circuitpy_mount)) {
+        writable = true;
+    }
+    #endif
     filesystem_set_writable_by_usb(&_circuitpy_mount, writable);
 }
 
@@ -577,6 +860,17 @@ static bool filesystem_native_fatfs(supervisor_vfs_t *fs_mount) {
 }
 
 bool filesystem_lock(supervisor_vfs_t *fs_mount) {
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    if (is_posix(fs_mount)) {
+        // As on FAT, a workflow holding the lock may write although the host owns the directory.
+        if (_posix_lock_count == 0 && !blockdev_lock(fs_mount)) {
+            return false;
+        }
+        _posix_lock_count++;
+        fs_mount->common.blockdev.flags |= MP_BLOCKDEV_FLAG_IGNORE_WRITE_PROTECTION;
+        return true;
+    }
+    #endif
     #if CIRCUITPY_FILESYSTEM_LITTLEFS
     if (fs_mount->common.base.type != &mp_fat_vfs_type) {
         // littlefs mounts are never exposed through USB MSC, so there is no
@@ -602,6 +896,15 @@ bool filesystem_lock(supervisor_vfs_t *fs_mount) {
 }
 
 void filesystem_unlock(supervisor_vfs_t *fs_mount) {
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    if (is_posix(fs_mount)) {
+        if (_posix_lock_count > 0 && --_posix_lock_count == 0) {
+            fs_mount->common.blockdev.flags &= ~MP_BLOCKDEV_FLAG_IGNORE_WRITE_PROTECTION;
+            blockdev_unlock(fs_mount);
+        }
+        return;
+    }
+    #endif
     #if CIRCUITPY_FILESYSTEM_LITTLEFS
     if (fs_mount->common.base.type != &mp_fat_vfs_type) {
         blockdev_unlock(fs_mount);
@@ -633,6 +936,11 @@ void blockdev_unlock(supervisor_vfs_t *fs_mount) {
 // are relative to the given mount. See supervisor/filesystem.h for details.
 
 bool supervisor_vfs_supported(supervisor_vfs_t *vfs) {
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    if (is_posix(vfs)) {
+        return true;
+    }
+    #endif
     #if CIRCUITPY_FILESYSTEM_LITTLEFS
     if (is_lfs(vfs)) {
         return true;
@@ -650,6 +958,37 @@ supervisor_fs_err_t supervisor_vfs_open_file(supervisor_vfs_t *vfs, const char *
     // successful open and callers must check the result before using file.
     file->open = false;
     file->fattime = 0;
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    file->posix = false;
+    if (is_posix(vfs)) {
+        char host[PATH_MAX];
+        if (posix_path(vfs, path, host, sizeof(host)) == NULL) {
+            return SUPERVISOR_FS_NO_PATH;
+        }
+        int oflags = O_RDONLY;
+        if ((flags & SUPERVISOR_FS_OPEN_WRITE) != 0) {
+            if (!filesystem_is_writable_by_python(vfs)) {
+                return SUPERVISOR_FS_WRITE_PROTECTED;
+            }
+            oflags = (flags & SUPERVISOR_FS_OPEN_READ) != 0 ? O_RDWR : O_WRONLY;
+        }
+        if ((flags & SUPERVISOR_FS_OPEN_CREATE) != 0) {
+            oflags |= O_CREAT;
+        }
+        if ((flags & SUPERVISOR_FS_OPEN_TRUNCATE) != 0) {
+            oflags |= O_TRUNC;
+        }
+        int fd = open(host, oflags | O_CLOEXEC | O_BINARY, 0644);
+        if (fd < 0) {
+            return posix_error(errno);
+        }
+        file->fd = fd;
+        file->mtime_ns = mtime_ns;
+        file->posix = true;
+        file->open = true;
+        return SUPERVISOR_FS_OK;
+    }
+    #endif
     #if CIRCUITPY_FILESYSTEM_LITTLEFS
     file->vfs = vfs;
     if (is_lfs(vfs)) {
@@ -738,6 +1077,12 @@ supervisor_fs_err_t supervisor_vfs_close_file(supervisor_vfs_file_t *file) {
         return SUPERVISOR_FS_OK;
     }
     file->open = false;
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    if (file->posix) {
+        posix_set_fd_mtime(file->fd, file->mtime_ns);
+        return close(file->fd) == 0 ? SUPERVISOR_FS_OK : posix_error(errno);
+    }
+    #endif
     #if CIRCUITPY_FILESYSTEM_LITTLEFS
     if (file->lfs) {
         // The mtime attribute filled in at open is written out here for a
@@ -761,6 +1106,19 @@ supervisor_fs_err_t supervisor_vfs_read_file(supervisor_vfs_file_t *file, void *
     if (!file->open) {
         return SUPERVISOR_FS_IO;
     }
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    if (file->posix) {
+        ssize_t n;
+        do {
+            n = read(file->fd, buf, len);
+        } while (n < 0 && errno == EINTR);
+        if (n < 0) {
+            return posix_error(errno);
+        }
+        *bytes_read = n;
+        return SUPERVISOR_FS_OK;
+    }
+    #endif
     #if CIRCUITPY_FILESYSTEM_LITTLEFS
     if (file->lfs) {
         lfs2_ssize_t read = lfs2_file_read(&file->vfs->lfs2.lfs, &file->file.lfs.lfs2, buf, len);
@@ -782,6 +1140,19 @@ supervisor_fs_err_t supervisor_vfs_write_file(supervisor_vfs_file_t *file, const
     if (!file->open) {
         return SUPERVISOR_FS_IO;
     }
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    if (file->posix) {
+        ssize_t n;
+        do {
+            n = write(file->fd, buf, len);
+        } while (n < 0 && errno == EINTR);
+        if (n < 0) {
+            return posix_error(errno);
+        }
+        *bytes_written = n;
+        return SUPERVISOR_FS_OK;
+    }
+    #endif
     #if CIRCUITPY_FILESYSTEM_LITTLEFS
     if (file->lfs) {
         lfs2_ssize_t written = lfs2_file_write(&file->vfs->lfs2.lfs, &file->file.lfs.lfs2, buf, len);
@@ -802,6 +1173,11 @@ supervisor_fs_err_t supervisor_vfs_seek_file(supervisor_vfs_file_t *file, size_t
     if (!file->open) {
         return SUPERVISOR_FS_IO;
     }
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    if (file->posix) {
+        return lseek(file->fd, offset, SEEK_SET) < 0 ? posix_error(errno) : SUPERVISOR_FS_OK;
+    }
+    #endif
     #if CIRCUITPY_FILESYSTEM_LITTLEFS
     if (file->lfs) {
         lfs2_soff_t result = lfs2_file_seek(&file->vfs->lfs2.lfs, &file->file.lfs.lfs2, offset, LFS2_SEEK_SET);
@@ -815,6 +1191,12 @@ size_t supervisor_vfs_tell_file(supervisor_vfs_file_t *file) {
     if (!file->open) {
         return 0;
     }
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    if (file->posix) {
+        off_t position = lseek(file->fd, 0, SEEK_CUR);
+        return position < 0 ? 0 : (size_t)position;
+    }
+    #endif
     #if CIRCUITPY_FILESYSTEM_LITTLEFS
     if (file->lfs) {
         return lfs2_file_tell(&file->vfs->lfs2.lfs, &file->file.lfs.lfs2);
@@ -827,6 +1209,12 @@ size_t supervisor_vfs_file_size(supervisor_vfs_file_t *file) {
     if (!file->open) {
         return 0;
     }
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    if (file->posix) {
+        struct stat st;
+        return fstat(file->fd, &st) == 0 ? (size_t)st.st_size : 0;
+    }
+    #endif
     #if CIRCUITPY_FILESYSTEM_LITTLEFS
     if (file->lfs) {
         return lfs2_file_size(&file->vfs->lfs2.lfs, &file->file.lfs.lfs2);
@@ -839,6 +1227,12 @@ supervisor_fs_err_t supervisor_vfs_truncate_file(supervisor_vfs_file_t *file) {
     if (!file->open) {
         return SUPERVISOR_FS_IO;
     }
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    if (file->posix) {
+        off_t position = lseek(file->fd, 0, SEEK_CUR);
+        return position < 0 || ftruncate(file->fd, position) != 0 ? posix_error(errno) : SUPERVISOR_FS_OK;
+    }
+    #endif
     #if CIRCUITPY_FILESYSTEM_LITTLEFS
     if (file->lfs) {
         int err = lfs2_file_truncate(&file->vfs->lfs2.lfs, &file->file.lfs.lfs2,
@@ -859,6 +1253,29 @@ supervisor_fs_err_t supervisor_vfs_stat(supervisor_vfs_t *vfs, const char *path,
     if (mtime_ns != NULL) {
         *mtime_ns = 0;
     }
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    if (is_posix(vfs)) {
+        char host[PATH_MAX];
+        struct stat st;
+        if (posix_path(vfs, path, host, sizeof(host)) == NULL) {
+            return SUPERVISOR_FS_NO_PATH;
+        }
+        if (stat(host, &st) != 0) {
+            return posix_error(errno);
+        }
+        bool directory = S_ISDIR(st.st_mode);
+        if (is_dir != NULL) {
+            *is_dir = directory;
+        }
+        if (size != NULL && !directory) {
+            *size = st.st_size;
+        }
+        if (mtime_ns != NULL) {
+            *mtime_ns = posix_mtime_ns(host, &st);
+        }
+        return SUPERVISOR_FS_OK;
+    }
+    #endif
     #if CIRCUITPY_FILESYSTEM_LITTLEFS
     if (is_lfs(vfs)) {
         struct lfs2_info info;
@@ -903,6 +1320,23 @@ supervisor_fs_err_t supervisor_vfs_stat(supervisor_vfs_t *vfs, const char *path,
 }
 
 supervisor_fs_err_t supervisor_vfs_mkdir(supervisor_vfs_t *vfs, const char *path, uint64_t mtime_ns) {
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    if (is_posix(vfs)) {
+        char host[PATH_MAX];
+        if (posix_path(vfs, path, host, sizeof(host)) == NULL) {
+            return SUPERVISOR_FS_NO_PATH;
+        }
+        if (!filesystem_is_writable_by_python(vfs)) {
+            return SUPERVISOR_FS_WRITE_PROTECTED;
+        }
+        supervisor_fs_err_t err = posix_mkdir(host);
+        if (err != SUPERVISOR_FS_OK) {
+            return err;
+        }
+        posix_set_path_mtime(host, mtime_ns);
+        return SUPERVISOR_FS_OK;
+    }
+    #endif
     #if CIRCUITPY_FILESYSTEM_LITTLEFS
     if (is_lfs(vfs)) {
         int err = lfs2_mkdir(&vfs->lfs2.lfs, path);
@@ -927,6 +1361,20 @@ supervisor_fs_err_t supervisor_vfs_mkdir(supervisor_vfs_t *vfs, const char *path
 }
 
 supervisor_fs_err_t supervisor_vfs_rename(supervisor_vfs_t *vfs, const char *old_path, const char *new_path) {
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    if (is_posix(vfs)) {
+        char old_host[PATH_MAX];
+        char new_host[PATH_MAX];
+        if (posix_path(vfs, old_path, old_host, sizeof(old_host)) == NULL ||
+            posix_path(vfs, new_path, new_host, sizeof(new_host)) == NULL) {
+            return SUPERVISOR_FS_NO_PATH;
+        }
+        if (!filesystem_is_writable_by_python(vfs)) {
+            return SUPERVISOR_FS_WRITE_PROTECTED;
+        }
+        return posix_rename(old_host, new_host);
+    }
+    #endif
     #if CIRCUITPY_FILESYSTEM_LITTLEFS
     if (is_lfs(vfs)) {
         int err = lfs2_rename(&vfs->lfs2.lfs, old_path, new_path);
@@ -943,6 +1391,18 @@ supervisor_fs_err_t supervisor_vfs_rename(supervisor_vfs_t *vfs, const char *old
 }
 
 supervisor_fs_err_t supervisor_vfs_unlink(supervisor_vfs_t *vfs, const char *path) {
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    if (is_posix(vfs)) {
+        char host[PATH_MAX];
+        if (posix_path(vfs, path, host, sizeof(host)) == NULL) {
+            return SUPERVISOR_FS_NO_PATH;
+        }
+        if (!filesystem_is_writable_by_python(vfs)) {
+            return SUPERVISOR_FS_WRITE_PROTECTED;
+        }
+        return posix_remove(host);
+    }
+    #endif
     #if CIRCUITPY_FILESYSTEM_LITTLEFS
     if (is_lfs(vfs)) {
         int err = lfs2_remove(&vfs->lfs2.lfs, path);
@@ -963,6 +1423,21 @@ supervisor_fs_err_t supervisor_vfs_opendir(supervisor_vfs_t *vfs, const char *pa
     // f_opendir/lfs2_dir_open on success and callers must check the result
     // before using dir.
     dir->open = false;
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    dir->posix = false;
+    if (is_posix(vfs)) {
+        if (posix_path(vfs, path, dir->posix_path, sizeof(dir->posix_path)) == NULL) {
+            return SUPERVISOR_FS_NO_PATH;
+        }
+        dir->posix_dir = opendir(dir->posix_path);
+        if (dir->posix_dir == NULL) {
+            return posix_error(errno);
+        }
+        dir->posix = true;
+        dir->open = true;
+        return SUPERVISOR_FS_OK;
+    }
+    #endif
     #if CIRCUITPY_FILESYSTEM_LITTLEFS
     dir->vfs = vfs;
     if (is_lfs(vfs)) {
@@ -1016,6 +1491,43 @@ supervisor_fs_err_t supervisor_vfs_readdir(supervisor_vfs_dir_t *dir, char *name
     if (!dir->open) {
         return SUPERVISOR_FS_IO;
     }
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    if (dir->posix) {
+        struct dirent *entry;
+        do {
+            errno = 0;
+            entry = readdir(dir->posix_dir);
+            if (entry == NULL) {
+                // The end of the directory, or an error.
+                name[0] = '\0';
+                return errno == 0 ? SUPERVISOR_FS_OK : posix_error(errno);
+            }
+            // FatFS lists neither "." nor "..".
+        } while (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0);
+        size_t name_chars = strlen(entry->d_name);
+        if (name_chars > name_len - 1) {
+            name_chars = name_len - 1;
+        }
+        memcpy(name, entry->d_name, name_chars);
+        name[name_chars] = '\0';
+        char host[PATH_MAX];
+        struct stat st;
+        int n = snprintf(host, sizeof(host), "%s/%s", dir->posix_path, entry->d_name);
+        if (n > 0 && (size_t)n < sizeof(host) && stat(host, &st) == 0) {
+            bool directory = S_ISDIR(st.st_mode);
+            if (is_dir != NULL) {
+                *is_dir = directory;
+            }
+            if (size != NULL && !directory) {
+                *size = st.st_size;
+            }
+            if (mtime_ns != NULL) {
+                *mtime_ns = posix_mtime_ns(host, &st);
+            }
+        }
+        return SUPERVISOR_FS_OK;
+    }
+    #endif
     #if CIRCUITPY_FILESYSTEM_LITTLEFS
     if (dir->lfs) {
         struct lfs2_info info;
@@ -1101,6 +1613,12 @@ supervisor_fs_err_t supervisor_vfs_rewinddir(supervisor_vfs_dir_t *dir) {
     if (!dir->open) {
         return SUPERVISOR_FS_IO;
     }
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    if (dir->posix) {
+        rewinddir(dir->posix_dir);
+        return SUPERVISOR_FS_OK;
+    }
+    #endif
     #if CIRCUITPY_FILESYSTEM_LITTLEFS
     if (dir->lfs) {
         int err = lfs2_dir_rewind(&dir->vfs->lfs2.lfs, &dir->dir.lfs2);
@@ -1116,6 +1634,11 @@ supervisor_fs_err_t supervisor_vfs_closedir(supervisor_vfs_dir_t *dir) {
         return SUPERVISOR_FS_OK;
     }
     dir->open = false;
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    if (dir->posix) {
+        return closedir(dir->posix_dir) == 0 ? SUPERVISOR_FS_OK : posix_error(errno);
+    }
+    #endif
     #if CIRCUITPY_FILESYSTEM_LITTLEFS
     if (dir->lfs) {
         int err = lfs2_dir_close(&dir->vfs->lfs2.lfs, &dir->dir.lfs2);
@@ -1126,6 +1649,15 @@ supervisor_fs_err_t supervisor_vfs_closedir(supervisor_vfs_dir_t *dir) {
 }
 
 supervisor_fs_err_t supervisor_vfs_statfs(supervisor_vfs_t *vfs, size_t *block_size, size_t *total_blocks, size_t *free_blocks) {
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    if (is_posix(vfs)) {
+        char host[PATH_MAX];
+        if (posix_path(vfs, "/", host, sizeof(host)) == NULL) {
+            return SUPERVISOR_FS_IO;
+        }
+        return posix_statfs(host, block_size, total_blocks, free_blocks);
+    }
+    #endif
     #if CIRCUITPY_FILESYSTEM_LITTLEFS
     if (is_lfs(vfs)) {
         struct lfs2_config *config = &vfs->lfs2.config;

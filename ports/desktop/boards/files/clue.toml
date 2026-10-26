@@ -1,0 +1,74 @@
+# A CLUE's names on the virtual board: circuitpython --board-file boards/files/clue.toml
+# Its buttons A and B are the Z and X keys (pressed = low, as on the CLUE); P0-P2 are touch pads;
+# its five sensors are models on the virtual I2C bus at the CLUE's addresses, so adafruit_clue
+# starts. The virtual board's display stands in for the CLUE's 240x240 one (board.DISPLAY).
+
+[pins]
+NEOPIXEL = "GPIO14"
+P18 = "GPIO14"
+D18 = "GPIO14"
+L = "GPIO15"
+LED = "GPIO15"
+P17 = "GPIO15"
+D17 = "GPIO15"
+WHITE_LEDS = "GPIO16"
+BUTTON_A = "SW_A"
+P5 = "SW_A"
+D5 = "SW_A"
+BUTTON_B = "SW_B"
+P11 = "SW_B"
+D11 = "SW_B"
+MICROPHONE_CLOCK = "GPIO17"
+MICROPHONE_DATA = "GPIO18"
+P0 = "GPIO19"
+D0 = "GPIO19"
+A2 = "GPIO19"
+P1 = "GPIO20"
+D1 = "GPIO20"
+A3 = "GPIO20"
+P2 = "GPIO21"
+D2 = "GPIO21"
+A4 = "GPIO21"
+P3 = "GPIO22"
+D3 = "GPIO22"
+A5 = "GPIO22"
+P4 = "GPIO23"
+D4 = "GPIO23"
+A6 = "GPIO23"
+P10 = "GPIO24"
+D10 = "GPIO24"
+A7 = "GPIO24"
+P12 = "GPIO25"
+D12 = "GPIO25"
+A0 = "GPIO25"
+P16 = "GPIO26"
+D16 = "GPIO26"
+A1 = "GPIO26"
+PROXIMITY_LIGHT_INTERRUPT = "GPIO27"
+ACCELEROMETER_GYRO_INTERRUPT = "GPIO12"   # SW_MENU's pin: an input nothing drives
+
+[neopixel]
+NEOPIXEL = "1"
+
+[led]
+L = "red"
+WHITE_LEDS = "white"
+
+[touch]
+P0 = ""
+P1 = ""
+P2 = ""
+
+[mic]
+MICROPHONE_DATA = ""
+
+[i2c]
+ACCEL = "lsm6ds33"      # 0x6a
+MAG = "lis3mdl"         # 0x1c
+LIGHT = "apds9960"      # 0x39
+HUMID = "sht31d"        # 0x44
+PRESS = "bmp280"        # 0x77
+
+[board]
+machine = "Adafruit CLUE nRF52840 Express with nRF52840"
+platform = "nRF52840"

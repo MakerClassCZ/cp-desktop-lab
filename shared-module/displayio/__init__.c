@@ -13,8 +13,10 @@
 #include "py/gc.h"
 #include "py/runtime.h"
 #include "shared-bindings/board/__init__.h"
+#if CIRCUITPY_BUSIO
 #include "shared-bindings/busio/I2C.h"
 #include "shared-bindings/busio/SPI.h"
+#endif
 #include "shared-bindings/displayio/Bitmap.h"
 #include "shared-bindings/displayio/Group.h"
 #include "shared-bindings/displayio/Palette.h"
@@ -76,7 +78,7 @@ displayio_buffer_transform_t null_transform = {
     .transpose_xy = false
 };
 
-#if CIRCUITPY_RGBMATRIX || CIRCUITPY_IS31FL3741 || CIRCUITPY_PICODVI || CIRCUITPY_MIPIDSI
+#if CIRCUITPY_RGBMATRIX || CIRCUITPY_IS31FL3741 || CIRCUITPY_PICODVI || CIRCUITPY_MIPIDSI || CIRCUITPY_SDL
 static bool any_display_uses_this_framebuffer(mp_obj_base_t *obj) {
     for (uint8_t i = 0; i < CIRCUITPY_DISPLAY_LIMIT; i++) {
         if (displays[i].display_base.type == &framebufferio_framebufferdisplay_type) {
@@ -198,6 +200,10 @@ static void common_hal_displayio_release_displays_impl(bool keep_primary) {
         #if CIRCUITPY_PICODVI
         } else if (bus_type == &picodvi_framebuffer_type) {
             common_hal_picodvi_framebuffer_deinit(&display_buses[i].picodvi);
+        #endif
+        #if CIRCUITPY_SDL
+        } else if (bus_type == &sdl_framebuffer_type) {
+            common_hal_sdl_framebuffer_deinit(&display_buses[i].sdl);
         #endif
         #if CIRCUITPY_MIPIDSI
         } else if (bus_type == &mipidsi_display_type) {
@@ -321,6 +327,13 @@ void reset_displays(void) {
             picodvi_framebuffer_obj_t *vc = &display_buses[i].picodvi;
             if (!any_display_uses_this_framebuffer(&vc->base)) {
                 common_hal_picodvi_framebuffer_deinit(vc);
+            }
+        #endif
+        #if CIRCUITPY_SDL
+        } else if (display_bus_type == &sdl_framebuffer_type) {
+            sdl_framebuffer_obj_t *sdl = &display_buses[i].sdl;
+            if (!any_display_uses_this_framebuffer(&sdl->base)) {
+                common_hal_sdl_framebuffer_deinit(sdl);
             }
         #endif
         #if CIRCUITPY_AURORA_EPAPER

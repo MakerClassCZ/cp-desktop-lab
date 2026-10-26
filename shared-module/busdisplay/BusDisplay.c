@@ -34,6 +34,15 @@
 
 #define DELAY 0x80
 
+// A port can attach a model of the display to the bus (one it emulates) before the init
+// sequence goes out; the size is the display's as the program sees it, turned by the rotation.
+MP_WEAK void busdisplay_port_attach(mp_obj_t bus, uint16_t width, uint16_t height, uint16_t rotation) {
+    (void)bus;
+    (void)width;
+    (void)height;
+    (void)rotation;
+}
+
 void common_hal_busdisplay_busdisplay_construct(busdisplay_busdisplay_obj_t *self,
     mp_obj_t bus, uint16_t width, uint16_t height, int16_t colstart, int16_t rowstart,
     uint16_t rotation, uint16_t color_depth, bool grayscale, bool pixels_in_byte_share_row,
@@ -54,6 +63,7 @@ void common_hal_busdisplay_busdisplay_construct(busdisplay_busdisplay_obj_t *sel
     }
     displayio_display_core_construct(&self->core, width, height, rotation,
         color_depth, grayscale, pixels_in_byte_share_row, bytes_per_cell, reverse_pixels_in_byte, reverse_bytes_in_word);
+    busdisplay_port_attach(bus, width, height, rotation);
     displayio_display_bus_construct(&self->bus, bus, ram_width, ram_height, colstart, rowstart,
         set_column_command, set_row_command, NO_COMMAND, NO_COMMAND, data_as_commands, false /* always_toggle_chip_select */,
         SH1107_addressing && color_depth == 1, false /*address_little_endian */);
@@ -421,8 +431,11 @@ bool common_hal_busdisplay_busdisplay_refresh(busdisplay_busdisplay_obj_t *self,
         }
         uint32_t remaining_time = target_ms_per_frame - (current_ms_since_real_refresh % target_ms_per_frame);
         // We're ahead of the game so wait until we align with the frame rate.
-        while (supervisor_ticks_ms64() - self->last_refresh_call < remaining_time) {
+        uint64_t waited;
+        while ((waited = supervisor_ticks_ms64() - self->last_refresh_call) < remaining_time) {
             RUN_BACKGROUND_TASKS;
+            // A port may wait out the rest in its own way; elsewhere a no-op.
+            MICROPY_INTERNAL_WFE((int)(remaining_time - waited));
         }
     }
     self->first_manual_refresh = false;

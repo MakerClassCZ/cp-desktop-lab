@@ -516,13 +516,12 @@ static mp_obj_t wifi_radio_connect(size_t n_args, const mp_obj_t *pos_args, mp_m
         mp_raise_TypeError_varg(MP_ERROR_TEXT("'%q' argument required"), MP_QSTR_ssid);
     }
 
-    mp_buffer_info_t ssid;
-    ssid.len = 0;
+    mp_buffer_info_t ssid = { 0 };
     mp_get_buffer_raise(ssid_obj, &ssid, MP_BUFFER_READ);
     mp_arg_validate_length_range(ssid.len, 1, 32, MP_QSTR_ssid);
 
-    mp_buffer_info_t password;
-    password.len = 0;
+    // Empty unless given: a buffer left unset would reach the port undefined.
+    mp_buffer_info_t password = { 0 };
     if (args[ARG_password].u_obj != mp_const_none) {
         mp_get_buffer_raise(args[ARG_password].u_obj, &password, MP_BUFFER_READ);
         if (password.len != 0) {
@@ -535,8 +534,7 @@ static mp_obj_t wifi_radio_connect(size_t n_args, const mp_obj_t *pos_args, mp_m
 
     #define MAC_ADDRESS_LENGTH 6
 
-    mp_buffer_info_t bssid;
-    bssid.len = 0;
+    mp_buffer_info_t bssid = { 0 };
     // Should probably make sure bssid is just bytes and not something else too
     if (bssid_obj != mp_const_none) {
         mp_get_buffer_raise(bssid_obj, &bssid, MP_BUFFER_READ);

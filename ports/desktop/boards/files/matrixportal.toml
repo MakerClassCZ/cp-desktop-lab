@@ -1,0 +1,44 @@
+# A MatrixPortal M4's names on the virtual board: circuitpython --board-file boards/files/matrixportal.toml
+# The HUB75 matrix (rgbmatrix.RGBMatrix on the MTX_ pins, as adafruit_matrixportal builds it)
+# shows on the panel as the display MATRIX. Its buttons UP and DOWN are the gamepad's up and down
+# (pressed = low, as on the MatrixPortal); the accelerometer is a LIS3DH on the virtual I2C bus.
+# The ESP32 co-processor is not there: programs that go online stop at it.
+
+[pins]
+MTX_R1 = "GPIO14"
+MTX_G1 = "GPIO15"
+MTX_B1 = "GPIO16"
+MTX_R2 = "GPIO17"
+MTX_G2 = "GPIO18"
+MTX_B2 = "GPIO19"
+MTX_ADDRA = "GPIO20"
+MTX_ADDRB = "GPIO21"
+MTX_ADDRC = "GPIO22"
+MTX_ADDRD = "GPIO23"
+MTX_ADDRE = "GPIO24"
+MTX_CLK = "GPIO25"
+MTX_LAT = "GPIO26"
+MTX_OE = "GPIO27"
+BUTTON_UP = "SW_UP"
+BUTTON_DOWN = "SW_DOWN"
+NEOPIXEL = "GPIO8"
+LED = "GPIO9"
+L = "GPIO9"
+A0 = "GPIO10"
+A1 = "GPIO11"
+A2 = "GPIO12"
+A3 = "GPIO2"
+A4 = "GPIO3"
+ACCELEROMETER_INTERRUPT = "GPIO4"
+
+[neopixel]
+NEOPIXEL = "1"
+
+[led]
+LED = "red"
+
+[i2c]
+ACCEL = "lis3dh 0x19"
+
+[board]
+machine = "Adafruit Matrix Portal M4 with samd51j19"    # adafruit_matrixportal builds the matrix by it

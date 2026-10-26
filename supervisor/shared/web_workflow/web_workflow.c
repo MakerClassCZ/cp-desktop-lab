@@ -4,9 +4,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-// Include strchrnul()
-#define _GNU_SOURCE
-
+#include <inttypes.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -18,7 +16,9 @@
 #include "py/mpstate.h"
 #include "py/persistentcode.h"
 
+#if CIRCUITPY_WIFI
 #include "shared-bindings/wifi/Radio.h"
+#endif
 #include "supervisor/filesystem.h"
 #include "supervisor/port.h"
 #include "supervisor/shared/reload.h"
@@ -50,6 +50,10 @@
 #include "common-hal/wifi/__init__.h"
 #include "shared-bindings/wifi/__init__.h"
 #endif
+
+// A host port's web workflow serves on the computer's network (hostnetwork), with no Wi-Fi to
+// join first, even when it has a wifi module for programs.
+#define WEB_WORKFLOW_WIFI (CIRCUITPY_WIFI && !CIRCUITPY_HOSTNETWORK)
 
 #if CIRCUITPY_MII
 #include "shared-bindings/mii/__init__.h"
@@ -93,7 +97,7 @@ typedef struct {
     char websocket_key[24 + 1];
 } _request;
 
-#if CIRCUITPY_WIFI
+#if WEB_WORKFLOW_WIFI
 static wifi_radio_error_t _wifi_status = WIFI_RADIO_ERROR_NONE;
 #endif
 
@@ -104,7 +108,7 @@ static uint32_t _last_ip = 0;
 static mp_int_t _last_web_api_port = 80;
 #endif
 
-#if CIRCUITPY_STATUS_BAR && CIRCUITPY_WIFI
+#if CIRCUITPY_STATUS_BAR && WEB_WORKFLOW_WIFI
 static wifi_radio_error_t _last_wifi_status = WIFI_RADIO_ERROR_NONE;
 #endif
 
@@ -196,7 +200,7 @@ static void _update_encoded_ip(uint32_t ipv4_address) {
 
 static bool _get_web_workflow_ip(uint32_t *ipv4_address) {
     *ipv4_address = 0;
-    #if CIRCUITPY_WIFI
+    #if WEB_WORKFLOW_WIFI
     if (!common_hal_wifi_radio_get_enabled(&common_hal_wifi_radio_obj)) {
         return false;
     }
@@ -222,7 +226,7 @@ static bool _get_web_workflow_ip(uint32_t *ipv4_address) {
 // no mDNS server is active to provide one. Never allocates. Returns "" when
 // there isn't one.
 static const char *_get_web_workflow_hostname(void) {
-    #if CIRCUITPY_WIFI
+    #if WEB_WORKFLOW_WIFI
     if (!common_hal_wifi_radio_get_enabled(&common_hal_wifi_radio_obj)) {
         return "";
     }
@@ -248,7 +252,7 @@ static void _print_web_workflow_endpoint(void) {
 #endif
 
 mdns_server_obj_t *supervisor_web_workflow_mdns(mp_obj_t network_interface) {
-    #if CIRCUITPY_MDNS && CIRCUITPY_WIFI
+    #if CIRCUITPY_MDNS && WEB_WORKFLOW_WIFI
     if (network_interface == &common_hal_wifi_radio_obj &&
         mdns.base.type == &mdns_server_type) {
         return &mdns;
@@ -266,7 +270,7 @@ bool supervisor_web_workflow_status_dirty(void) {
     if (enabled != _last_enabled || ipv4_address != _last_ip || web_api_port != _last_web_api_port) {
         return true;
     }
-    #if CIRCUITPY_WIFI
+    #if WEB_WORKFLOW_WIFI
     if (_last_wifi_status != _wifi_status) {
         return true;
     }
@@ -296,7 +300,7 @@ void supervisor_web_workflow_status(void) {
         }
     }
 
-    #if CIRCUITPY_WIFI
+    #if WEB_WORKFLOW_WIFI
     serial_write_compressed(MP_ERROR_TEXT("Wi-Fi: "));
     _last_wifi_status = _wifi_status;
     if (!_last_enabled) {
@@ -323,7 +327,7 @@ void supervisor_web_workflow_status(void) {
 bool supervisor_start_web_workflow(void) {
     #if CIRCUITPY_WEB_WORKFLOW && CIRCUITPY_SETTINGS_TOML && (CIRCUITPY_WIFI || CIRCUITPY_HOSTNETWORK || CIRCUITPY_MII)
 
-    #if CIRCUITPY_WIFI
+    #if WEB_WORKFLOW_WIFI
     mp_obj_t socketpool_radio = MP_OBJ_FROM_PTR(&common_hal_wifi_radio_obj);
     #elif CIRCUITPY_MII
     mp_obj_t socketpool_radio = mii_get_default_instance();
@@ -337,7 +341,7 @@ bool supervisor_start_web_workflow(void) {
 
     settings_err_t result;
 
-    #if CIRCUITPY_WIFI
+    #if WEB_WORKFLOW_WIFI
     char ssid[33];
     char password[64];
 
@@ -376,7 +380,7 @@ bool supervisor_start_web_workflow(void) {
     }
     #endif
 
-    #if CIRCUITPY_MII && !CIRCUITPY_WIFI
+    #if CIRCUITPY_MII && !WEB_WORKFLOW_WIFI
     mii_ethernet_obj_t *eth = (mii_ethernet_obj_t *)mii_get_default_instance();
     if (eth == NULL) {
         return false;
@@ -626,7 +630,7 @@ static bool _origin_ok(_request *request) {
             return true;
         }
         // DEBUG: OK if origin is 'localhost' (ignoring port #)
-        char *cptr = strchrnul(&request->origin[PREFIX_HTTP_LEN], ':');
+        char *cptr = &request->origin[PREFIX_HTTP_LEN] + strcspn(&request->origin[PREFIX_HTTP_LEN], ":");
         char csave = *cptr; // NULL or colon
         *cptr = '\0';
         if (strcmp(&request->origin[PREFIX_HTTP_LEN], "localhost") == 0) {
@@ -990,11 +994,11 @@ static void _reply_with_version_json(socketpool_socket_obj_t *socket, _request *
         #if MICROPY_PERSISTENT_CODE_LOAD_NATIVE
         "\"architecture\": \"" MPY_FEATURE_ARCH_NAME "\", "
         #endif
-        "\"board_id\": \"" CIRCUITPY_BOARD_ID "\", "
+        "\"board_id\": \"%s\", "
         "\"creator_id\": %u, "
         "\"creation_id\": %u, "
         "\"hostname\": \"%s\", "
-        "\"port\": %d, ", MICROPY_HW_BOARD_NAME, CIRCUITPY_CREATOR_ID, CIRCUITPY_CREATION_ID, hostname, web_api_port, _our_ip_encoded);
+        "\"port\": %d, ", MICROPY_HW_BOARD_NAME, port_board_id(), CIRCUITPY_CREATOR_ID, CIRCUITPY_CREATION_ID, hostname, web_api_port, _our_ip_encoded);
     #if CIRCUITPY_MICROCONTROLLER && COMMON_HAL_MCU_PROCESSOR_UID_LENGTH > 0
     uint8_t raw_id[COMMON_HAL_MCU_PROCESSOR_UID_LENGTH];
     common_hal_mcu_processor_get_uid(raw_id);
@@ -1521,7 +1525,7 @@ static void _reset_request(_request *request) {
 static void _process_request(socketpool_socket_obj_t *socket, _request *request) {
     bool more = true;
     bool error = false;
-    uint8_t c;
+    uint8_t c = 0;      // recv_into takes a const pointer, so clang cannot see the write
     // This code assumes header lines are terminated with \r\n
     while (more && !error) {
 

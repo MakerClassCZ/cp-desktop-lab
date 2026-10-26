@@ -1,0 +1,49 @@
+# The board panel demo's parts: circuitpython --drive examples/panel/CIRCUITPY --board-file examples/panel/board.toml
+# Pins 0-12 are the keyboard's buttons, 13 the speaker, 14-27 free virtual pins.
+
+[pins]
+NEOPIXEL = "GPIO14"
+MATRIX = "GPIO15"
+LED = "GPIO16"
+KNOB = "GPIO17"
+METER = "GPIO18"
+LAMP = "GPIO19"
+SERVO = "GPIO20"
+PAD = "GPIO21"
+MIC_CLK = "GPIO22"
+MIC_DATA = "GPIO23"
+I2S_BCLK = "GPIO24"
+I2S_WS = "GPIO25"
+I2S_DATA = "GPIO26"
+SWITCH = "GPIO27"
+BUTTON = "SW_A"          # the panel's button, or the Z key
+
+[neopixel]
+NEOPIXEL = "8"
+MATRIX = "8x8 serpentine"
+
+[analog]
+KNOB = ""                # a slider: drag it, or the mouse wheel over it (Shift: one count)
+METER = ""               # the program's AnalogOut: a bar
+
+[button]
+BUTTON = ""
+
+[switch]
+SWITCH = ""
+
+[led]
+LED = "green"
+
+[pwm]
+LAMP = "amber"
+SERVO = "servo"
+
+[touch]
+PAD = ""
+
+[mic]
+MIC_DATA = "tone 440"    # "noise", or "mic" for the computer's microphone
+
+[i2s]
+I2S_DATA = ""

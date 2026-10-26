@@ -63,6 +63,15 @@ extern void common_hal_mcu_enable_interrupts(void);
 #define CIRCUITPY_FILESYSTEM_LITTLEFS    (0)
 #endif
 
+// A port on a host can serve CIRCUITPY from a directory instead, through
+// VfsPosix; supervisor_filesystem_posix_root() picks it at run time.
+#ifndef CIRCUITPY_FILESYSTEM_POSIX
+#define CIRCUITPY_FILESYSTEM_POSIX       (0)
+#endif
+#if CIRCUITPY_FILESYSTEM_POSIX && !defined(MICROPY_VFS_POSIX)
+#define MICROPY_VFS_POSIX                (1)
+#endif
+
 // Always turn on exit code handling
 #define MICROPY_PYEXEC_ENABLE_EXIT_CODE_HANDLING (1)
 
@@ -498,7 +507,11 @@ extern const struct _mp_obj_module_t nvm_module;
 #endif
 
 // We need to provide a declaration/definition of alloca()
+#ifdef _WIN32
+#include <malloc.h>
+#else
 #include <alloca.h>
+#endif
 
 #define MP_STATE_PORT MP_STATE_VM
 
@@ -548,6 +561,10 @@ void background_callback_run_all(void);
 #endif
 
 #define CIRCUITPY_BOOT_OUTPUT_FILE "/boot_out.txt"
+// How long to wait before writing it, in case power is momentary.
+#ifndef CIRCUITPY_BOOT_OUTPUT_DELAY_MS
+#define CIRCUITPY_BOOT_OUTPUT_DELAY_MS (1000)
+#endif
 
 #ifndef CIRCUITPY_BOOT_COUNTER
 #define CIRCUITPY_BOOT_COUNTER 0
@@ -748,7 +765,7 @@ void background_callback_run_all(void);
 #define CIRCUITPY_BOOT_BUTTON_ACTIVE_HIGH (0)
 #endif
 
-#if defined(__GNUC__) && !defined(__ZEPHYR__)
+#if defined(__GNUC__) && !defined(__ZEPHYR__) && !defined(__clang__)
 #if __GNUC__ < CIRCUITPY_MIN_GCC_VERSION
 // (the 3 level scheme here is required to get expansion & stringization
 // correct)

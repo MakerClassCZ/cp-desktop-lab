@@ -1,0 +1,84 @@
+# A Circuit Playground's names on the virtual board:
+#   circuitpython --board-file boards/files/circuitplayground.toml
+# The ring of ten NeoPixels is drawn as a row. Its buttons read high while pressed, as on the
+# real board (press them on the board panel; the keyboard's keys read low). The light sensor and
+# the thermistor are sliders: LIGHT and TEMPERATURE read what the slider says. The accelerometer
+# is a LIS3DH on a virtual I2C bus, its x, y and z sliders; the microphone the panel's generator.
+# They sit on keys' pins, there being no more free ones: ACCELEROMETER_SCL and _SDA on L and R
+# (Q, W), its interrupt on SELECT (Backspace), the microphone on START and Y (Return, S).
+
+[pins]
+NEOPIXEL = "GPIO14"
+D8 = "GPIO14"
+LED = "GPIO15"
+D13 = "GPIO15"
+SLIDE_SWITCH = "GPIO16"
+D7 = "GPIO16"
+SPEAKER_ENABLE = "GPIO17"
+D11 = "GPIO17"
+A1 = "GPIO18"
+A2 = "GPIO19"
+A3 = "GPIO20"
+A4 = "GPIO21"
+A5 = "GPIO22"
+A6 = "GPIO23"
+A7 = "GPIO24"
+TX = "GPIO24"             # the A7 pad: the library touches it as TX
+BUTTON_A = "GPIO25"
+D4 = "GPIO25"
+BUTTON_B = "GPIO26"
+D5 = "GPIO26"
+LIGHT = "GPIO27"
+A8 = "GPIO27"
+TEMPERATURE = "GPIO12"   # SW_MENU's pin: the board panel drives it
+A9 = "GPIO12"
+A0 = "SPEAKER"
+ACCELEROMETER_SCL = "GPIO10"
+ACCELEROMETER_SDA = "GPIO11"
+ACCELEROMETER_INTERRUPT = "GPIO9"
+MICROPHONE_CLOCK = "GPIO8"
+MICROPHONE_DATA = "GPIO7"
+IR_RX = "GPIO5"          # the IR receiver: the panel sends it a remote's code
+REMOTEIN = "GPIO5"
+IR_TX = "GPIO6"          # the IR LED: its pulses go to the bus trace
+REMOTEOUT = "GPIO6"
+
+[neopixel]
+NEOPIXEL = "10"
+
+[led]
+LED = "red"
+
+[button]
+BUTTON_A = "high"
+BUTTON_B = "high"
+
+[switch]
+SLIDE_SWITCH = ""
+
+[touch]
+A1 = ""
+A7 = ""
+A2 = ""
+A3 = ""
+A4 = ""
+A5 = ""
+A6 = ""
+
+[analog]
+LIGHT = ""
+TEMPERATURE = ""
+
+[mic]
+MICROPHONE_DATA = ""
+
+[ir]
+IR_RX = ""
+
+[i2c]
+ACCEL = "lis3dh 0x19"
+CRICKIT = "crickit"      # 0x49: a Crickit under the Circuit Playground (adafruit_crickit)
+
+[board]
+platform = "Atmel SAMD21"   # adafruit_circuitplayground picks the Express by it
+machine = "Adafruit CircuitPlayground Express with samd21g18"

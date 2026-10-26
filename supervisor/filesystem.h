@@ -12,6 +12,11 @@
 #if CIRCUITPY_FILESYSTEM_LITTLEFS
 #include "extmod/vfs_lfs.h"
 #endif
+#if CIRCUITPY_FILESYSTEM_POSIX
+#include <dirent.h>
+#include <limits.h>
+#include "extmod/vfs_posix.h"
+#endif
 
 // A supervisor-managed filesystem object, which is either a FAT fs_user_mount_t
 // or, on littlefs builds, an mp_obj_vfs_lfs2_t. Both begin with the same
@@ -28,7 +33,17 @@ typedef union _supervisor_vfs_t {
     #if CIRCUITPY_FILESYSTEM_LITTLEFS
     mp_obj_vfs_lfs2_t lfs2;
     #endif
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    // A host directory (base.type &mp_type_vfs_posix); its blockdev only holds flags.
+    mp_obj_vfs_posix_t posix;
+    #endif
 } supervisor_vfs_t;
+
+#if CIRCUITPY_FILESYSTEM_POSIX
+// A port that runs on a host returns the absolute directory to serve as CIRCUITPY, or NULL
+// (the default) to use its flash. filesystem_init() creates a missing directory.
+const char *supervisor_filesystem_posix_root(void);
+#endif
 
 extern volatile bool filesystem_flush_requested;
 
@@ -47,10 +62,10 @@ extern volatile bool filesystem_flush_requested;
 #define SUPERVISOR_FS_OPEN_TRUNCATE     0x08
 
 // Error codes shared by the supervisor filesystem API.
-#if CIRCUITPY_FILESYSTEM_LITTLEFS
+#if CIRCUITPY_FILESYSTEM_LITTLEFS || CIRCUITPY_FILESYSTEM_POSIX
 
-// When littlefs is enabled, FatFS and littlefs results are mapped to these
-// shared codes so call sites can be shared between FAT and littlefs.
+// When littlefs or host directories are enabled, FatFS, littlefs and errno results are mapped to
+// these shared codes so call sites can be shared between the filesystems.
 typedef enum {
     SUPERVISOR_FS_OK = 0,
     SUPERVISOR_FS_NO_FILE,          // File or directory doesn't exist.
@@ -94,6 +109,13 @@ typedef struct _supervisor_vfs_file_t {
     // its own filesystem.
     supervisor_vfs_t *vfs;
     #endif
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    // A file in a host directory: its descriptor, and the modification time to set on close
+    // (0 = leave the time the host gave it).
+    bool posix;
+    int fd;
+    uint64_t mtime_ns;
+    #endif
     // FAT: timestamp to stamp the file with on close (0 = current time).
     DWORD fattime;
     union {
@@ -121,6 +143,12 @@ typedef struct _supervisor_vfs_dir_t {
     char path[SUPERVISOR_VFS_DIR_PATH_MAX];
     // Which mount the directory is open on. Unused on FAT.
     supervisor_vfs_t *vfs;
+    #endif
+    #if CIRCUITPY_FILESYSTEM_POSIX
+    // A directory in a host directory, and its host path for stat() of each entry.
+    bool posix;
+    DIR *posix_dir;
+    char posix_path[PATH_MAX];
     #endif
     union {
         FF_DIR fat;

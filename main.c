@@ -504,6 +504,10 @@ static bool __attribute__((noinline)) run_code_py(safe_mode_t safe_mode, bool *s
         usb_setup_with_vm();
         #endif
 
+        // CIRCUITPY-CHANGE: a port may run code of its own in the fresh VM before the user's,
+        // such as a debugger that will trace it.
+        port_before_user_code();
+
         // Check if a different run file has been allocated
         if (next_code_configuration != NULL) {
             next_code_configuration->options &= ~SUPERVISOR_NEXT_CODE_OPT_NEWLY_SET;
@@ -916,7 +920,7 @@ static void __attribute__ ((noinline)) run_boot_py(safe_mode_t safe_mode) {
         filesystem_set_ignore_write_protection(vfs, true);
 
         // Write version info
-        mp_printf(&mp_plat_print, "%s\nBoard ID:%s\n", MICROPY_FULL_VERSION_INFO, CIRCUITPY_BOARD_ID);
+        mp_printf(&mp_plat_print, "%s\nBoard ID:%s\n", MICROPY_FULL_VERSION_INFO, port_board_id());
         #if MICROPY_PERSISTENT_CODE_LOAD_NATIVE
         mp_printf(&mp_plat_print, "%q:%s\n", MP_QSTR_architecture, MPY_FEATURE_ARCH_NAME);
         #endif
@@ -955,9 +959,9 @@ static void __attribute__ ((noinline)) run_boot_py(safe_mode_t safe_mode) {
         }
 
         if (write_boot_output) {
-            // Wait 1 second before opening CIRCUITPY_BOOT_OUTPUT_FILE for write,
+            // Wait before opening CIRCUITPY_BOOT_OUTPUT_FILE for write,
             // in case power is momentary or will fail shortly due to, say a low, battery.
-            mp_hal_delay_ms(1000);
+            mp_hal_delay_ms(CIRCUITPY_BOOT_OUTPUT_DELAY_MS);
 
             if (supervisor_vfs_open_file(vfs_root, CIRCUITPY_BOOT_OUTPUT_FILE,
                 SUPERVISOR_FS_OPEN_WRITE | SUPERVISOR_FS_OPEN_CREATE | SUPERVISOR_FS_OPEN_TRUNCATE, 0,

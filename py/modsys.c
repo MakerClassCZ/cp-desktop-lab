@@ -187,7 +187,13 @@ static const mp_rom_obj_tuple_t mp_sys_implementation_obj = {
 
 #ifdef MICROPY_PY_SYS_PLATFORM
 // platform - the platform that MicroPython is running on
+// CIRCUITPY-CHANGE: a port that picks its board at run time may name the platform then.
+#ifdef MICROPY_PY_SYS_PLATFORM_OBJ
+extern mp_obj_str_t MICROPY_PY_SYS_PLATFORM_OBJ;
+#define mp_sys_platform_obj MICROPY_PY_SYS_PLATFORM_OBJ
+#else
 static const MP_DEFINE_STR_OBJ(mp_sys_platform_obj, MICROPY_PY_SYS_PLATFORM);
+#endif
 #endif
 
 #ifdef MICROPY_PY_SYS_EXECUTABLE
