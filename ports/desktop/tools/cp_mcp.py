@@ -110,9 +110,11 @@ TOOLS = [
 
 def _default_program():
     here = os.path.dirname(os.path.abspath(__file__))
-    names = ["build-windows/circuitpython.exe"] if os.name == "nt" else ["build-linux/circuitpython"]
+    # Beside this file (a release package), else in the port's tree.
+    exe = "circuitpython.exe" if os.name == "nt" else "circuitpython"
+    names = [exe, os.path.join("..", "build-windows" if os.name == "nt" else "build-linux", exe)]
     for name in names:
-        path = os.path.join(here, "..", name)
+        path = os.path.join(here, name)
         if os.path.exists(path):
             return os.path.abspath(path)
     return shutil.which("circuitpython") or "circuitpython"

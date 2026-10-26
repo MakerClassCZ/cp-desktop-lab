@@ -18,7 +18,7 @@ linux)
     NAME=circuitpython-linux-$(uname -m)
     rm -rf "${OUT:?}/$NAME" && mkdir -p "$OUT/$NAME"
     strip -o "$OUT/$NAME/circuitpython" "$HERE/build-linux/circuitpython"
-    cp "$HERE/python/debugadapter.py" "$HERE/README.md" "$OUT/$NAME/"
+    cp "$HERE/python/debugadapter.py" "$HERE/tools/cp_mcp.py" "$HERE/tools/cpapi.py" "$HERE/README.md" "$OUT/$NAME/"
     tar czf "$OUT/$NAME.tar.gz" -C "$OUT" "$NAME"
     ls -la "$OUT/$NAME.tar.gz"
     ;;

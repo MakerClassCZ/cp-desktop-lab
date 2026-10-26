@@ -261,6 +261,23 @@ else:
     c.p.stdin.close()
     c.p.wait(timeout=15)
 
+# As in a release package: the server beside the program finds it without --program
+import shutil, tempfile
+package = tempfile.mkdtemp()
+dlls = [os.path.join(os.path.dirname(BIN), f) for f in os.listdir(os.path.dirname(BIN)) if f.endswith(".dll")]
+for f in [SERVER, os.path.join(os.path.dirname(os.path.abspath(SERVER)), "cpapi.py"), BIN] + dlls:
+    shutil.copy(f, package)
+p = subprocess.Popen([sys.executable, os.path.join(package, "cp_mcp.py")], stdin=subprocess.PIPE,
+                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, cwd=package)
+p.stdin.write((json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+    "name": "launch", "arguments": {"drive": drive('print("packaged")\n')}}}) + "\n").encode())
+p.stdin.flush()
+answer = p.stdout.readline()
+check("in a package the server launches the program beside it", b'"isError": false' in answer, answer[:300])
+p.stdin.close()
+p.wait(timeout=15)
+shutil.rmtree(package, ignore_errors=True)
+
 # The output up to a match, cut by byte offsets when the ring held a byte that is not UTF-8
 sys.path.insert(0, os.path.dirname(os.path.abspath(SERVER)))
 import cp_mcp

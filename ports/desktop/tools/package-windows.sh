@@ -9,7 +9,7 @@ OUT=$1; SDL_DIR=$2; shift 2
 P="$OUT/circuitpython-windows-x64"
 rm -rf "$P" && mkdir -p "$P"
 "${CROSS_COMPILE:-x86_64-w64-mingw32-}strip" -o "$P/circuitpython.exe" "$HERE/build-windows/circuitpython.exe"
-cp "$SDL_DIR/bin/SDL2.dll" "$HERE/python/debugadapter.py" "$P/"
+cp "$SDL_DIR/bin/SDL2.dll" "$HERE/python/debugadapter.py" "$HERE/tools/cp_mcp.py" "$HERE/tools/cpapi.py" "$P/"
 cp "${LIBUSB_DLL:-/mnt/c/msys64/ucrt64/bin/libusb-1.0.dll}" "$P/libusb-1.0.dll"
 cp "$HERE/tools/libusb-LICENSE.txt" "$P/"
 cp "$HERE"/vscode/*.vsix "$P/" 2>/dev/null || echo "no .vsix: run 'npx @vscode/vsce package --allow-missing-repository --skip-license' in vscode/"

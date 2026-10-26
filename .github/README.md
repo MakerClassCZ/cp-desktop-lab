@@ -42,6 +42,27 @@ installed (`libsdl2-2.0-0` on Debian and Ubuntu).
 The VS Code extension is the `.vsix` file on the same page, for Linux and Windows alike: in
 VS Code, Extensions > `...` > Install from VSIX.
 
+## Use it with an AI assistant
+
+`cp_mcp.py` in the package is an MCP server (Python 3, standard library only). Through it an
+assistant starts the program on a project folder, runs code in the REPL, reads the console, moves
+the board panel's parts, looks at the displays as images and reads and writes the files, so it
+can try the code it writes before it reaches a board.
+
+Claude Code:
+
+```
+claude mcp add circuitpython -- python3 /path/to/package/cp_mcp.py
+```
+
+Claude Desktop, in `claude_desktop_config.json` (on Windows `python` and a `C:\\...` path):
+
+```json
+{"mcpServers": {"circuitpython": {"command": "python3", "args": ["/path/to/package/cp_mcp.py"]}}}
+```
+
+The server finds the program beside it; `--program PATH` names another.
+
 How to build it, every option and what is missing: [`ports/desktop/README.md`](../ports/desktop/README.md).
 
 ## Status
