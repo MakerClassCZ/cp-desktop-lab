@@ -1,6 +1,10 @@
 # The board panel demo
 
-Every kind of part on the board panel at once, on the virtual board:
+Every kind of part on the board panel at once, on the virtual board. From a release package:
+
+    circuitpython --drive examples/panel/CIRCUITPY --board-file examples/panel/board.toml
+
+From the port's directory after a build:
 
     build-windows/circuitpython.exe --drive examples/panel/CIRCUITPY --board-file examples/panel/board.toml
     build-linux/circuitpython --drive examples/panel/CIRCUITPY --board-file examples/panel/board.toml

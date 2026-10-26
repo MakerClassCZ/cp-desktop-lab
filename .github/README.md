@@ -37,7 +37,12 @@ installed (`libsdl2-2.0-0` on Debian and Ubuntu).
 ./circuitpython                       # ./CIRCUITPY is created on the first start
 ./circuitpython --drive path/to/project
 ./circuitpython --board ft232h        # real pins through an FT232H
+./circuitpython --board-file boards/files/pybadge.toml   # a PyBadge's pin names, buttons and NeoPixels
 ```
+
+`boards/files/` in the package has board files of real boards (Feather, CLUE, PyBadge, PyGamer,
+MagTag, MatrixPortal, Circuit Playground, Pico and others), so code written for one finds its pin
+names; `examples/panel` shows every part of the board panel.
 
 The VS Code extension is the `.vsix` file on the same page, for Linux and Windows alike: in
 VS Code, Extensions > `...` > Install from VSIX.

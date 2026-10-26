@@ -19,6 +19,15 @@ else
 BUILD ?= build-linux
 endif
 
+# The version comes from CircuitPython's own tags (numbers), never from the port's release tags
+# (desktop-v*), which git describe would otherwise find first.
+ifeq ($(CP_VERSION),)
+CP_VERSION := $(shell git describe --dirty --tags --first-parent --match "[0-9]*" 2>/dev/null)
+endif
+ifneq ($(CP_VERSION),)
+export CP_VERSION
+endif
+
 include ../../py/circuitpy_mkenv.mk
 
 INC += \

@@ -3,8 +3,16 @@ CircuitPython for Windows: an experimental, unofficial build of ports/desktop
 Run it from a terminal (Windows Terminal, cmd or PowerShell):
 
     circuitpython.exe                      CIRCUITPY is the folder .\CIRCUITPY, created on first start
-    circuitpython.exe --drive demo\picostellar
     circuitpython.exe --drive C:\path\to\folder
+
+A board's names, NeoPixels and parts: boards\files\ holds board files of real boards (pybadge.toml,
+clue.toml, feather.toml, magtag.toml, ...), so code written for one runs with its pin names:
+
+    circuitpython.exe --board-file boards\files\pybadge.toml --drive C:\path\to\project
+    circuitpython.exe --drive examples\panel\CIRCUITPY --board-file examples\panel\board.toml
+
+README.md is the whole manual: the board panel, virtual sensors and displays, --fast-time,
+--trace-bus, the web workflow, the network, the MCP server.
 
 The terminal is the serial console: Ctrl-C interrupts, Ctrl-D reloads, any key opens the REPL,
 Ctrl-\ or closing the window quits. Edit the files in the folder with any editor; code.py runs

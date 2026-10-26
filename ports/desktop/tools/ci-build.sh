@@ -19,6 +19,8 @@ linux)
     rm -rf "${OUT:?}/$NAME" && mkdir -p "$OUT/$NAME"
     strip -o "$OUT/$NAME/circuitpython" "$HERE/build-linux/circuitpython"
     cp "$HERE/python/debugadapter.py" "$HERE/tools/cp_mcp.py" "$HERE/tools/cpapi.py" "$HERE/README.md" "$OUT/$NAME/"
+    mkdir -p "$OUT/$NAME/boards" && cp -r "$HERE/boards/files" "$OUT/$NAME/boards/files"
+    cp -r "$HERE/examples" "$OUT/$NAME/examples"
     tar czf "$OUT/$NAME.tar.gz" -C "$OUT" "$NAME"
     ls -la "$OUT/$NAME.tar.gz"
     ;;
