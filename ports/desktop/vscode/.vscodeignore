@@ -1,0 +1,5 @@
+# Left out of the .vsix: the tests, and what git ignores.
+test/**
+node_modules/**
+*.vsix
+.gitignore

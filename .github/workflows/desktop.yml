@@ -47,7 +47,7 @@ jobs:
           git fetch -q --no-recurse-submodules --shallow-since="2021-07-01" --tags https://github.com/adafruit/circuitpython HEAD
           git fetch -q --no-recurse-submodules --shallow-since="2021-07-01" origin $GITHUB_SHA
           echo "CP_VERSION=$(python py/version.py)" >> $GITHUB_ENV
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: matrix.target == 'windows'
         with:
           node-version: '20'
@@ -60,7 +60,7 @@ jobs:
       - name: VS Code extension beside the packages
         if: matrix.target == 'windows'
         run: cp ports/desktop/vscode/*.vsix dist/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.target }}-${{ runner.arch }}
           path: |
@@ -85,7 +85,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: windows-X64
       - name: Tests
@@ -101,7 +101,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
