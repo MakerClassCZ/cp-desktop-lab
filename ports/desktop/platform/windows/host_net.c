@@ -132,4 +132,3 @@ int host_ping_ms(uint32_t address, int timeout_ms) {
     ICMP_ECHO_REPLY *r = (ICMP_ECHO_REPLY *)reply;
     return n > 0 && r->Status == IP_SUCCESS ? (int)r->RoundTripTime : -1;
 }
-

@@ -38,7 +38,9 @@ void serial_host_close(serial_host_t *port) {
 }
 
 static speed_t _speed(uint32_t baud) {
-    static const struct { uint32_t baud; speed_t speed; } speeds[] = {
+    static const struct { uint32_t baud;
+                          speed_t speed;
+    } speeds[] = {
         { 300, B300 }, { 600, B600 }, { 1200, B1200 }, { 2400, B2400 }, { 4800, B4800 },
         { 9600, B9600 }, { 19200, B19200 }, { 38400, B38400 }, { 57600, B57600 },
         { 115200, B115200 }, { 230400, B230400 },
@@ -167,4 +169,3 @@ bool serial_host_find_usb(uint16_t vid, uint16_t pid, char *path, size_t len) {
     closedir(dir);
     return found;
 }
-

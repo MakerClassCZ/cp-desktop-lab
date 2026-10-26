@@ -1,9 +1,10 @@
 """A client for the CircuitPython program's control API (--api), standard library only.
 
-    with Board.launch("circuitpython", "CIRCUITPY") as b:
-        b.wait("Hello")
-        print(b.state())
+with Board.launch("circuitpython", "CIRCUITPY") as b:
+    b.wait("Hello")
+    print(b.state())
 """
+
 import http.client
 import json
 import os
@@ -20,7 +21,7 @@ def upto_next(r):
     """A stream answer's text up to its next offset. Cut from the end: a byte that was not UTF-8
     comes back as one 3-byte character, and those are rarer after the match than before it."""
     data = r["data"].encode()
-    return data[:max(0, len(data) - (r["end"] - r["next"]))].decode(errors="replace")
+    return data[: max(0, len(data) - (r["end"] - r["next"]))].decode(errors="replace")
 
 
 def _tie_to_this_process(p):
@@ -29,21 +30,34 @@ def _tie_to_this_process(p):
         return
     import ctypes
     from ctypes import wintypes
+
     global _job
     k = ctypes.WinDLL("kernel32", use_last_error=True)
     if _job is None:
+
         class Basic(ctypes.Structure):
-            _fields_ = [("a", ctypes.c_int64), ("b", ctypes.c_int64), ("LimitFlags", wintypes.DWORD),
-                        ("c", ctypes.c_size_t), ("d", ctypes.c_size_t), ("e", wintypes.DWORD),
-                        ("f", ctypes.c_size_t), ("g", wintypes.DWORD), ("h", wintypes.DWORD)]
+            _fields_ = [
+                ("a", ctypes.c_int64),
+                ("b", ctypes.c_int64),
+                ("LimitFlags", wintypes.DWORD),
+                ("c", ctypes.c_size_t),
+                ("d", ctypes.c_size_t),
+                ("e", wintypes.DWORD),
+                ("f", ctypes.c_size_t),
+                ("g", wintypes.DWORD),
+                ("h", wintypes.DWORD),
+            ]
 
         class Extended(ctypes.Structure):
             _fields_ = [("basic", Basic), ("io", ctypes.c_uint64 * 6), ("m", ctypes.c_size_t * 4)]
+
         k.CreateJobObjectW.restype = wintypes.HANDLE
         job = k.CreateJobObjectW(None, None)
         info = Extended()
-        info.basic.LimitFlags = 0x2000          # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-        if not job or not k.SetInformationJobObject(wintypes.HANDLE(job), 9, ctypes.byref(info), ctypes.sizeof(info)):
+        info.basic.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not job or not k.SetInformationJobObject(
+            wintypes.HANDLE(job), 9, ctypes.byref(info), ctypes.sizeof(info)
+        ):
             return
         _job = job
     # A reset's child started later is in the job too.
@@ -58,7 +72,8 @@ def _die_with_parent():
     try:
         import ctypes
         import signal
-        ctypes.CDLL(None).prctl(1, signal.SIGTERM)      # PR_SET_PDEATHSIG
+
+        ctypes.CDLL(None).prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
     except (OSError, AttributeError):
         pass
 
@@ -88,17 +103,27 @@ class Board:
         self.url = url
         self.token = token
         self.process = process
-        self.offset = 0                 # the console read so far
-        self.trace_offset = 0           # and the trace
-        self.boot = None                # the process they belong to; a reset starts them over
-        self.retry = 10                 # seconds a refused connection is tried again
+        self.offset = 0  # the console read so far
+        self.trace_offset = 0  # and the trace
+        self.boot = None  # the process they belong to; a reset starts them over
+        self.retry = 10  # seconds a refused connection is tried again
         hostport = url.split("//", 1)[1].rstrip("/")
         self._host, port = hostport.rsplit(":", 1)
         self._port = int(port)
 
     @classmethod
-    def launch(cls, program, drive, board_file=None, board=None, headless=True, args=(), timeout=15, env=None,
-               fast_time=False):
+    def launch(
+        cls,
+        program,
+        drive,
+        board_file=None,
+        board=None,
+        headless=True,
+        args=(),
+        timeout=15,
+        env=None,
+        fast_time=False,
+    ):
         """Start program on drive with --api 0 and a token of its own; stderr is read for the port.
         fast_time: its sleeps return at once and move its clock on (--fast-time)."""
         token = secrets.token_hex(16)
@@ -114,13 +139,20 @@ class Board:
         if fast_time:
             command += ["--fast-time"]
         command += list(args)
-        p = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                             stderr=subprocess.PIPE, env=e, cwd=os.path.dirname(os.path.abspath(drive)),
-                             preexec_fn=_die_with_parent if os.name != "nt" else None)
+        p = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            env=e,
+            cwd=os.path.dirname(os.path.abspath(drive)),
+            preexec_fn=_die_with_parent if os.name != "nt" else None,
+        )
         _tie_to_this_process(p)
         # stderr is read on a thread from the start: the announcement within timeout even when the
         # program prints nothing, and afterwards so the program never blocks writing to it.
         import threading
+
         lines, found = [], []
         announced = threading.Event()
 
@@ -132,6 +164,7 @@ class Board:
                     found.append(m)
                     announced.set()
             announced.set()
+
         threading.Thread(target=drain, daemon=True).start()
         announced.wait(timeout)
         if not found:
@@ -164,10 +197,17 @@ class Board:
                 r = c.getresponse()
                 data = r.read()
                 break
-            except (ConnectionRefusedError, ConnectionResetError, http.client.RemoteDisconnected) as e:
+            except (
+                ConnectionRefusedError,
+                ConnectionResetError,
+                http.client.RemoteDisconnected,
+            ) as e:
                 cut = not isinstance(e, ConnectionRefusedError)
-                if (cut and method != "GET") or time.time() > end or (
-                        self.process is not None and self.process.poll() is not None):
+                if (
+                    (cut and method != "GET")
+                    or time.time() > end
+                    or (self.process is not None and self.process.poll() is not None)
+                ):
                     raise
                 time.sleep(0.1)
             finally:
@@ -177,7 +217,10 @@ class Board:
                 answer = json.loads(data)
                 # A panel answer names the lines that failed.
                 message = answer.get("error") or "; ".join(
-                    "%s: %s" % (x["line"], x["error"]) for x in answer.get("results", []) if not x["ok"])
+                    "%s: %s" % (x["line"], x["error"])
+                    for x in answer.get("results", [])
+                    if not x["ok"]
+                )
             except ValueError:
                 message = data.decode(errors="replace")
             raise ApiError(r.status, message)
@@ -194,7 +237,10 @@ class Board:
         return self._stream("/api/console", "offset", since, wait, timeout)
 
     def _stream(self, path, attr, since, wait, timeout):
-        q = {"since": getattr(self, attr) if since is None else since, "timeout": int(timeout * 1000)}
+        q = {
+            "since": getattr(self, attr) if since is None else since,
+            "timeout": int(timeout * 1000),
+        }
         if wait is not None:
             q["wait"] = wait
         r = self.request("GET", path + "?" + urlencode(q), timeout=timeout + 30)
@@ -211,7 +257,9 @@ class Board:
         and moves past it. TimeoutError, with what came, when it does not appear."""
         r = self.console(wait=text, timeout=timeout)
         if not r["matched"]:
-            raise TimeoutError("%r not seen in %s s; the console: %r" % (text, timeout, r["data"][-800:]))
+            raise TimeoutError(
+                "%r not seen in %s s; the console: %r" % (text, timeout, r["data"][-800:])
+            )
         self.offset = r["next"]
         return upto_next(r)
 
@@ -231,7 +279,9 @@ class Board:
         """Waits for text in the trace after the last read; returns the lines up to it."""
         r = self.trace(wait=text, timeout=timeout)
         if not r["matched"]:
-            raise TimeoutError("%r not in the trace in %s s: %r" % (text, timeout, r["data"][-800:]))
+            raise TimeoutError(
+                "%r not in the trace in %s s: %r" % (text, timeout, r["data"][-800:])
+            )
         self.trace_offset = r["next"]
         return upto_next(r)
 
@@ -243,9 +293,12 @@ class Board:
 
     def run(self, code, interrupt=False, timeout=10):
         """The exec answer as the server gives it: ok, output, value, error."""
-        return self.request("POST", "/api/exec", body={"code": code, "interrupt": interrupt,
-                                                        "timeout_ms": int(timeout * 1000)},
-                            timeout=timeout + 30)
+        return self.request(
+            "POST",
+            "/api/exec",
+            body={"code": code, "interrupt": interrupt, "timeout_ms": int(timeout * 1000)},
+            timeout=timeout + 30,
+        )
 
     def exec(self, code, interrupt=False, timeout=10):
         """Runs code in the REPL; returns what it printed. CircuitPythonError when it raised or
@@ -275,7 +328,9 @@ class Board:
 
     def display(self, name=None):
         """A display's picture as PNG bytes: board.DISPLAY, or a board file's display by name."""
-        return self.request("GET", "/api/display" + ("?" + urlencode({"name": name}) if name else ""), raw=True)
+        return self.request(
+            "GET", "/api/display" + ("?" + urlencode({"name": name}) if name else ""), raw=True
+        )
 
     def part(self, name):
         for p in self.state()["parts"]:

@@ -164,4 +164,3 @@ int host_ping_ms(uint32_t address, int timeout_ms) {
     close(s);
     return ready == 1 ? (int)_ms_since(&start) : -1;
 }
-

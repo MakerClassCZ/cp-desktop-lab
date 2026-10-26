@@ -184,4 +184,3 @@ bool hid_host_exchange(const uint8_t cmd[HID_REPORT_SIZE], uint8_t reply[HID_REP
     memcpy(reply, in + 1, HID_REPORT_SIZE);
     return true;
 }
-

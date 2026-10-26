@@ -3,9 +3,10 @@
 rgbmatrix.RGBMatrix (as adafruit_matrixportal builds it, through framebufferio) shows on the
 panel as the display MATRIX; the test reads its picture through the control API.
 """
+
 from harness import check, launch, picture, seen
 
-PINS = '''[pins]
+PINS = """[pins]
 MTX_R1 = "GPIO14"
 MTX_G1 = "GPIO15"
 MTX_B1 = "GPIO16"
@@ -19,9 +20,10 @@ MTX_ADDRD = "GPIO23"
 MTX_CLK = "GPIO25"
 MTX_LAT = "GPIO26"
 MTX_OE = "GPIO27"
-'''
+"""
 
-with launch('''import board, displayio, framebufferio, rgbmatrix, time
+with launch(
+    """import board, displayio, framebufferio, rgbmatrix, time
 displayio.release_displays()
 matrix = rgbmatrix.RGBMatrix(width=64, bit_depth=4,
     rgb_pins=[board.MTX_R1, board.MTX_G1, board.MTX_B1, board.MTX_R2, board.MTX_G2, board.MTX_B2],
@@ -46,7 +48,9 @@ matrix.brightness = 0
 print("dark", matrix.brightness)
 while True:
     time.sleep(1)
-''', PINS) as b:
+""",
+    PINS,
+) as b:
     seen(b, "drawn")
     img = picture(b, "MATRIX")
     seen(b, "dark")
@@ -56,7 +60,15 @@ check("RGBMatrix: 64 wide, 32 high from four address pins", "matrix 64 32" in ou
 check("the panel's MATRIX is 64x32", img is not None and img[:2] == (64, 32), img and img[:2])
 if img:
     w, h, px = img
-    check("the red square at the bottom right", px(60, 28)[0] > 200 and px(60, 28)[2] < 50, px(60, 28))
+    check(
+        "the red square at the bottom right",
+        px(60, 28)[0] > 200 and px(60, 28)[2] < 50,
+        px(60, 28),
+    )
     check("blue elsewhere", px(2, 2)[2] > 200 and px(2, 2)[0] < 50, px(2, 2))
-check("brightness 0 darkens the matrix", "dark 0.0" in out and dark[2](2, 2) == (0, 0, 0), (out, dark[2](2, 2)))
+check(
+    "brightness 0 darkens the matrix",
+    "dark 0.0" in out and dark[2](2, 2) == (0, 0, 0),
+    (out, dark[2](2, 2)),
+)
 print("DONE")

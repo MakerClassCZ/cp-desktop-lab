@@ -114,7 +114,8 @@ static void _bmp280_read(i2c_virtual_device_t *dev, uint8_t *data, size_t len) {
 
 const i2c_virtual_model_t i2c_model_bme280 = {
     "bme280", 0x77, 3, {
-        { "temp", "C", -40, 85, 22, 2 }, { "hum", "%", 0, 100, 45, 1 }, { "press", "hPa", 300, 1100, 1013.25, 2 } },
+        { "temp", "C", -40, 85, 22, 2 }, { "hum", "%", 0, 100, 45, 1 }, { "press", "hPa", 300, 1100, 1013.25, 2 }
+    },
     i2c_model_plain_write, _bme280_read
 };
 

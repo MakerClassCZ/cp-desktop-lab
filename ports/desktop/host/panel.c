@@ -199,7 +199,7 @@ static int _height(void) {
     uint16_t cols, rows;
     bool serpentine;
     size_t count;
-    const uint8_t (*rgbw)[4];
+    const uint8_t(*rgbw)[4];
     for (size_t i = 0; neopixel_emu_strip(i, &cols, &rows, &serpentine, &count, &rgbw); i++) {
         h += rows * _cell(cols) + PAD;
     }
@@ -220,7 +220,7 @@ static void _draw_neopixels(void) {
     uint16_t cols, rows;
     bool serpentine;
     size_t count;
-    const uint8_t (*rgbw)[4];
+    const uint8_t(*rgbw)[4];
     for (size_t i = 0; neopixel_emu_strip(i, &cols, &rows, &serpentine, &count, &rgbw); i++) {
         int c = _cell(cols);
         int gap = c >= 8 ? c / 6 : 0;
@@ -497,7 +497,7 @@ static bool _open(void) {
 void panel_task(void) {
     parts_poll();
     if (_failed || _hidden || (parts_count() == 0 && neopixel_emu_strips() == 0 && !gamepad_shown()
-        && vdisplay_count() == 0)) {
+                               && vdisplay_count() == 0)) {
         return;
     }
     if (_window == NULL && !_open()) {
@@ -706,7 +706,7 @@ void panel_state_json(api_buf_t *b) {
         uint16_t cols, rows;
         bool serpentine;
         size_t count;
-        const uint8_t (*rgbw)[4];
+        const uint8_t(*rgbw)[4];
         if (!neopixel_emu_strip(i, &cols, &rows, &serpentine, &count, &rgbw)) {
             continue;
         }
@@ -852,7 +852,7 @@ bool panel_event(const SDL_Event *e) {
 bool panel_command(const char *line) {
     char verb[16];
     if (sscanf(line, "%15s", verb) != 1 || (strcmp(verb, "set") != 0 && strcmp(verb, "press") != 0 && strcmp(verb, "release") != 0
-        && strcmp(verb, "turn") != 0 && strcmp(verb, "dump") != 0 && strcmp(verb, "send") != 0)) {
+                                            && strcmp(verb, "turn") != 0 && strcmp(verb, "dump") != 0 && strcmp(verb, "send") != 0)) {
         return false;
     }
     SDL_Event event = { 0 };

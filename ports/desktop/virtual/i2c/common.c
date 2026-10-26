@@ -22,7 +22,7 @@ void i2c_model_st_write(i2c_virtual_device_t *dev, const uint8_t *data, size_t l
     for (size_t i = 1; i < len; i++) {
         dev->regs[dev->pointer] = data[i];
         if (dev->pointer == reset_reg) {
-            dev->regs[reset_reg] &= (uint8_t)~reset_bit;
+            dev->regs[reset_reg] &= (uint8_t) ~reset_bit;
         }
         dev->pointer = (dev->pointer + 1) & 0x7f;
     }

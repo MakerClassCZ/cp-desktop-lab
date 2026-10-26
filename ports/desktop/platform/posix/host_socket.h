@@ -44,4 +44,3 @@ static inline int host_sock_close(int fd) {
 static inline int host_sock_set_nonblocking(int fd) {
     return fcntl(fd, F_SETFL, O_NONBLOCK);
 }
-

@@ -42,11 +42,20 @@ static unsigned _hd_sta, _su_sto, _idle, _delay;
 
 static void _timings(uint32_t frequency) {
     if (frequency <= 100000) {
-        _hd_sta = 4; _su_sto = 4; _idle = 5; _delay = 5;
+        _hd_sta = 4;
+        _su_sto = 4;
+        _idle = 5;
+        _delay = 5;
     } else if (frequency <= 400000) {
-        _hd_sta = 2; _su_sto = 2; _idle = 2; _delay = 2;
+        _hd_sta = 2;
+        _su_sto = 2;
+        _idle = 2;
+        _delay = 2;
     } else {
-        _hd_sta = 1; _su_sto = 1; _idle = 1; _delay = 1;
+        _hd_sta = 1;
+        _su_sto = 1;
+        _idle = 1;
+        _delay = 1;
     }
 }
 
@@ -89,15 +98,23 @@ static void _stop(void) {
 
 // A byte out, then SDA released and the acknowledge bit clocked in (one byte back per call).
 static void _byte_out(uint8_t byte_out) {
-    _put(0x11); _put(0x00); _put(0x00); _put(byte_out);
+    _put(0x11);
+    _put(0x00);
+    _put(0x00);
+    _put(byte_out);
     _lines(CLK_LO_DATA_HI, 1);
-    _put(0x22); _put(0x00);
+    _put(0x22);
+    _put(0x00);
 }
 
 // A byte in (one byte back), then our acknowledge or, for the last byte, none.
 static void _byte_in(bool last) {
-    _put(0x20); _put(0x00); _put(0x00);
-    _put(0x13); _put(0x00); _put(last ? 0xFF : 0x00);
+    _put(0x20);
+    _put(0x00);
+    _put(0x00);
+    _put(0x13);
+    _put(0x00);
+    _put(last ? 0xFF : 0x00);
     _lines(CLK_LO_DATA_HI, _delay);
 }
 

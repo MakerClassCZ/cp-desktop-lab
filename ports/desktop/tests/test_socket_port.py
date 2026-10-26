@@ -4,6 +4,7 @@ A TCP socket whose port is taken, or below 1024 without root on Linux, binds to 
 (or the ports after its own when that is 8080 or more) and says so on the console. UDP keeps its
 port: a protocol may need it.
 """
+
 import os, re, socket, time
 from harness import Run, check, drive
 
@@ -26,7 +27,7 @@ def free_pair():
     raise RuntimeError("no free ports")
 
 
-SERVER = '''import wifi, socketpool
+SERVER = """import wifi, socketpool
 pool = socketpool.SocketPool(wifi.radio)
 s = pool.socket(pool.AF_INET, pool.SOCK_STREAM)
 s.bind(("0.0.0.0", %d))
@@ -37,7 +38,7 @@ c, addr = s.accept()
 c.send(b"moved")
 c.close()
 print("served")
-'''
+"""
 
 
 def fetch(port):
@@ -61,7 +62,11 @@ r = start(SERVER % taken)
 got = fetch(taken + 1) if r.wait_for("listening", 15) else b""
 r.stop()
 blocker.close()
-check("a taken TCP port moves to the next one", "port %d is in use, using %d" % (taken, taken + 1) in r.text(), r.text())
+check(
+    "a taken TCP port moves to the next one",
+    "port %d is in use, using %d" % (taken, taken + 1) in r.text(),
+    r.text(),
+)
 check("and the server answers there", got == b"moved", got)
 
 # Below 1024 without root on Linux: 8080 or the first free one after it
@@ -71,7 +76,11 @@ if os.name != "nt" and os.geteuid() != 0:
     m = re.search(r"port 80 is not allowed, using (\d+)", r.text())
     got = fetch(int(m.group(1))) if m else b""
     r.stop()
-    check("port 80 without root moves to 8080 or after", m is not None and int(m.group(1)) >= 8080, r.text())
+    check(
+        "port 80 without root moves to 8080 or after",
+        m is not None and int(m.group(1)) >= 8080,
+        r.text(),
+    )
     check("and the server answers there", got == b"moved", got)
 else:
     print("SKIP port 80 needs no root here")
@@ -79,7 +88,8 @@ else:
 # UDP keeps its port: the bind fails as it would on a board with the port taken
 udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 udp.bind(("", taken))
-r = start('''import wifi, socketpool
+r = start(
+    """import wifi, socketpool
 pool = socketpool.SocketPool(wifi.radio)
 u = pool.socket(pool.AF_INET, pool.SOCK_DGRAM)
 try:
@@ -87,9 +97,15 @@ try:
     print("udp bound")
 except OSError as e:
     print("udp refused", e)
-''' % taken)
+"""
+    % taken
+)
 r.wait_for("udp ", 15)
 r.stop()
 udp.close()
-check("a taken UDP port is refused, not moved", "udp refused" in r.text() and "using" not in r.text(), r.text())
+check(
+    "a taken UDP port is refused, not moved",
+    "udp refused" in r.text() and "using" not in r.text(),
+    r.text(),
+)
 print("DONE")

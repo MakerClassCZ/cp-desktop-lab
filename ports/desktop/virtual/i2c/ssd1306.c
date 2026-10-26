@@ -13,13 +13,26 @@
 // The parameters each command takes; the rest take none.
 static uint8_t _ssd1306_params(uint8_t command) {
     switch (command) {
-        case 0x20: case 0x81: case 0x8d: case 0xa8: case 0xad: case 0xd3: case 0xd5: case 0xd9: case 0xda: case 0xdb:
+        case 0x20:
+        case 0x81:
+        case 0x8d:
+        case 0xa8:
+        case 0xad:
+        case 0xd3:
+        case 0xd5:
+        case 0xd9:
+        case 0xda:
+        case 0xdb:
             return 1;
-        case 0x21: case 0x22: case 0xa3:
+        case 0x21:
+        case 0x22:
+        case 0xa3:
             return 2;
-        case 0x29: case 0x2a:
+        case 0x29:
+        case 0x2a:
             return 5;
-        case 0x26: case 0x27:
+        case 0x26:
+        case 0x27:
             return 6;
         default:
             return 0;

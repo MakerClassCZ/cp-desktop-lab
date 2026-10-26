@@ -16,6 +16,7 @@ happened; report prints the counts. N larger than the repository takes every cod
 SETTINGS=1 gives a project that brings no settings.toml made-up Wi-Fi and Adafruit IO settings, and
 any other name its code reads with getenv (a token, a city id) made up too.
 """
+
 import json, os, random, re, shutil, subprocess, sys, time
 
 IMPORT = re.compile(r"^\s*(?:import\s+([\w., ]+)|from\s+([\w.]+)\s+import\b)", re.M)
@@ -61,14 +62,20 @@ def prepare(guides, work, n=200, seed=2026):
                 local.add(name[:-3])
                 sources.append(open(path, encoding="utf-8", errors="replace").read())
             elif os.path.isdir(path) and os.path.exists(os.path.join(path, "__init__.py")):
-                shutil.copytree(path, os.path.join(drive, name), ignore=shutil.ignore_patterns("*.mpy"))
+                shutil.copytree(
+                    path, os.path.join(drive, name), ignore=shutil.ignore_patterns("*.mpy")
+                )
                 local.add(name)
         for s in sources:
             wanted |= imports(s) - local
         index.append({"n": i, "guide": rel})
     with open(os.path.join(work, "libdrive", "code.py"), "w") as f:
         f.write("".join("import %s\n" % name for name in sorted(wanted)))
-    json.dump({"found": len(found), "seed": seed, "picked": index}, open(os.path.join(work, "index.json"), "w"), indent=1)
+    json.dump(
+        {"found": len(found), "seed": seed, "picked": index},
+        open(os.path.join(work, "index.json"), "w"),
+        indent=1,
+    )
     print("code.py files:", len(found), "picked:", len(picked), "imports to look up:", len(wanted))
 
 
@@ -79,7 +86,10 @@ def classify(text, still_running):
             return "finished", ""
         return ("running" if still_running else "finished"), ""
     lines = [l.strip() for l in text[tb:].splitlines() if l.strip()]
-    err = next((l for l in lines[1:] if not l.startswith("File ") and not l.startswith("Traceback")), lines[-1])
+    err = next(
+        (l for l in lines[1:] if not l.startswith("File ") and not l.startswith("Traceback")),
+        lines[-1],
+    )
     m = re.match(r"ImportError: no module named '([\w.]+)'", err)
     if m:
         return "missing module", m.group(1)
@@ -107,24 +117,35 @@ def _read(path):
 
 RAN = ("running", "finished")
 
+
 # The board file a program is written for, from its project's path and the board names it uses.
 def board_for(work, entry):
     drive = os.path.join(work, "drives", "%03d" % entry["n"])
-    source = "".join(open(os.path.join(drive, f), encoding="utf-8", errors="replace").read()
-                     for f in os.listdir(drive) if f.endswith(".py"))
+    source = "".join(
+        open(os.path.join(drive, f), encoding="utf-8", errors="replace").read()
+        for f in os.listdir(drive)
+        if f.endswith(".py")
+    )
     path = entry["guide"].lower()
     if "magtag" in source.lower() or "magtag" in path:
         return "magtag"
     if "adafruit_clue" in source or re.search(r"(^|/|_)clue", path):
         return "clue"
-    if re.search(r"matrix.?portal", path, re.I) or "adafruit_matrixportal" in source or "MTX_" in source:
+    if (
+        re.search(r"matrix.?portal", path, re.I)
+        or "adafruit_matrixportal" in source
+        or "MTX_" in source
+    ):
         return "matrixportal"
     if "pygamer" in path or "pygamer" in source.lower():
         return "pygamer"
     if re.search(r"pybadge|edgebadge|pybadger", path) or "pybadger" in source:
         return "pybadge"
-    if ("circuitplayground" in source or re.search(r"board\.(SLIDE_SWITCH|ACCELEROMETER_\w+)", source)
-            or re.search(r"circuit_?playground|cpx|cpb|bluefruit", path)):
+    if (
+        "circuitplayground" in source
+        or re.search(r"board\.(SLIDE_SWITCH|ACCELEROMETER_\w+)", source)
+        or re.search(r"circuit_?playground|cpx|cpb|bluefruit", path)
+    ):
         return "circuitplayground"
     if re.search(r"board\.GP\d+", source) or "pico" in path:
         return "pico"
@@ -135,11 +156,11 @@ def board_for(work, entry):
 
 # What a guide keeps in settings.toml, made up, for a project that brings none: its program gets
 # past reading them and reaches the network (SETTINGS=1).
-SETTINGS = '''CIRCUITPY_WIFI_SSID = "survey"
+SETTINGS = """CIRCUITPY_WIFI_SSID = "survey"
 CIRCUITPY_WIFI_PASSWORD = "survey-password"
 ADAFRUIT_AIO_USERNAME = "survey"
 ADAFRUIT_AIO_KEY = "aio_survey"
-'''
+"""
 
 
 def made_up_settings(drive):
@@ -151,12 +172,17 @@ def made_up_settings(drive):
             continue
         for f in files:
             if f.endswith(".py"):
-                names.update(re.findall(r"getenv\(\s*[\"'](\w+)[\"']", open(os.path.join(root, f), errors="replace").read()))
+                names.update(
+                    re.findall(
+                        r"getenv\(\s*[\"'](\w+)[\"']",
+                        open(os.path.join(root, f), errors="replace").read(),
+                    )
+                )
     text = SETTINGS
     for name in sorted(names):
         if not re.search(r"^%s\s*=" % name, text, re.M):
             number = re.search(r"id$|celsius|offset|count|interval|zip", name, re.I)
-            text += '%s = %s\n' % (name, "1" if number else '"survey"')
+            text += "%s = %s\n" % (name, "1" if number else '"survey"')
     return text
 
 
@@ -168,7 +194,13 @@ def run(work, binary, seconds=10.0, board="virtual", board_file=None):
     lib = os.path.join(work, "libdrive", "lib")
     env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy")
     auto = board_file is not None and os.path.isdir(board_file)
-    tag = board + ("-auto" if auto else "-" + os.path.splitext(os.path.basename(board_file))[0] if board_file else "")
+    tag = board + (
+        "-auto"
+        if auto
+        else "-" + os.path.splitext(os.path.basename(board_file))[0]
+        if board_file
+        else ""
+    )
     results_path = os.path.join(work, "results-%s.json" % tag)
     before = {}
     if auto and os.path.exists(results_path) and os.environ.get("FRESH") != "1":
@@ -182,14 +214,28 @@ def run(work, binary, seconds=10.0, board="virtual", board_file=None):
             os.symlink(lib, os.path.join(drive, "lib"))
         settings = os.path.join(drive, "settings.toml")
         # Made up where the project brings none, or the made-up ones of an earlier run.
-        if os.environ.get("SETTINGS") == "1" and (not os.path.exists(settings) or open(settings).read().startswith(SETTINGS)):
+        if os.environ.get("SETTINGS") == "1" and (
+            not os.path.exists(settings) or open(settings).read().startswith(SETTINGS)
+        ):
             open(settings, "w").write(made_up_settings(drive))
         chosen = board_for(work, entry) if auto else None
         log_path = os.path.join(work, "log-%03d.txt" % entry["n"])
         with open(log_path, "wb") as log:
-            extra = ["--board-file", os.path.join(board_file, chosen + ".toml") if auto else board_file] if board_file else []
-            p = subprocess.Popen([binary, "--drive", drive, "--board", board] + extra, stdin=subprocess.DEVNULL,
-                                 stdout=log, stderr=subprocess.STDOUT, env=env)
+            extra = (
+                [
+                    "--board-file",
+                    os.path.join(board_file, chosen + ".toml") if auto else board_file,
+                ]
+                if board_file
+                else []
+            )
+            p = subprocess.Popen(
+                [binary, "--drive", drive, "--board", board] + extra,
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                env=env,
+            )
             end = time.time() + seconds
             while time.time() < end and p.poll() is None:
                 text = _read(log_path)
@@ -206,6 +252,7 @@ def run(work, binary, seconds=10.0, board="virtual", board_file=None):
 
     # JOBS programs at a time: each sleeps most of its seconds, so a whole repository takes minutes.
     from concurrent.futures import ThreadPoolExecutor
+
     with ThreadPoolExecutor(int(os.environ.get("JOBS", "1"))) as pool:
         results = list(pool.map(one, index["picked"]))
     json.dump(results, open(results_path, "w"), indent=1)
@@ -218,7 +265,10 @@ def files(guides, work, board="virtual"):
     results = json.load(open(os.path.join(work, "results-%s-auto.json" % board)))
     wanted = [r for r in results if r["kind"] == "missing file"]
     folders = sorted({os.path.dirname(r["guide"]) for r in wanted})
-    subprocess.run(["git", "-C", guides, "sparse-checkout", "add"] + ["/%s/**" % f for f in folders], check=True)
+    subprocess.run(
+        ["git", "-C", guides, "sparse-checkout", "add"] + ["/%s/**" % f for f in folders],
+        check=True,
+    )
     copied = 0
     for r in wanted:
         src = os.path.join(guides, os.path.dirname(r["guide"]))
@@ -228,7 +278,11 @@ def files(guides, work, board="virtual"):
             for name in names:
                 path = os.path.join(root, name)
                 target = os.path.join(drive, os.path.relpath(path, src))
-                if name.endswith(".py") or os.path.exists(target) or os.path.getsize(path) > 8 * 1024 * 1024:
+                if (
+                    name.endswith(".py")
+                    or os.path.exists(target)
+                    or os.path.getsize(path) > 8 * 1024 * 1024
+                ):
                     continue
                 os.makedirs(os.path.dirname(target), exist_ok=True)
                 shutil.copy(path, target)
@@ -252,11 +306,19 @@ def seed(work, board="virtual"):
         mine = runs.get(chosen, runs.get("feather"))[entry["n"]]
         results.append(dict(ran or mine, board=chosen))
     json.dump(results, open(os.path.join(work, "results-%s-auto.json" % board), "w"), indent=1)
-    print("seeded from", sorted(runs), "ran", sum(r["kind"] in RAN for r in results), "of", len(results))
+    print(
+        "seeded from",
+        sorted(runs),
+        "ran",
+        sum(r["kind"] in RAN for r in results),
+        "of",
+        len(results),
+    )
 
 
 def report(work):
     from collections import Counter
+
     for name in sorted(os.listdir(work)):
         if not name.startswith("results-"):
             continue
@@ -275,8 +337,13 @@ if __name__ == "__main__":
     if cmd == "prepare":
         prepare(sys.argv[2], sys.argv[3], *(int(a) for a in sys.argv[4:6]))
     elif cmd == "run":
-        run(sys.argv[2], sys.argv[3], float(sys.argv[4]) if len(sys.argv) > 4 else 10.0, sys.argv[5] if len(sys.argv) > 5 else "virtual",
-            sys.argv[6] if len(sys.argv) > 6 else None)
+        run(
+            sys.argv[2],
+            sys.argv[3],
+            float(sys.argv[4]) if len(sys.argv) > 4 else 10.0,
+            sys.argv[5] if len(sys.argv) > 5 else "virtual",
+            sys.argv[6] if len(sys.argv) > 6 else None,
+        )
     elif cmd == "files":
         files(sys.argv[2], sys.argv[3])
     elif cmd == "seed":

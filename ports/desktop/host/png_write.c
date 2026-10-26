@@ -95,7 +95,7 @@ size_t png_write_rgb565(const uint16_t *pixels, uint16_t width, uint16_t height,
         *z++ = done + n == raw_len ? 1 : 0;
         *z++ = (uint8_t)n;
         *z++ = (uint8_t)(n >> 8);
-        *z++ = (uint8_t)~n;
+        *z++ = (uint8_t) ~n;
         *z++ = (uint8_t)(~n >> 8);
         memcpy(z, raw + done, n);
         for (size_t i = 0; i < n; i++) {

@@ -92,4 +92,3 @@ static inline int host_sock_set_nonblocking(int fd) {
     u_long one = 1;
     return ioctlsocket(fd, FIONBIO, &one);
 }
-

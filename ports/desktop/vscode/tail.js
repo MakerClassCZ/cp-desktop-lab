@@ -6,9 +6,9 @@ const READ_MAX = 60 * 1024;         // read per poll, so a burst cannot take all
 const PARTIAL_MAX = 1024 * 1024;    // a line without an end is passed on once it is this long
 
 class FileTail {
-    constructor(path, onText, intervalMs = 200) {
+    constructor(path, onChunk, intervalMs = 200) {
         this.path = path;
-        this.onText = onText;
+        this.onChunk = onChunk;
         this.intervalMs = intervalMs;
         this.offset = 0;
         this.partial = '';
@@ -61,7 +61,7 @@ class FileTail {
         }
         this.partial = text.slice(end);
         if (end > 0) {
-            this.onText(text.slice(0, end));
+            this.onChunk(text.slice(0, end));
         }
     }
 }

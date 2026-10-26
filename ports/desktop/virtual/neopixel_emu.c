@@ -24,7 +24,7 @@ typedef struct {
     char order[5];
     uint8_t bpp;
     size_t count;
-    uint8_t (*rgbw)[4];
+    uint8_t(*rgbw)[4];
 } strip_t;
 
 static strip_t _strips[NEOPIXEL_EMU_STRIPS];
@@ -125,7 +125,7 @@ void neopixel_emu_write(uint8_t pin, const uint8_t *data, size_t len) {
         }
         memcpy(s->rgbw[p], px, 4);
     }
-    bus_trace_neopixel(pin, (const uint8_t (*)[4])s->rgbw, n, s->bpp == 4);
+    bus_trace_neopixel(pin, (const uint8_t(*)[4])s->rgbw, n, s->bpp == 4);
     panel_changed();
 }
 
@@ -141,6 +141,6 @@ bool neopixel_emu_strip(size_t i, uint16_t *cols, uint16_t *rows, bool *serpenti
     *rows = _strips[i].rows;
     *serpentine = _strips[i].serpentine;
     *count = _strips[i].count;
-    *rgbw = (const uint8_t (*)[4])_strips[i].rgbw;
+    *rgbw = (const uint8_t(*)[4])_strips[i].rgbw;
     return true;
 }

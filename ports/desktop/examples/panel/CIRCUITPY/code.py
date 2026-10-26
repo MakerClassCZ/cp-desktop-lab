@@ -42,7 +42,7 @@ def output(pin):
 strip = output(board.NEOPIXEL)
 matrix = output(board.MATRIX)
 led = output(board.LED)
-button = digitalio.DigitalInOut(board.BUTTON)       # reads low while pressed
+button = digitalio.DigitalInOut(board.BUTTON)  # reads low while pressed
 switch = digitalio.DigitalInOut(board.SWITCH)
 knob = analogio.AnalogIn(board.KNOB)
 meter = analogio.AnalogOut(board.METER)
@@ -51,7 +51,9 @@ servo = pwmio.PWMOut(board.SERVO, frequency=50)
 pad = touchio.TouchIn(board.PAD)
 mic = audiobusio.PDMIn(board.MIC_CLK, board.MIC_DATA, sample_rate=16000, bit_depth=16)
 speaker = audiobusio.I2SOut(board.I2S_BCLK, board.I2S_WS, board.I2S_DATA)
-beep = audiocore.RawSample(array.array("h", [int(math.sin(i * math.pi / 8) * 8000) for i in range(16)]), sample_rate=8000)
+beep = audiocore.RawSample(
+    array.array("h", [int(math.sin(i * math.pi / 8) * 8000) for i in range(16)]), sample_rate=8000
+)
 samples = array.array("H", [0] * 160)
 
 print("board panel demo: move KNOB, the microphone's slider, SWITCH; hold BUTTON or PAD")
@@ -60,7 +62,7 @@ last_print = 0
 while True:
     k = knob.value
     lamp.duty_cycle = k
-    servo.duty_cycle = int(65535 * (1 + k / 65535) / 20)    # a 1-2 ms pulse every 20 ms
+    servo.duty_cycle = int(65535 * (1 + k / 65535) / 20)  # a 1-2 ms pulse every 20 ms
     meter.value = k
 
     lit = k * 9 // 65536
@@ -93,5 +95,8 @@ while True:
     now = time.monotonic()
     if now - last_print >= 1:
         last_print = now
-        print("knob %5d  mic level %d/8  switch %s  pad %s  button %s" % (k, level, switch.value, pad.value, pressed))
+        print(
+            "knob %5d  mic level %d/8  switch %s  pad %s  button %s"
+            % (k, level, switch.value, pad.value, pressed)
+        )
     frame += 1

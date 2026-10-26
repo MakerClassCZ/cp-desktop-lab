@@ -149,4 +149,3 @@ bool serial_host_find_usb(uint16_t vid, uint16_t pid, char *path, size_t len) {
     SetupDiDestroyDeviceInfoList(set);
     return found;
 }
-

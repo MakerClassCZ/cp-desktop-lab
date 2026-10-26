@@ -51,14 +51,29 @@ static void _crickit_write(i2c_virtual_device_t *dev, const uint8_t *data, size_
     } else if (base == 0x01 && n > 0) {                 // GPIO
         uint64_t pins = _seesaw_pins(arg, n);
         switch (function) {
-            case 0x02: dev->gpio_output |= pins; break;     // DIRSET_BULK
-            case 0x03: dev->gpio_output &= ~pins; break;    // DIRCLR_BULK
-            case 0x05: dev->gpio_level |= pins; break;      // BULK_SET
-            case 0x06: dev->gpio_level &= ~pins; break;     // BULK_CLR
-            case 0x07: dev->gpio_level ^= pins; break;      // BULK_TOGGLE
-            case 0x0b: dev->gpio_pull |= pins; break;       // PULLENSET
-            case 0x0c: dev->gpio_pull &= ~pins; break;      // PULLENCLR
-            default: break;
+            case 0x02:
+                dev->gpio_output |= pins;
+                break;                                      // DIRSET_BULK
+            case 0x03:
+                dev->gpio_output &= ~pins;
+                break;                                      // DIRCLR_BULK
+            case 0x05:
+                dev->gpio_level |= pins;
+                break;                                      // BULK_SET
+            case 0x06:
+                dev->gpio_level &= ~pins;
+                break;                                      // BULK_CLR
+            case 0x07:
+                dev->gpio_level ^= pins;
+                break;                                      // BULK_TOGGLE
+            case 0x0b:
+                dev->gpio_pull |= pins;
+                break;                                      // PULLENSET
+            case 0x0c:
+                dev->gpio_pull &= ~pins;
+                break;                                      // PULLENCLR
+            default:
+                break;
         }
     } else if (base == 0x08 && n >= 3 && arg[0] < sizeof(_crickit_pwm) / sizeof(_crickit_pwm[0])) {    // TIMER
         uint16_t value = (uint16_t)(arg[1] << 8 | arg[2]);
@@ -117,6 +132,7 @@ static void _crickit_read(i2c_virtual_device_t *dev, uint8_t *data, size_t len) 
 const i2c_virtual_model_t i2c_model_crickit = {
     "crickit", 0x49, 4, {
         { "touch1", "", 0, 1023, 300, 0 }, { "touch2", "", 0, 1023, 300, 0 }, { "touch3", "", 0, 1023, 300, 0 },
-        { "touch4", "", 0, 1023, 300, 0 } },
+        { "touch4", "", 0, 1023, 300, 0 }
+    },
     _crickit_write, _crickit_read
 };

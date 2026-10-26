@@ -33,6 +33,7 @@ static void _apds9960_read(i2c_virtual_device_t *dev, uint8_t *data, size_t len)
 const i2c_virtual_model_t i2c_model_apds9960 = {
     "apds9960", 0x39, 4, {
         { "prox", "", 0, 255, 0, 0 }, { "red", "", 0, 4096, 300, 0 }, { "green", "", 0, 4096, 300, 0 },
-        { "blue", "", 0, 4096, 300, 0 } },
+        { "blue", "", 0, 4096, 300, 0 }
+    },
     i2c_model_plain_write, _apds9960_read
 };

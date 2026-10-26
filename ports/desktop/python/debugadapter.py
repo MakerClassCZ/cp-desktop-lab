@@ -24,7 +24,7 @@ import supervisor
 _OWN_FILES = ("debugadapter.py", "<debug>")
 # Ways a program stops that are no error to show.
 _NOT_ERRORS = ("KeyboardInterrupt", "SystemExit", "GeneratorExit", "ReloadException")
-_POLL_NS = 50000000     # how often the running program looks for editor requests
+_POLL_NS = 50000000  # how often the running program looks for editor requests
 _REPR_MAX = 200
 _PRIMITIVE = (int, float, str, bool, bytes, type(None))
 _THREAD = {"id": 1, "name": "main"}
@@ -55,9 +55,9 @@ class Adapter:
         self.seq = 1
         self.connected = False
         self.configured = False
-        self.breakpoints = {}           # "/lib/x.py" -> set of lines
+        self.breakpoints = {}  # "/lib/x.py" -> set of lines
         self.break_on_exception = False
-        self.mode = "run"               # run, step, next, out
+        self.mode = "run"  # run, step, next, out
         self.step_depth = 0
         self.pause_requested = False
         self.terminate_requested = False
@@ -66,8 +66,8 @@ class Adapter:
         self.frames = []
         self.handles = []
         self.last_poll = 0
-        self.raised = None              # (exception, "/x.py", line) where the latest one was raised
-        self.uncaught = False           # it reached code.py's own frame and nothing handled it there
+        self.raised = None  # (exception, "/x.py", line) where the latest one was raised
+        self.uncaught = False  # it reached code.py's own frame and nothing handled it there
 
     # -- paths -------------------------------------------------------------
 
@@ -78,13 +78,13 @@ class Adapter:
     def editor_to_rel(self, path):
         path = path.replace("\\", "/")
         if path.lower().startswith(self.drive.lower() + "/"):
-            return path[len(self.drive):]
+            return path[len(self.drive) :]
         return "/" + _basename(path)
 
     def rel_to_editor(self, rel):
         path = self.drive + rel
         if len(self.drive) > 1 and self.drive[1] == ":":
-            path = path.replace("/", "\\")     # a Windows path, as the editor spells it
+            path = path.replace("/", "\\")  # a Windows path, as the editor spells it
         return path
 
     # -- the wire ------------------------------------------------------------
@@ -148,8 +148,8 @@ class Adapter:
         start = head + 4
         if len(self.rx) < start + length:
             return None
-        body = bytes(self.rx[start:start + length])
-        self.rx = self.rx[start + length:]
+        body = bytes(self.rx[start : start + length])
+        self.rx = self.rx[start + length :]
         return json.loads(body)
 
     def read_message(self, block, timeout=0.2):
@@ -181,8 +181,12 @@ class Adapter:
         self.send({"type": "event", "event": name, "body": body or {}})
 
     def respond(self, request, body=None, error=None):
-        message = {"type": "response", "request_seq": request["seq"], "command": request["command"],
-                   "success": error is None}
+        message = {
+            "type": "response",
+            "request_seq": request["seq"],
+            "command": request["command"],
+            "success": error is None,
+        }
         if error is not None:
             message["message"] = error
         else:
@@ -206,14 +210,17 @@ class Adapter:
             self.respond(request, error="%s: %s" % (type(e).__name__, e))
 
     def on_initialize(self, request, args):
-        self.respond(request, {
-            "supportsConfigurationDoneRequest": True,
-            "supportsEvaluateForHovers": True,
-            "supportsTerminateRequest": True,
-            "exceptionBreakpointFilters": [
-                {"filter": "all", "label": "All exceptions", "default": False},
-            ],
-        })
+        self.respond(
+            request,
+            {
+                "supportsConfigurationDoneRequest": True,
+                "supportsEvaluateForHovers": True,
+                "supportsTerminateRequest": True,
+                "exceptionBreakpointFilters": [
+                    {"filter": "all", "label": "All exceptions", "default": False},
+                ],
+            },
+        )
         self.event("initialized")
 
     def on_setBreakpoints(self, request, args):
@@ -223,7 +230,9 @@ class Adapter:
             self.breakpoints[rel] = set(lines)
         else:
             self.breakpoints.pop(rel, None)
-        self.respond(request, {"breakpoints": [{"verified": True, "line": line} for line in lines]})
+        self.respond(
+            request, {"breakpoints": [{"verified": True, "line": line} for line in lines]}
+        )
 
     def on_setExceptionBreakpoints(self, request, args):
         self.break_on_exception = "all" in (args.get("filters") or [])
@@ -289,13 +298,15 @@ class Adapter:
         frames = []
         for i, frame in enumerate(self.frames):
             rel = self.rel_path(frame.f_code.co_filename)
-            frames.append({
-                "id": i + 1,
-                "name": frame.f_code.co_name,
-                "source": {"name": _basename(rel), "path": self.rel_to_editor(rel)},
-                "line": frame.f_lineno,
-                "column": 1,
-            })
+            frames.append(
+                {
+                    "id": i + 1,
+                    "name": frame.f_code.co_name,
+                    "source": {"name": _basename(rel), "path": self.rel_to_editor(rel)},
+                    "line": frame.f_lineno,
+                    "column": 1,
+                }
+            )
         self.respond(request, {"stackFrames": frames, "totalFrames": len(frames)})
 
     def frame_for(self, frame_id):
@@ -312,10 +323,23 @@ class Adapter:
     def on_scopes(self, request, args):
         frame = self.frame_for(args.get("frameId", 1))
         locals_, globals_ = self.namespaces(frame)
-        self.respond(request, {"scopes": [
-            {"name": "Locals", "variablesReference": self.handle_for(locals_), "expensive": False},
-            {"name": "Globals", "variablesReference": self.handle_for(globals_), "expensive": True},
-        ]})
+        self.respond(
+            request,
+            {
+                "scopes": [
+                    {
+                        "name": "Locals",
+                        "variablesReference": self.handle_for(locals_),
+                        "expensive": False,
+                    },
+                    {
+                        "name": "Globals",
+                        "variablesReference": self.handle_for(globals_),
+                        "expensive": True,
+                    },
+                ]
+            },
+        )
 
     def handle_for(self, value):
         self.handles.append(value)
@@ -369,11 +393,16 @@ class Adapter:
         except Exception as e:
             self.respond(request, error="%s: %s" % (type(e).__name__, e))
             return
-        self.respond(request, {
-            "result": _short(value),
-            "type": type(value).__name__,
-            "variablesReference": self.handle_for(value) if not isinstance(value, _PRIMITIVE) else 0,
-        })
+        self.respond(
+            request,
+            {
+                "result": _short(value),
+                "type": type(value).__name__,
+                "variablesReference": self.handle_for(value)
+                if not isinstance(value, _PRIMITIVE)
+                else 0,
+            },
+        )
 
     # -- tracing -------------------------------------------------------------
 
@@ -462,9 +491,16 @@ class Adapter:
         # An exception that ended code.py, for the editor's Problems panel.
         if self.connected and self.uncaught and self.raised is not None:
             exc, rel, line = self.raised
-            self.event("circuitpython.uncaught", {
-                "path": self.rel_to_editor(rel), "line": line,
-                "text": "%s: %s" % (type(exc).__name__, exc) if str(exc) else type(exc).__name__})
+            self.event(
+                "circuitpython.uncaught",
+                {
+                    "path": self.rel_to_editor(rel),
+                    "line": line,
+                    "text": "%s: %s" % (type(exc).__name__, exc)
+                    if str(exc)
+                    else type(exc).__name__,
+                },
+            )
         if self.connected:
             self.event("exited", {"exitCode": 0})
             self.event("terminated")

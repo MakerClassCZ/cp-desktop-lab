@@ -14,7 +14,11 @@ def run(image, expect):
 if os.path.exists(os.path.join(T, "new.img")):
     os.remove(os.path.join(T, "new.img"))
 ok, mapped, t = run("new.img", "Hello World!")
-check("new .img created, formatted, code.py runs", ok and os.path.isfile(os.path.join(T, "new.img")), t)
+check(
+    "new .img created, formatted, code.py runs",
+    ok and os.path.isfile(os.path.join(T, "new.img")),
+    t,
+)
 if os.path.exists("/proc"):
     check("the image is memory-mapped", mapped)
 ok, mapped, t = run("new.img", "Hello World!")

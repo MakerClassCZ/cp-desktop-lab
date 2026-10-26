@@ -49,23 +49,23 @@ struct libusb_device_descriptor {
 };
 
 static struct {
-    int (USB_CALL *init)(libusb_context **);
-    void (USB_CALL *exit)(libusb_context *);
-    ptrdiff_t (USB_CALL *get_device_list)(libusb_context *, libusb_device ***);
-    void (USB_CALL *free_device_list)(libusb_device **, int);
-    int (USB_CALL *get_device_descriptor)(libusb_device *, struct libusb_device_descriptor *);
-    int (USB_CALL *open)(libusb_device *, libusb_device_handle **);
-    void (USB_CALL *close)(libusb_device_handle *);
-    int (USB_CALL *get_configuration)(libusb_device_handle *, int *);
-    int (USB_CALL *set_configuration)(libusb_device_handle *, int);
-    int (USB_CALL *set_auto_detach_kernel_driver)(libusb_device_handle *, int);
-    int (USB_CALL *claim_interface)(libusb_device_handle *, int);
-    int (USB_CALL *release_interface)(libusb_device_handle *, int);
-    int (USB_CALL *control_transfer)(libusb_device_handle *, uint8_t, uint8_t, uint16_t, uint16_t, unsigned char *, uint16_t, unsigned);
-    int (USB_CALL *bulk_transfer)(libusb_device_handle *, unsigned char, unsigned char *, int, int *, unsigned);
+    int(USB_CALL * init)(libusb_context * *);
+    void(USB_CALL * exit)(libusb_context *);
+    ptrdiff_t(USB_CALL * get_device_list)(libusb_context *, libusb_device ***);
+    void(USB_CALL * free_device_list)(libusb_device * *, int);
+    int(USB_CALL * get_device_descriptor)(libusb_device *, struct libusb_device_descriptor *);
+    int(USB_CALL * open)(libusb_device *, libusb_device_handle **);
+    void(USB_CALL * close)(libusb_device_handle *);
+    int(USB_CALL * get_configuration)(libusb_device_handle *, int *);
+    int(USB_CALL * set_configuration)(libusb_device_handle *, int);
+    int(USB_CALL * set_auto_detach_kernel_driver)(libusb_device_handle *, int);
+    int(USB_CALL * claim_interface)(libusb_device_handle *, int);
+    int(USB_CALL * release_interface)(libusb_device_handle *, int);
+    int(USB_CALL * control_transfer)(libusb_device_handle *, uint8_t, uint8_t, uint16_t, uint16_t, unsigned char *, uint16_t, unsigned);
+    int(USB_CALL * bulk_transfer)(libusb_device_handle *, unsigned char, unsigned char *, int, int *, unsigned);
     const char *(USB_CALL *strerror)(int);
     libusb_device *(USB_CALL *get_device)(libusb_device_handle *);
-    int (USB_CALL *get_max_packet_size)(libusb_device *, unsigned char);
+    int(USB_CALL * get_max_packet_size)(libusb_device *, unsigned char);
 } _lib;
 
 static libusb_context *_ctx;
@@ -133,7 +133,7 @@ bool usb_host_load(char *err, size_t err_len) {
     LOAD(strerror, "libusb_strerror");
     LOAD(get_device, "libusb_get_device");
     LOAD(get_max_packet_size, "libusb_get_max_packet_size");
-    #undef LOAD
+#undef LOAD
     return true;
 }
 
