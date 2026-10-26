@@ -1,0 +1,110 @@
+# The desktop port (ports/desktop) alone: the Linux and Windows programs, their tests, and on a
+# desktop-v* tag a GitHub release with the packages. The steps live in ports/desktop/tools/ci-*.sh.
+name: Desktop port
+
+on:
+  push:
+    branches: [desktop]
+    tags: ['desktop-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux
+            runner: ubuntu-22.04
+          - target: linux
+            runner: ubuntu-22.04-arm
+          - target: windows
+            runner: ubuntu-22.04
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+          fetch-depth: 1
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Packages
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq libsdl2-dev p7zip-full
+          pip install -q -r requirements-dev.txt
+      - name: Version
+        # From adafruit/circuitpython's tags, as its own builds do.
+        run: |
+          git fetch -q --no-recurse-submodules --shallow-since="2021-07-01" --tags https://github.com/adafruit/circuitpython HEAD
+          git fetch -q --no-recurse-submodules --shallow-since="2021-07-01" origin $GITHUB_SHA
+          echo "CP_VERSION=$(python py/version.py)" >> $GITHUB_ENV
+      - uses: actions/setup-node@v4
+        if: matrix.target == 'windows'
+        with:
+          node-version: '20'
+      - name: VS Code extension
+        if: matrix.target == 'windows'
+        working-directory: ports/desktop/vscode
+        run: npx --yes @vscode/vsce@3.6.0 package --allow-missing-repository --skip-license
+      - name: Build
+        run: sh ports/desktop/tools/ci-build.sh ${{ matrix.target }} dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}-${{ runner.arch }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+          if-no-files-found: error
+      - name: Tests (Linux)
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get install -yq socat
+          sh ports/desktop/tools/ci-test.sh ports/desktop/build-linux/circuitpython
+
+  test-windows:
+    needs: build
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+          fetch-depth: 1
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-X64
+      - name: Tests
+        shell: bash
+        run: |
+          7z x -y circuitpython-windows-x64.zip > /dev/null
+          PYTHON=python sh ports/desktop/tools/ci-test.sh circuitpython-windows-x64/circuitpython.exe
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: [build, test-windows]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --prerelease \
+            --title "CircuitPython desktop $GITHUB_REF_NAME" \
+            --notes "Experimental, unofficial build of ports/desktop. Linux: libsdl2-2.0-0 must be installed."

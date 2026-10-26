@@ -1,4 +1,4 @@
-CircuitPython for Windows (experimental build, 2026-10-20, branch linux-port)
+CircuitPython for Windows: an experimental, unofficial build of ports/desktop
 
 Run it from a terminal (Windows Terminal, cmd or PowerShell):
 
@@ -14,9 +14,10 @@ controllers work through XInput.
 
 DEBUGGING IN VS CODE
 1. Install the extension: in VS Code, Extensions > "..." > Install from VSIX >
-   circuitpython-host-debug-0.1.0.vsix.
-2. Open the folder demo\hello (File > Open Folder). Its .vscode\launch.json points at
-   circuitpython.exe two levels up; for your own project copy that file and set "program".
+   circuitpython-host-debug-*.vsix.
+2. Open your project folder, the one with code.py (File > Open Folder), and add to
+   .vscode\launch.json a configuration of type "circuitpython" whose "program" is the path of
+   circuitpython.exe (README of the extension: Extensions > CircuitPython host debugger).
 3. Set a breakpoint in code.py or lib\helper.py and press F5. The program starts in a terminal
    inside VS Code, waits for the editor, then runs code.py under the debugger: stepping, the
    call stack, Locals and Globals, and the Watch and Debug Console evaluate expressions.
@@ -31,6 +32,11 @@ The chip has to be on the WinUSB driver: in Zadig (zadig.akeo.ie), Options > Lis
 pick "USB Serial Converter" with USB ID 0403 6014, choose WinUSB, Replace Driver. libusb-1.0.dll
 must stay beside circuitpython.exe (its license is in libusb-LICENSE.txt).
 
-Not on Windows yet: audiomp3, os.statvfs(). Sound plays through the default audio device.
+REAL PINS WITH AN MCP2221A
+    circuitpython.exe --board mcp2221 --drive C:\path\to\project
+gives board.G0-G3, busio.I2C, analogio and the chip's serial port as board.UART(); no driver
+is needed.
+
+Not on Windows yet: audiomp3. Sound plays through the default audio device.
 
 A crash prints "hard fault, exception ... at 0x...": send that line back with what you ran.
