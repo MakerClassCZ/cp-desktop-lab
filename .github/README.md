@@ -39,6 +39,9 @@ installed (`libsdl2-2.0-0` on Debian and Ubuntu).
 ./circuitpython --board ft232h        # real pins through an FT232H
 ```
 
+The VS Code extension is the `.vsix` file on the same page, for Linux and Windows alike: in
+VS Code, Extensions > `...` > Install from VSIX.
+
 How to build it, every option and what is missing: [`ports/desktop/README.md`](../ports/desktop/README.md).
 
 ## Status

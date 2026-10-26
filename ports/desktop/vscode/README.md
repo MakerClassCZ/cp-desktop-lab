@@ -10,8 +10,10 @@ VS Code to it.
 
 ## Install
 
-Copy this folder to `~/.vscode/extensions/circuitpython-host-debug` (on Windows
-`%USERPROFILE%\.vscode\extensions\`) and restart VS Code, or install the `.vsix`.
+Install the `.vsix` from the Releases page of
+[cp-desktop-lab](https://github.com/MakerClassCZ/cp-desktop-lab/releases) (Extensions > `...` >
+Install from VSIX), or copy this folder to `~/.vscode/extensions/circuitpython-host-debug` (on
+Windows `%USERPROFILE%\.vscode\extensions\`) and restart VS Code.
 
 ## Use
 

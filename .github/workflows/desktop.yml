@@ -57,12 +57,16 @@ jobs:
         run: npx --yes @vscode/vsce@3.6.0 package --allow-missing-repository --skip-license
       - name: Build
         run: sh ports/desktop/tools/ci-build.sh ${{ matrix.target }} dist
+      - name: VS Code extension beside the packages
+        if: matrix.target == 'windows'
+        run: cp ports/desktop/vscode/*.vsix dist/
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}-${{ runner.arch }}
           path: |
             dist/*.tar.gz
             dist/*.zip
+            dist/*.vsix
           if-no-files-found: error
       - name: Tests (Linux)
         if: matrix.target == 'linux'

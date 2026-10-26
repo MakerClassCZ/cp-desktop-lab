@@ -401,8 +401,8 @@ before `code.py` and waits for an editor speaking the Debug Adapter Protocol on
 `code.py` and in `lib/*.py`, step into, over and out, the call stack, the local and global
 variables of each frame, and expressions evaluated in a frame. The display keeps running in its
 window while the program is stopped. `vscode/` is the VS Code extension: it starts the program
-in a terminal and connects the editor (see `vscode/README.md`). Any other DAP client attaches
-the same way.
+in a terminal and connects the editor (see `vscode/README.md`; the packaged `.vsix` is on the
+Releases page). Any other DAP client attaches the same way.
 
 A program under the debugger runs about three times slower. Python files compiled from source
 show their locals; a `.mpy` keeps no variable names. After a reload (a file saved on the drive)
