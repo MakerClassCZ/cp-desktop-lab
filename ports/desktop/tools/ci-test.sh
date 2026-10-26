@@ -11,6 +11,7 @@ fi
 PROGRAM=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 shift
 PYTHON=${PYTHON:-python3}
+export PYTHONIOENCODING=utf-8      # the console text has emoji; Windows would write cp1252
 WORK=$(mktemp -d)
 cp "$HERE"/tests/*.py "$HERE/tools/cpapi.py" "$HERE/tools/cp_mcp.py" "$WORK/"
 mkdir "$WORK/board_files" && cp "$HERE"/boards/files/*.toml "$WORK/board_files/"
