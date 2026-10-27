@@ -1,6 +1,6 @@
 # cp-desktop-lab
 
-**Unofficial.** CircuitPython as a program for Linux and Windows: the supervisor, the VM and the
+**Unofficial.** CircuitPython as a program for Linux, Windows and macOS: the supervisor, the VM and the
 CIRCUITPY drive run on your computer, the terminal is the serial console, and a window is the
 display. Code written for a board runs as it is, with the same libraries, without a board, or with
 real pins through a USB adapter or a Raspberry Pi's header.
@@ -29,9 +29,10 @@ rest of the tree is CircuitPython as it is upstream.
 
 ## Get it
 
-Builds for Linux (x86_64, aarch64) and Windows are on the
+Builds for Linux (x86_64, aarch64), Windows and macOS (Apple silicon) are on the
 [Releases](https://github.com/MakerClassCZ/cp-desktop-lab/releases) page. On Linux, SDL2 must be
-installed (`libsdl2-2.0-0` on Debian and Ubuntu).
+installed (`libsdl2-2.0-0` on Debian and Ubuntu). The macOS program is not signed by Apple: after
+unpacking, `xattr -dr com.apple.quarantine circuitpython-macos-arm64` once.
 
 ```
 ./circuitpython                       # ./CIRCUITPY is created on the first start
@@ -44,7 +45,7 @@ installed (`libsdl2-2.0-0` on Debian and Ubuntu).
 MagTag, MatrixPortal, Circuit Playground, Pico and others), so code written for one finds its pin
 names; `examples/panel` shows every part of the board panel.
 
-The VS Code extension is the `.vsix` file on the same page, for Linux and Windows alike: in
+The VS Code extension is the `.vsix` file on the same page, for all three systems alike: in
 VS Code, Extensions > `...` > Install from VSIX.
 
 ## A sensor in a minute

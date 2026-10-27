@@ -50,8 +50,9 @@
 // sys.exc_info(): the trace hook's "exception" event comes without the exception, this has it.
 #define MICROPY_PY_SYS_EXC_INFO                 (1)
 
-// The register helper's x86-64 assembly is for the System V ABI; Windows uses setjmp instead.
-#ifdef _WIN32
+// The register helper's x86-64 assembly is for the System V ABI, and its arm64 register variables
+// are GCC's; Windows and macOS (clang) use setjmp instead.
+#if defined(_WIN32) || defined(__APPLE__)
 #define MICROPY_GCREGS_SETJMP                   (1)
 #endif
 

@@ -325,6 +325,11 @@ def alive(pid):
         os.kill(pid, 0)
     except OSError:
         return False
+    if not os.path.exists("/proc"):  # macOS: ps names a zombie's state Z
+        state = subprocess.run(
+            ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True
+        ).stdout
+        return not state.strip().startswith("Z")
     return not open("/proc/%d/stat" % pid).read().split(")")[-1].split()[0] == "Z"
 
 

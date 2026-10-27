@@ -221,7 +221,11 @@ static supervisor_fs_err_t posix_statfs(const char *host, size_t *block_size, si
 #else
 static uint64_t posix_mtime_ns(const char *host, const struct stat *st) {
     (void)host;
+    #ifdef __APPLE__
+    return (uint64_t)st->st_mtimespec.tv_sec * 1000000000ULL + st->st_mtimespec.tv_nsec;
+    #else
     return (uint64_t)st->st_mtim.tv_sec * 1000000000ULL + st->st_mtim.tv_nsec;
+    #endif
 }
 
 static void posix_set_fd_mtime(int fd, uint64_t ns) {

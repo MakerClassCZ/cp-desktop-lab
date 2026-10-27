@@ -1,4 +1,4 @@
-# The desktop port (ports/desktop) alone: the Linux and Windows programs, their tests, and on a
+# The desktop port (ports/desktop) alone: the Linux, Windows and macOS programs, their tests, and on a
 # desktop-v* tag a GitHub release with the packages. The steps live in ports/desktop/tools/ci-*.sh.
 name: Desktop port
 
@@ -27,6 +27,8 @@ jobs:
             runner: ubuntu-22.04-arm
           - target: windows
             runner: ubuntu-22.04
+          - target: macos
+            runner: macos-14
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
@@ -37,9 +39,15 @@ jobs:
         with:
           python-version: '3.12'
       - name: Packages
+        if: matrix.target != 'macos'
         run: |
           sudo apt-get update -q
           sudo apt-get install -yq libsdl2-dev p7zip-full
+          pip install -q -r requirements-dev.txt
+      - name: Packages (macOS)
+        if: matrix.target == 'macos'
+        run: |
+          brew install libusb coreutils socat
           pip install -q -r requirements-dev.txt
       - name: Version
         # adafruit/circuitpython's tags, from which the port's Makefile takes the version (never
@@ -74,6 +82,9 @@ jobs:
         run: |
           sudo apt-get install -yq socat
           sh ports/desktop/tools/ci-test.sh ports/desktop/build-linux/circuitpython
+      - name: Tests (macOS)
+        if: matrix.target == 'macos'
+        run: sh ports/desktop/tools/ci-test.sh ports/desktop/build-macos/circuitpython
 
   test-windows:
     needs: build
@@ -112,4 +123,4 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --prerelease \
             --title "CircuitPython desktop $GITHUB_REF_NAME" \
-            --notes "Experimental, unofficial build of ports/desktop. Linux: libsdl2-2.0-0 must be installed."
+            --notes "Experimental, unofficial build of ports/desktop. Linux: libsdl2-2.0-0 must be installed. macOS: see README.txt in the package (xattr)."

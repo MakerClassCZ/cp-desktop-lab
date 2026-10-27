@@ -15,6 +15,14 @@ bool common_hal_os_urandom(uint8_t *buffer, mp_uint_t length) {
     return BCRYPT_SUCCESS(BCryptGenRandom(NULL, buffer, length, BCRYPT_USE_SYSTEM_PREFERRED_RNG));
 }
 
+#elif defined(__APPLE__)
+#include <stdlib.h>
+
+bool common_hal_os_urandom(uint8_t *buffer, mp_uint_t length) {
+    arc4random_buf(buffer, length);
+    return true;
+}
+
 #else
 #include <sys/random.h>
 

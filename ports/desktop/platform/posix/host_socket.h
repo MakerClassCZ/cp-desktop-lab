@@ -21,6 +21,11 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#ifndef MSG_NOSIGNAL
+// macOS: SIGPIPE stays blocked on every thread (platform_start), so a send to a closed peer fails.
+#define MSG_NOSIGNAL 0
+#endif
+
 #define HOST_SOCK_BUF(p) ((void *)(p))
 #define HOST_SOCK_CBUF(p) ((const void *)(p))
 

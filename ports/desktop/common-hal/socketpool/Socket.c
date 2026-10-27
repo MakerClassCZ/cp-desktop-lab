@@ -50,6 +50,11 @@ static mp_obj_t _format_address(const struct sockaddr *addr, int family) {
     return mp_obj_new_str(ip_str, strlen(ip_str));
 }
 
+// The length of the address its family has: BSD systems (macOS) refuse a longer one.
+static socklen_t _sockaddr_len(const struct sockaddr_storage *addr) {
+    return addr->ss_family == AF_INET6 ? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in);
+}
+
 static mp_obj_t _sockaddr_to_tuple(const struct sockaddr_storage *sockaddr) {
     mp_obj_t args[4] = {
         _format_address((const struct sockaddr *)sockaddr, sockaddr->ss_family),
@@ -91,7 +96,7 @@ static void socketpool_resolve_host_or_throw(int family, int type, const char *h
         common_hal_socketpool_socketpool_raise_gaierror(error);
     }
 
-    memcpy(addr, result_i->ai_addr, sizeof(struct sockaddr_storage));
+    memcpy(addr, result_i->ai_addr, result_i->ai_addrlen);
     freeaddrinfo(result_i);
 }
 
@@ -325,7 +330,7 @@ size_t common_hal_socketpool_socket_bind(socketpool_socket_obj_t *self,
         }
     }
 
-    int result = bind(self->num, (struct sockaddr *)&bind_addr, sizeof(bind_addr));
+    int result = bind(self->num, (struct sockaddr *)&bind_addr, _sockaddr_len(&bind_addr));
     if (result == 0) {
         return 0;
     }
@@ -340,7 +345,7 @@ size_t common_hal_socketpool_socket_bind(socketpool_socket_obj_t *self,
     for (uint32_t moved = first; moved < first + 100 && moved <= 65535; moved++) {
         // The port lies at the same place in sockaddr_in and sockaddr_in6.
         ((struct sockaddr_in *)&bind_addr)->sin_port = htons(moved);
-        if (bind(self->num, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) == 0) {
+        if (bind(self->num, (struct sockaddr *)&bind_addr, _sockaddr_len(&bind_addr)) == 0) {
             mp_printf(&mp_plat_print, "port %u is %s, using %u\n", (unsigned)port,
                 err == EACCES ? "not allowed" : "in use", (unsigned)moved);
             return 0;
@@ -376,7 +381,7 @@ void common_hal_socketpool_socket_connect(socketpool_socket_obj_t *self,
     struct sockaddr_storage addr;
     resolve_host_or_throw(self, host, &addr, port);
 
-    int result = connect(self->num, (struct sockaddr *)&addr, sizeof(addr));
+    int result = connect(self->num, (struct sockaddr *)&addr, _sockaddr_len(&addr));
 
     if (result == 0) {
         // Connected immediately.
@@ -603,7 +608,7 @@ mp_uint_t common_hal_socketpool_socket_sendto(socketpool_socket_obj_t *self,
     struct sockaddr_storage addr;
     resolve_host_or_throw(self, host, &addr, port);
 
-    int bytes_sent = sendto(self->num, HOST_SOCK_CBUF(buf), len, MSG_NOSIGNAL, (struct sockaddr *)&addr, sizeof(addr));
+    int bytes_sent = sendto(self->num, HOST_SOCK_CBUF(buf), len, MSG_NOSIGNAL, (struct sockaddr *)&addr, _sockaddr_len(&addr));
     if (bytes_sent < 0) {
         mp_raise_BrokenPipeError();
         return 0;

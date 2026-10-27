@@ -1,4 +1,4 @@
-import os, subprocess
+import os, subprocess, sys
 from harness import BIN, HEADLESS, Run, T, check, drive, launch, refused, run, seen
 
 # an unknown board name lists the known ones and exits 2
@@ -83,9 +83,13 @@ with launch('print("to the repl")\n', board='[pins]\nZQ_LAMP = "GPIO5"\n') as b:
         b.console(since=0)["data"][-300:],
     )
 
-# --board gpiochip needs a GPIO chip of the kernel: without one (Windows, WSL) it says why and exits 2
+# --board gpiochip needs a GPIO chip of the kernel: without one (Windows, macOS, WSL) it says why and exits 2
 status, out = refused(["--board", "gpiochip", "--gpiochip", "/dev/nonexistent-gpiochip"])
-want = "runs on Linux only" if os.name == "nt" else "cannot open /dev/nonexistent-gpiochip"
+want = (
+    "cannot open /dev/nonexistent-gpiochip"
+    if sys.platform.startswith("linux")
+    else "runs on Linux only"
+)
 check(
     "gpiochip board without a GPIO chip",
     status == 2 and want in out,

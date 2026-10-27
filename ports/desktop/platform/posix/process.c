@@ -5,7 +5,8 @@
 // SPDX-License-Identifier: MIT
 
 // The process on POSIX: its environment, the fault signals, re-executing itself as a reset, the
-// termination signals on a thread of their own, the stack limit. /proc/self/exe is Linux's.
+// termination signals on a thread of their own, the stack limit. /proc/self/exe is Linux's,
+// _NSGetExecutablePath macOS's.
 
 #include <execinfo.h>
 #include <limits.h>
@@ -16,6 +17,9 @@
 #include <string.h>
 #include <sys/resource.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
 
 #include "desktop_port.h"
 #include "platform.h"
@@ -57,9 +61,32 @@ void platform_catch_faults(void (*restart)(void)) {
     pthread_sigmask(SIG_UNBLOCK, &faults, NULL);
 }
 
+// The program's own path, NUL terminated in path; false when it is not known.
+static bool _exe_path(char *path, size_t len) {
+    #ifdef __APPLE__
+    // The path the program was started by, which may hold symbolic links and "..".
+    char started[PATH_MAX];
+    uint32_t size = sizeof(started);
+    if (_NSGetExecutablePath(started, &size) != 0 || len < PATH_MAX) {
+        return false;
+    }
+    return realpath(started, path) != NULL;
+    #else
+    ssize_t n = readlink("/proc/self/exe", path, len - 1);
+    if (n <= 0 || (size_t)n >= len) {
+        return false;
+    }
+    path[n] = '\0';
+    return true;
+    #endif
+}
+
 void platform_restart(int generation) {
     (void)generation;
-    execv("/proc/self/exe", desktop_options.argv);
+    char path[PATH_MAX];
+    if (_exe_path(path, sizeof(path))) {
+        execv(path, desktop_options.argv);
+    }
     perror("circuitpython: reset");
 }
 
@@ -111,9 +138,7 @@ size_t platform_stack_limit(void) {
 }
 
 void platform_exe_dir(char *dir, size_t len) {
-    ssize_t n = readlink("/proc/self/exe", dir, len - 1);
-    if (n > 0 && (size_t)n < len) {
-        dir[n] = '\0';
+    if (_exe_path(dir, len)) {
         char *slash = strrchr(dir, '/');
         if (slash != NULL) {
             *slash = '\0';

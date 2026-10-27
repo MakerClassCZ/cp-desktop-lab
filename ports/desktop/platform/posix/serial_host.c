@@ -132,6 +132,7 @@ void serial_host_flush_input(serial_host_t *port) {
     tcflush(FD(port), TCIFLUSH);
 }
 
+#ifndef __APPLE__     // macOS finds its ports through IOKit (platform/macos/serial_find.c)
 static unsigned _read_hex(const char *path) {
     FILE *f = fopen(path, "r");
     unsigned v = 0;
@@ -169,3 +170,4 @@ bool serial_host_find_usb(uint16_t vid, uint16_t pid, char *path, size_t len) {
     closedir(dir);
     return found;
 }
+#endif

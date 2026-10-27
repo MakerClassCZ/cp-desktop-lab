@@ -11,6 +11,8 @@ fi
 PROGRAM=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 shift
 PYTHON=${PYTHON:-python3}
+# macOS has GNU timeout as gtimeout (Homebrew's coreutils).
+TIMEOUT=$(command -v timeout || command -v gtimeout)
 export PYTHONIOENCODING=utf-8      # the console text has emoji; Windows would write cp1252
 WORK=$(mktemp -d)
 cp "$HERE"/tests/*.py "$HERE/tools/cpapi.py" "$HERE/tools/cp_mcp.py" "$WORK/"
@@ -19,7 +21,7 @@ cd "$WORK" || exit 2
 [ $# -gt 0 ] || set -- test_*.py
 failed=""
 for t in "$@"; do
-    timeout 300 "$PYTHON" "$t" "$PROGRAM" > "$t.out" 2>&1
+    "$TIMEOUT" 300 "$PYTHON" "$t" "$PROGRAM" > "$t.out" 2>&1
     rc=$?
     echo "$t: rc=$rc $(grep -c '^PASS' "$t.out") PASS $(grep -c '^FAIL' "$t.out") FAIL $(grep -c '^SKIP' "$t.out") SKIP"
     if [ $rc -ne 0 ] || grep -q '^FAIL' "$t.out"; then

@@ -1,9 +1,9 @@
-# CircuitPython for Linux and Windows
+# CircuitPython for Linux, Windows and macOS
 
 CircuitPython as a program: the supervisor, the VM and the CIRCUITPY drive run in one process,
 the terminal is the serial console, and SDL2 provides the display, the buttons and the sound. It
 is meant for Linux handhelds (Miyoo, Anbernic and the like) and as a fast way to run
-CircuitPython code on a desktop, Linux or Windows. This port is experimental.
+CircuitPython code on a desktop, Linux, Windows or macOS. This port is experimental.
 
 ## Build
 
@@ -26,6 +26,15 @@ make BUILD=build-windows CROSS_COMPILE=x86_64-w64-mingw32- SDL_DIR=/path/to/SDL2
 `build-windows/circuitpython.exe` runs on Windows 10 and 11 with `SDL2.dll` from the same SDL2
 package beside it; the C runtime and winpthreads are built in. A crash prints an address that
 `x86_64-w64-mingw32-addr2line -f -e build-windows/circuitpython.exe 0x...` resolves.
+
+On macOS (Apple silicon) the build is native, with Xcode's command line tools and SDL2 from
+Homebrew (`brew install sdl2`), or SDL's own `SDL2.framework` from the SDL2 `.dmg` in a directory
+given as `SDL_FRAMEWORK_DIR` (what the release package has beside the program):
+
+```
+make BUILD=build-macos
+make BUILD=build-macos SDL_FRAMEWORK_DIR=/path/to/dir/with/SDL2.framework
+```
 
 ## Run
 
@@ -146,6 +155,8 @@ The program needs libusb-1.0 and the FT232H on a driver libusb can use:
   from FTDI's driver to WinUSB with [Zadig](https://zadig.akeo.ie/): Options → List All Devices,
   pick "USB Serial Converter" with USB ID 0403 6014, choose WinUSB, Replace Driver. The chip stops
   being a COM port until the driver is rolled back in Device Manager.
+- macOS: `libusb-1.0.0.dylib` beside the program (in the package) or Homebrew's
+  (`brew install libusb`); no driver change.
 
 What the chip's MPSSE engine cannot do: inputs have fixed pull-ups (`Pull.DOWN` raises), SPI
 modes 1 and 3, I2C clock stretching, UART, PWM, analog and `neopixel`. Every pin access is a USB
@@ -168,9 +179,9 @@ access takes about two milliseconds. `SCL` and `SDA` are bus pins only: `digital
 raises. The chip's settings are changed in SRAM only, so a power cycle restores its defaults.
 
 Linux needs permission to the hidraw device, with a udev rule such as
-`KERNEL=="hidraw*", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="00dd", MODE="0666"`. Windows needs
-nothing. The chip's UART is a serial port of its own (a COM port, `/dev/ttyACM*`): `busio.UART`
-on `board.TX`/`board.RX` uses it, found by the chip's USB IDs.
+`KERNEL=="hidraw*", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="00dd", MODE="0666"`. Windows and
+macOS need nothing. The chip's UART is a serial port of its own (a COM port, `/dev/ttyACM*`,
+`/dev/cu.usbmodem*`): `busio.UART` on `board.TX`/`board.RX` uses it, found by the chip's USB IDs.
 
 ## Real pins on a Raspberry Pi: --board gpiochip
 

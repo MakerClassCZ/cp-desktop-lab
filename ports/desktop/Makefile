@@ -89,15 +89,26 @@ WINDOWS = 1
 EXE = .exe
 endif
 
-# What differs between the systems: platform/windows/ or platform/posix/ (Linux, later macOS),
-# each implementing the headers the rest of the port includes.
+# A native build on a Mac; a Windows cross build there stays a Windows one.
+ifeq ($(WINDOWS)$(shell uname -s),Darwin)
+MACOS = 1
+endif
+
+# What differs between the systems: platform/windows/ or platform/posix/ (Linux and macOS),
+# each implementing the headers the rest of the port includes. On macOS a file of platform/macos/
+# takes the place of the posix one of its name.
 ifeq ($(WINDOWS),1)
 PLATFORM = windows
 else
 PLATFORM = posix
 endif
 INC += -Iplatform -Iplatform/$(PLATFORM)
+ifeq ($(MACOS),1)
+MACOS_C = $(sort $(wildcard platform/macos/*.c))
+SRC_C += $(MACOS_C) $(filter-out $(MACOS_C:platform/macos/%=platform/posix/%),$(sort $(wildcard platform/posix/*.c)))
+else
 SRC_C += $(sort $(wildcard platform/$(PLATFORM)/*.c))
+endif
 
 # The virtual buses' device models (virtual/i2c/, the SPI display names): CIRCUITPY_VIRTUAL_DEVICES
 ifeq ($(CIRCUITPY_VIRTUAL_DEVICES),1)
@@ -110,6 +121,13 @@ ifeq ($(WINDOWS),1)
 # The port has its own main(); SDL's console build needs neither SDL_main nor -mwindows.
 SDL_CFLAGS ?= -I$(SDL_DIR)/include/SDL2 -DSDL_MAIN_HANDLED
 SDL_LIBS ?= -L$(SDL_DIR)/lib -lSDL2
+else ifneq ($(SDL_FRAMEWORK_DIR),)
+# macOS with SDL's own SDL2.framework from SDL_FRAMEWORK_DIR, found beside the program or there.
+SDL_CFLAGS ?= -F$(SDL_FRAMEWORK_DIR) -I$(SDL_FRAMEWORK_DIR)/SDL2.framework/Headers
+SDL_LIBS ?= -F$(SDL_FRAMEWORK_DIR) -framework SDL2 -Wl,-rpath,@executable_path -Wl,-rpath,$(SDL_FRAMEWORK_DIR)
+else ifeq ($(MACOS),1)
+SDL_CFLAGS ?= $(shell sdl2-config --cflags)
+SDL_LIBS ?= $(shell sdl2-config --libs)
 else
 SDL_CFLAGS ?= $(shell sdl2-config --cflags)
 SDL_LIBS ?= $(shell pkg-config --exists sdl2 && pkg-config --libs sdl2 || echo -l:libSDL2-2.0.so.0)
@@ -193,7 +211,11 @@ CFLAGS += \
 
 $(BUILD)/x509_crt_bundle.S: $(TOP)/lib/certificates/data/roots-full.pem $(TOP)/tools/gen_crt_bundle.py
 	$(Q)$(PYTHON) $(TOP)/tools/gen_crt_bundle.py -i $< -o $@ --asm
-ifeq ($(WINDOWS),1)
+# Mach-O names its sections otherwise.
+ifeq ($(MACOS),1)
+	$(Q)sed -i '' 's/^\.section \.rodata\.embedded$$/.const/' $@
+endif
+ifneq ($(WINDOWS)$(MACOS),)
 NOEXECSTACK =
 else
 NOEXECSTACK = -Wa,--noexecstack
@@ -219,6 +241,7 @@ ifeq ($(CLANG),1)
 $(patsubst %.c,$(BUILD)/%.o,$(SRC_MBEDTLS)) $(OBJ_MBEDTLS): CFLAGS += \
 	-Wno-array-bounds \
 	-Wno-undef \
+	-Wno-unknown-warning-option \
 	-Wno-uninitialized-const-pointer
 else
 $(patsubst %.c,$(BUILD)/%.o,$(SRC_MBEDTLS)) $(OBJ_MBEDTLS): CFLAGS += \
@@ -239,12 +262,20 @@ ifeq ($(WINDOWS),1)
 LIBS = -lm $(shell $(CC) -print-file-name=libwinpthread.a) -lws2_32 -liphlpapi -lbcrypt -lwinmm -lhid -lsetupapi -ladvapi32 $(SDL_LIBS)
 # The VM runs on the main thread, whose stack size is fixed here.
 LDFLAGS += -Wl,--stack,8388608
+else ifeq ($(MACOS),1)
+# CoreServices is FSEvents (platform/macos/watch.c), IOKit the HID devices and the serial ports'
+# IDs; libusb-1.0 is loaded at run time.
+LIBS = -lm -lpthread $(SDL_LIBS) -framework CoreServices -framework IOKit -framework CoreFoundation
 else
 # libusb-1.0 is loaded at run time (hardware/usb_host.c), hence -ldl and no -lusb.
 LIBS = -lm -lpthread -lrt -ldl $(SDL_LIBS)
 endif
 # Drops the shared weak defaults this port overrides (and the TLSF calls inside them).
+ifeq ($(MACOS),1)
+LDFLAGS += -Wl,-dead_strip
+else
 LDFLAGS += -Wl,--gc-sections
+endif
 
 OBJ += $(PY_O) $(SUPERVISOR_O) $(addprefix $(BUILD)/, $(SRC_C:.c=.o))
 OBJ += $(addprefix $(BUILD)/, $(SRC_COMMON_HAL_SHARED_MODULE_EXPANDED:.c=.o))

@@ -8,11 +8,16 @@
 // interrupts.c.
 
 #include <errno.h>
-#include <malloc.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <malloc/malloc.h>
+#define malloc_usable_size malloc_size
+#else
+#include <malloc.h>
+#endif
 #ifdef _WIN32
 #define malloc_usable_size _msize
 #endif

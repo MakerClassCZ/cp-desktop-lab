@@ -11,6 +11,7 @@ import os
 import re
 import secrets
 import subprocess
+import sys
 import time
 from urllib.parse import urlencode
 
@@ -24,8 +25,39 @@ def upto_next(r):
     return data[: max(0, len(data) - (r["end"] - r["next"]))].decode(errors="replace")
 
 
+# macOS has no PR_SET_PDEATHSIG: a watcher waits for this process or the program to end (kqueue)
+# and ends the program in the first case. argv: this process's pid, the program's.
+_WATCHER = """import os, select, signal, sys
+parent, child = int(sys.argv[1]), int(sys.argv[2])
+kq = select.kqueue()
+ended = None
+for pid in (child, parent):
+    try:
+        kq.control([select.kevent(pid, select.KQ_FILTER_PROC, select.KQ_EV_ADD, select.KQ_NOTE_EXIT)], 0)
+    except ProcessLookupError:
+        ended = pid
+        break
+if ended is None:
+    ended = kq.control(None, 1)[0].ident
+if ended == parent:
+    try:
+        os.kill(child, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+"""
+
+
 def _tie_to_this_process(p):
     """The program ends when this process ends, however it ends (a host killing an MCP server)."""
+    if sys.platform == "darwin":
+        subprocess.Popen(
+            [sys.executable, "-c", _WATCHER, str(os.getpid()), str(p.pid)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        return
     if os.name != "nt":
         return
     import ctypes
@@ -68,7 +100,7 @@ _job = None
 
 
 def _die_with_parent():
-    """Linux: SIGTERM when the process that started the program ends."""
+    """Linux: SIGTERM when the process that started the program ends (macOS: _WATCHER)."""
     try:
         import ctypes
         import signal

@@ -1025,6 +1025,11 @@ static void *_accept_loop(void *arg) {
         pthread_mutex_unlock(&_lock);
         #ifdef _WIN32
         sock_t s = accept(_listener, NULL, NULL);
+        #elif defined(__APPLE__)
+        sock_t s = accept(_listener, NULL, NULL);
+        if (s != BAD_SOCKET) {
+            fcntl(s, F_SETFD, FD_CLOEXEC);      // not kept by a reset's exec
+        }
         #else
         sock_t s = accept4(_listener, NULL, NULL, SOCK_CLOEXEC);     // not kept by a reset's exec
         #endif
@@ -1110,7 +1115,12 @@ bool control_api_start(void) {
     // Not inherited: a process started by a reset binds the port itself.
     _listener = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
     #else
+    #ifdef __APPLE__
+    _listener = socket(AF_INET, SOCK_STREAM, 0);     // macOS has no SOCK_CLOEXEC
+    fcntl(_listener, F_SETFD, FD_CLOEXEC);
+    #else
     _listener = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    #endif
     int one = 1;
     setsockopt(_listener, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
     #endif

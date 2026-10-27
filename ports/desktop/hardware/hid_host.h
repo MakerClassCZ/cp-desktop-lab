@@ -11,7 +11,7 @@
 #include <stdint.h>
 
 // A USB HID device with 64-byte reports, through the system's HID support: hid.dll on Windows,
-// /dev/hidraw on Linux. One device at a time; every call runs on the VM thread.
+// /dev/hidraw on Linux, IOKit on macOS. One device at a time; every call runs on the VM thread.
 
 #define HID_REPORT_SIZE 64
 

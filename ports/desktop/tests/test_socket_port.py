@@ -5,7 +5,7 @@ A TCP socket whose port is taken, or below 1024 without root on Linux, binds to 
 port: a protocol may need it.
 """
 
-import os, re, socket, time
+import os, re, socket, sys, time
 from harness import Run, check, drive
 
 
@@ -69,8 +69,8 @@ check(
 )
 check("and the server answers there", got == b"moved", got)
 
-# Below 1024 without root on Linux: 8080 or the first free one after it
-if os.name != "nt" and os.geteuid() != 0:
+# Below 1024 without root on Linux: 8080 or the first free one after it (macOS lets anyone have it)
+if sys.platform.startswith("linux") and os.geteuid() != 0:
     r = start(SERVER % 80)
     r.wait_for("listening", 15)
     m = re.search(r"port 80 is not allowed, using (\d+)", r.text())

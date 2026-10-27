@@ -101,15 +101,23 @@ bool usb_host_load(char *err, size_t err_len) {
     }
     #else
     #ifdef __APPLE__
-    const char *name = "libusb-1.0.0.dylib";
+    // Beside the program, else Homebrew's (Apple silicon, Intel), which dlopen does not search.
+    static const char *const names[] = { "@executable_path/libusb-1.0.0.dylib",
+                                         "/opt/homebrew/lib/libusb-1.0.0.dylib", "/usr/local/lib/libusb-1.0.0.dylib" };
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]) && _module == NULL; i++) {
+        _module = dlopen(names[i], RTLD_NOW);
+    }
+    if (_module == NULL) {
+        snprintf(err, err_len, "libusb-1.0 not found: brew install libusb");
+        return false;
+    }
     #else
-    const char *name = "libusb-1.0.so.0";
-    #endif
-    _module = dlopen(name, RTLD_NOW);
+    _module = dlopen("libusb-1.0.so.0", RTLD_NOW);
     if (_module == NULL) {
         snprintf(err, err_len, "libusb-1.0 not found: %s", dlerror());
         return false;
     }
+    #endif
     #endif
     #define LOAD(field, name) \
     if ((*(void **)&_lib.field = _sym(name)) == NULL) { \
