@@ -79,3 +79,17 @@ check(
 )
 out, trace = run('print("up")\n', "wait up\ndown z\nup z\ndown up\nup up", None, "[gamepad]\n" + KEYS)
 check("the gamepad keeps the arrows", "GAMEPAD UP pressed" in trace, trace)
+
+# The panel's state: the keyboard's name, range, channel and held keys; none without one.
+with launch(READER % 100, '[midi]\nKEYS = "keyboard C2"\n') as b:
+    b.wait("ready")
+    b.panel("press KEYS C2", "press KEYS E2")
+    s = b.state()["midi"]
+    check(
+        "state: name, range, channel, held",
+        s == {"keyboard": "KEYS", "low": "C2", "high": "C4", "channel": 1, "held": ["C2", "E2"]},
+        s,
+    )
+with launch('print("up")\n') as b:
+    b.wait("up")
+    check("state: no keyboard", b.state()["midi"] is None, b.state())

@@ -40,6 +40,10 @@ extern const fontio_builtinfont_t supervisor_terminal_font;
 #define GAMEPAD_H 176
 #define DPAD 48                     // a D-pad arm's side
 #define FACE_R 26                   // a face button's radius
+#define KEYBOARD_H 130              // the MIDI keyboard: its title, then its keys
+#define KEYS_TOP 26                 // the keys under the title
+#define KEYS_H 100
+#define WHITE_KEYS 15               // two octaves, C to C
 
 static SDL_Window *_window;
 static SDL_Renderer *_renderer;
@@ -54,6 +58,9 @@ static SDL_Texture *_display_textures[VDISPLAYS_MAX];
 static int _gamepad_top;            // where the gamepad starts, under the displays
 static int _parts_top;              // where the rows start, under the gamepad
 static int _held_button = -1;       // a gamepad button the mouse holds
+static int _keyboard_top;           // where the MIDI keyboard starts, under the gamepad
+static bool _playing;               // the mouse went down on the keyboard and is still down
+static int _held_note = -1;         // the note it holds, -1 while it is off the keys
 
 void panel_changed(void) {
     _dirty = true;
@@ -230,6 +237,10 @@ static int _height(void) {
     _gamepad_top = h;
     if (gamepad_shown()) {
         h += GAMEPAD_H + PAD;
+    }
+    _keyboard_top = h;
+    if (midi_keyboard_present()) {
+        h += KEYBOARD_H + PAD;
     }
     _parts_top = h;
     return h + parts_count() * ROW + PAD;
@@ -470,6 +481,70 @@ static void _draw_gamepad(void) {
     }
 }
 
+// ---- the MIDI keyboard ----
+
+static bool _black(int offset) {
+    int k = offset % 12;
+    return k == 1 || k == 3 || k == 6 || k == 8 || k == 10;
+}
+
+// A key's place, by its semitone above the keyboard's lowest note (0-24).
+static SDL_Rect _key_rect(int offset) {
+    int white_w = (WIDTH - 2 * PAD) / WHITE_KEYS, top = _keyboard_top + KEYS_TOP;
+    int whites = 0;     // white keys left of it
+    for (int k = 0; k < offset; k++) {
+        whites += !_black(k);
+    }
+    if (_black(offset)) {
+        int w = white_w * 6 / 10;
+        return (SDL_Rect) { PAD + whites * white_w - w / 2, top, w, KEYS_H * 6 / 10 };
+    }
+    return (SDL_Rect) { PAD + whites * white_w, top, white_w, KEYS_H };
+}
+
+// The key under a point, black keys first as they lie on top, and how hard a click there plays
+// it: the lower on the key, the louder. -1 for none.
+static int _key_at(int x, int y, int *velocity) {
+    SDL_Point point = { x, y };
+    for (int pass = 0; midi_keyboard_present() && pass < 2; pass++) {
+        for (int offset = 0; offset < 25; offset++) {
+            SDL_Rect r = _key_rect(offset);
+            if (_black(offset) == (pass == 0) && SDL_PointInRect(&point, &r)) {
+                *velocity = 40 + 87 * (y - r.y) / r.h;
+                return offset;
+            }
+        }
+    }
+    return -1;
+}
+
+static void _draw_keyboard(void) {
+    int low = midi_keyboard_low();
+    char title[64], from[8], to[8];
+    midi_note_name(low, from, sizeof(from));
+    midi_note_name(low + 24, to, sizeof(to));
+    snprintf(title, sizeof(title), "%s  %s-%s  ch %d  PgUp/PgDn octave", midi_keyboard_name(), from, to,
+        midi_keyboard_channel());
+    _text(PAD, _keyboard_top + 2, title, 0xd0d0d0);
+    for (int pass = 0; pass < 2; pass++) {
+        for (int offset = 0; offset < 25; offset++) {
+            bool black = _black(offset);
+            if (black != (pass == 1)) {
+                continue;
+            }
+            SDL_Rect r = _key_rect(offset);
+            bool held = midi_keyboard_held(low + offset);
+            _fill(r.x, r.y, r.w, r.h, black ? (held ? 0x606060 : 0x202020) : (held ? 0x909090 : 0xe8e8e8));
+            _frame(r.x, r.y, r.w, r.h, 0x404040);
+            int key = midi_keyboard_scancode(offset);
+            if (key != 0) {
+                const char *name = SDL_GetKeyName(SDL_GetKeyFromScancode((SDL_Scancode)key));
+                _text_centred(r.x + r.w / 2, r.y + r.h - 16, name, black ? 0xa0a0a0 : 0x606060, 1, 3);
+            }
+        }
+    }
+}
+
 static void _draw(void) {
     int h = _height(), w, oh;
     SDL_GetWindowSize(_window, &w, &oh);
@@ -482,6 +557,9 @@ static void _draw(void) {
     _draw_displays();
     if (gamepad_shown()) {
         _draw_gamepad();
+    }
+    if (midi_keyboard_present()) {
+        _draw_keyboard();
     }
     for (int i = 0; i < parts_count(); i++) {
         _draw_part(parts_at(i), _parts_top + i * ROW);
@@ -517,7 +595,7 @@ static bool _open(void) {
 void panel_task(void) {
     parts_poll();
     if (_failed || _hidden || (parts_count() == 0 && neopixel_emu_strips() == 0 && !gamepad_shown()
-                               && vdisplay_count() == 0)) {
+                               && vdisplay_count() == 0 && !midi_keyboard_present())) {
         return;
     }
     if (_window == NULL && !_open()) {
@@ -788,6 +866,27 @@ void panel_state_json(api_buf_t *b) {
             first = false;
         }
     }
+    api_buf_add(b, "]}, \"midi\": ", 12);
+    if (!midi_keyboard_present()) {
+        api_buf_add(b, "null}", 5);
+        return;
+    }
+    char from[8], to[8];
+    midi_note_name(midi_keyboard_low(), from, sizeof(from));
+    midi_note_name(midi_keyboard_low() + 24, to, sizeof(to));
+    api_buf_add(b, "{\"keyboard\": ", 13);
+    api_buf_json_string(b, midi_keyboard_name(), strlen(midi_keyboard_name()));
+    api_buf_printf(b, ", \"low\": \"%s\", \"high\": \"%s\", \"channel\": %d, \"held\": [", from, to,
+        midi_keyboard_channel());
+    first = true;
+    for (int note = 0; note < 128; note++) {
+        if (midi_keyboard_held(note)) {
+            char name[8];
+            midi_note_name(note, name, sizeof(name));
+            api_buf_printf(b, "%s\"%s\"", first ? "" : ", ", name);
+            first = false;
+        }
+    }
     api_buf_add(b, "]}}", 3);
 }
 
@@ -802,6 +901,14 @@ bool panel_event(const SDL_Event *e) {
         case SDL_MOUSEBUTTONDOWN: {
             if (!_ours(e->button.windowID)) {
                 return false;
+            }
+            int velocity;
+            int key = _key_at(e->button.x, e->button.y, &velocity);
+            if (key >= 0) {
+                _playing = true;
+                _held_note = midi_keyboard_low() + key;
+                midi_keyboard_note(_held_note, true, velocity);
+                return true;
             }
             int button = _gamepad_at(e->button.x, e->button.y);
             if (button >= 0) {
@@ -837,6 +944,17 @@ bool panel_event(const SDL_Event *e) {
             if (_drag != NULL) {
                 _slide(_drag, e->motion.x);
             }
+            if (_playing) {
+                // Dragged across the keys: each one under the mouse plays in turn.
+                int velocity;
+                int key = _key_at(e->motion.x, e->motion.y, &velocity);
+                int note = key >= 0 ? midi_keyboard_low() + key : -1;
+                if (note != _held_note) {
+                    midi_keyboard_note(_held_note, false, 0);
+                    midi_keyboard_note(note, true, velocity);
+                    _held_note = note;
+                }
+            }
             return true;
         case SDL_MOUSEBUTTONUP:
             if (!_ours(e->button.windowID)) {
@@ -848,6 +966,9 @@ bool panel_event(const SDL_Event *e) {
             if (_held_button >= 0) {
                 gamepad_press(_held_button, false);
             }
+            midi_keyboard_note(_held_note, false, 0);
+            _playing = false;
+            _held_note = -1;
             _held = NULL;
             _held_button = -1;
             _drag = NULL;
