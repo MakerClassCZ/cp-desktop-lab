@@ -212,7 +212,8 @@ The virtual board's `TX`, `RX`, `SCL`, `SDA`, `SCK`, `MOSI` and `MISO` are plain
 
 On the virtual board the program's parts appear in a window, "CircuitPython board": NeoPixels
 on top, then a row per part with its name, its control and its exact value. A part appears when
-the program uses it, or ahead of the program from a board file.
+the program uses it (and says so on stderr), ahead of the program from a board file, or from
+Python with `board.attach` (see [Plugging parts in from Python](#plugging-parts-in-from-python)).
 
 | part | in the program | on the panel |
 |---|---|---|
@@ -270,8 +271,8 @@ Every change goes to `--trace-bus`, the user's and the program's: `NEOPIXEL GPIO
 1000 Hz 500 us`, `TOUCH T1 on`, `LED D13 on`, `I2S I2S_DATA play 22050 Hz 16-bit mono`, `PWMAUDIO SPEAKER play ...`, `ENCODER ENC 3`, `IR IR_RX 255,2,247,8`, `PULSEOUT GPIO6 38000 Hz 67: 9000 4500 ...` (a
 `pulseio.PulseOut`'s pulses in microseconds; `send()` takes as long as they last). Reads are not traced. The key script
 (`CIRCUITPY_SDL_KEYS`) takes `set NAME VALUE`, `press NAME` and `release NAME` (a part, or a
-gamepad button: `press START`) `turn NAME DETENTS` (an encoder, negative counter-clockwise) and `send NAME [CODE]` (an IR receiver: its
-code, or `255,2,127,128`), so a test moves
+gamepad button: `press START`) `turn NAME DETENTS` (an encoder, negative counter-clockwise), `send NAME [CODE]` (an IR receiver: its
+code, or `255,2,127,128`) and `close` (the panel window, as its close button does), so a test moves
 the panel without a window. `pwmio`, `touchio` and `pulseio` exist on the virtual board only, `audiobusio` on every board (a record of
 the generator takes as long as its samples last, as on a board); `analogio`
 uses the MCP2221's ADC and DAC on `--board mcp2221`.
@@ -313,7 +314,8 @@ ENV = "bme280"
 LIS3DH for `adafruit_circuitplayground.express`. With no `[i2c]` the bus is empty, as a board
 with nothing on its connector, until a driver looks for a device: an `I2CDevice` at an empty
 address gets the first model above whose own address it is (0x6a an LSM6DS33, named LSM6DS33 on
-the panel), as if the breakout were plugged in. A scan does not add any.
+the panel), as if the breakout were plugged in, and a line on stderr says so: `virtual: LSM6DS33
+attached at I2C 0x6a (automatic)`. A scan does not add any.
 
 ### Displays on the buses
 
@@ -347,6 +349,67 @@ program's `rotation` is turned back, so the panel shows the picture upright, as 
 panels have no controller to model: what the program refreshes is what the panel shows, dark
 while `brightness` is 0). `adafruit_matrixportal` builds it as on a MatrixPortal with
 `boards/files/matrixportal.toml`. Tiled and serpentine chains show as the program lays them out.
+
+### Plugging parts in from Python
+
+On the virtual board parts are plugged in and pulled out from `code.py` or the REPL, as on a
+breadboard. `board.parts` is the catalogue (Tab lists it): `Button`, `Switch`, `LED`,
+`Potentiometer`, `Lamp`, `Servo`, `Touch`, `Speaker`, `Mic`, `Encoder`, `IR`, `NeoPixel` and a
+kind per I2C sensor model, in capitals (`BME280`, `LIS3DH` ...). Calling a kind describes a part;
+`board.attach(part)` puts it on the board and returns it; `board.detach(part)` or
+`board.detach("NAME")` takes it off; `board.attached` is a dict, name to part, of everything on
+the board, wherever it came from.
+
+```python
+>>> import board
+>>> from microcontroller import pin
+>>> env = board.attach(board.parts.BME280(address=0x76, name="ENV"))
+>>> env.temp = 35            # the panel's slider moves; the library reads 35
+>>> led = board.attach(board.parts.LED(pin.GPIO16, color="green"))
+>>> led
+<LED GPIO16 on GPIO16: off>
+>>> board.detach("ENV")      # the library's next read raises, as with the wire pulled
+>>> sorted(board.attached)
+['GPIO16']
+```
+
+A kind takes its pin (a sensor its `address=`, by default the model's), `name=` (by default the
+board's name for the pin, or the model in capitals; up to 23 characters, 11 for a sensor) and at
+most one option, written as the board file writes it: `Button(pin, pressed="low")`,
+`LED(pin, color="red")`, `Lamp(pin, color="red")`, `Mic(pin, source="tone 440")`,
+`IR(pin, code="255,2,247,8")`, `NeoPixel(pin, layout="10")`. A kind's `repr` lists them, and a
+sensor's channels with their units.
+
+An attached part's values are its attributes; setting one is what moving its control on the
+panel does:
+
+| part | values |
+|---|---|
+| `Button`, `Switch`, `Touch` | `pressed`, `on`, `touched` |
+| `LED` | `value`: lit (read only) |
+| `Potentiometer`, `Mic` | `value`, `level`: 0-65535 (a potentiometer reads what an `AnalogOut` wrote) |
+| `Lamp`, `Servo` | `duty` and `frequency`, `angle` (read only) |
+| `Encoder` | `position` in detents (read only), `turn(detents)` |
+| `IR` | `send(code=None)` |
+| `Speaker` | `playing` (read only) |
+| `NeoPixel` | `colors`: `(r, g, b)` or `(r, g, b, w)` per pixel (read only) |
+| a sensor | each channel by its name (`env.temp`, `accel.z`), kept within its range as the slider is |
+
+A value of a part that is not on the board raises `RuntimeError`. A part's place is its pin, its
+I2C address or its strip's data pin. A part attached where another is, or under another's name,
+replaces it, in board files too; the same kind at the same place keeps the live part and its
+values, so `code.py` may attach its parts on every run. A part pulled out is gone as on a board:
+its I2C address is not acknowledged (the library raises), an LED or a strip shows nothing, a
+button's pin reads its pull, an `AnalogIn` reads 0; objects the program holds work again when a
+part is attached there again, and the automatic attaching leaves the place empty until then.
+What was attached and pulled out stays over a reload; a reset or a new start begins from the
+board files again.
+
+Every part the automatic attaching adds says so on stderr, `virtual: BME280 attached at I2C 0x77
+(automatic)` or `virtual: Potentiometer A0 attached at A0 (automatic)`, and its `repr` ends in
+`(automatic)`: when the guess is wrong (several chips share an address), detach it and attach
+what is really there. A closed panel window shows again when a part is added.
+`examples/parts` plugs in a button, an LED and a BME280 from its `code.py`.
 
 ### Wi-Fi
 

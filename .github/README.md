@@ -47,6 +47,26 @@ names; `examples/panel` shows every part of the board panel.
 The VS Code extension is the `.vsix` file on the same page, for Linux and Windows alike: in
 VS Code, Extensions > `...` > Install from VSIX.
 
+## A sensor in a minute
+
+Learning Guide code for a BME280 runs as it is: the driver looks for the sensor, and the virtual
+board plugs one in and says so:
+
+```
+virtual: BME280 attached at I2C 0x77 (automatic)
+```
+
+Its values are sliders on the board panel, and attributes in the REPL:
+
+```python
+>>> import board
+>>> board.attached["BME280"].temp = 30
+```
+
+`board.parts` lists every part that can be plugged in; `board.attach` and `board.detach` plug
+them in and out from `code.py` or the REPL
+([README](../ports/desktop/README.md#plugging-parts-in-from-python)).
+
 ## Use it with an AI assistant
 
 `cp_mcp.py` in the package is an MCP server (Python 3, standard library only). Through it an

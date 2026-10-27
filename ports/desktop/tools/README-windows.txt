@@ -11,6 +11,13 @@ clue.toml, feather.toml, magtag.toml, ...), so code written for one runs with it
     circuitpython.exe --board-file boards\files\pybadge.toml --drive C:\path\to\project
     circuitpython.exe --drive examples\panel\CIRCUITPY --board-file examples\panel\board.toml
 
+Parts from Python: on the virtual board board.parts lists what can be plugged in, board.attach
+and board.detach plug parts in and out from code.py or the REPL, and board.attached is what is
+on the board (board.attached["BME280"].temp = 30); examples\parts shows a button, an LED and a
+sensor:
+
+    circuitpython.exe --drive examples\parts\CIRCUITPY
+
 README.md is the whole manual: the board panel, virtual sensors and displays, --fast-time,
 --trace-bus, the web workflow, the network, the MCP server.
 
