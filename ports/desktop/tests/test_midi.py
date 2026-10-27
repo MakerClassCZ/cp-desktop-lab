@@ -153,3 +153,35 @@ with launch('print("up")\n') as b:
         "the catalogue lists them",
         "CC" in b.eval("dir(board.parts)") and "Keyboard" in b.eval("dir(board.parts)"),
     )
+
+# Notes played while no program runs (after "Code done running") are not the next run's.
+FIRST_THEN_READ = (
+    "import supervisor\nif supervisor.runtime.run_reason == supervisor.RunReason.STARTUP:\n"
+    '    print("first done")\nelse:\n'
+    + "".join("    " + l + "\n" for l in (READER % 3).splitlines())
+)
+with launch(FIRST_THEN_READ, KEYS) as b:
+    b.wait("Code done running")
+    b.panel("tap KEYS C4")
+    b.reload()
+    b.wait("ready")
+    b.panel("tap KEYS D4")
+    out = b.wait("midi ") + b.read(timeout=1)
+    check("a run gets nothing played before it started", "midi 90 3e 64" in out, out)
+
+# A name is one part's: a CC slider or the keyboard takes it from a part that had it.
+with launch('print("up")\n') as b:
+    b.wait("up")
+    b.exec(
+        "import board\nfrom microcontroller import pin\n"
+        "board.attach(board.parts.Button(pin.GPIO5, name='CUTOFF'))\n"
+        "c = board.attach(board.parts.CC(74, name='CUTOFF'))\n"
+        "board.attach(board.parts.LED(pin.GPIO6, name='KEYS'))\n"
+        "k = board.attach(board.parts.Keyboard())\n"
+    )
+    kinds = sorted(
+        (p["name"], p["kind"]) for p in b.state()["parts"] if p["name"] in ("CUTOFF", "KEYS")
+    )
+    check("the last part of a name wins", kinds == [("CUTOFF", "cc")], kinds)
+    b.panel("set CUTOFF 99")
+    check("set reaches the CC slider", b.eval("c.value") == "99", b.eval("c.value"))

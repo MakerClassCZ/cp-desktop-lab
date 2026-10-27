@@ -406,6 +406,12 @@ part_t *parts_add_cc(const char *name, const char *options, const char **why) {
         *why = "at most 8 CC sliders";
         return NULL;
     }
+    // The last wins: another part of the name is pulled out.
+    for (int i = 0; i < _count; i++) {
+        if (&_parts[i] != p && _parts[i].kind != PART_SENSOR && strcasecmp(_parts[i].name, name) == 0) {
+            parts_detach(&_parts[i]);
+        }
+    }
     if (p == NULL) {
         if (_count == PARTS_MAX) {
             *why = "too many parts";

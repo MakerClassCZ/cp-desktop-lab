@@ -181,6 +181,11 @@ bool midi_keyboard_add(const char *name, const char *options, const char **why) 
             return false;
         }
     }
+    // The last wins: a part of the name is pulled out.
+    part_t *named = parts_by_name(name);
+    if (named != NULL && named->kind != PART_SENSOR) {
+        parts_detach(named);
+    }
     bool added = !_present;
     midi_keyboard_remove();
     _present = true;

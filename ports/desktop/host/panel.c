@@ -671,7 +671,11 @@ bool panel_apply(const char *line, char *err, size_t errlen) {
             snprintf(err, errlen, "no key %s", line + strlen(verb) + 1);
             return false;
         }
-        event.key.keysym.scancode = SDL_GetScancodeFromKey(event.key.keysym.sym);
+        // The key's position by its US name, so "down z" plays the same note on every layout.
+        event.key.keysym.scancode = SDL_GetScancodeFromName(key);
+        if (event.key.keysym.scancode == SDL_SCANCODE_UNKNOWN) {
+            event.key.keysym.scancode = SDL_GetScancodeFromKey(event.key.keysym.sym);
+        }
         SDL_PushEvent(&event);
         return true;
     }
