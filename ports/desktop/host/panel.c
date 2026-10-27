@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "shared-bindings/displayio/Bitmap.h"
 #include "shared-module/fontio/BuiltinFont.h"
@@ -18,6 +19,7 @@
 #include "gamepad.h"
 #include "i2c_virtual.h"
 #include "desktop_pins.h"
+#include "midi_in.h"
 #include "desktop_port.h"
 #include "neopixel_emu.h"
 #include "parts.h"
@@ -587,6 +589,22 @@ bool panel_apply(const char *line, char *err, size_t errlen) {
         SDL_PushEvent(&event);
         return true;
     }
+    if (n >= 2 && midi_keyboard_present() && strcasecmp(name, midi_keyboard_name()) == 0
+        && (strcmp(verb, "press") == 0 || strcmp(verb, "release") == 0 || strcmp(verb, "tap") == 0)) {
+        // "press KEYS C4", "release KEYS 60", "tap KEYS C4" (pressed and let go).
+        char note_text[16] = "";
+        sscanf(line, "%*s %*s %15s", note_text);
+        int note = midi_note_parse(note_text);
+        if (note < 0) {
+            snprintf(err, errlen, "bad note %s", note_text);
+            return false;
+        }
+        midi_keyboard_note(note, verb[0] != 'r', 100);
+        if (verb[0] == 't') {
+            midi_keyboard_note(note, false, 0);
+        }
+        return true;
+    }
     part_t *p = n >= 2 ? parts_by_name(name) : NULL;
     int button = n >= 2 && p == NULL ? gamepad_button(name) : -1;
     if (button >= 0 && (strcmp(verb, "press") == 0 || strcmp(verb, "release") == 0)) {
@@ -876,7 +894,7 @@ bool panel_command(const char *line) {
     char verb[16];
     if (sscanf(line, "%15s", verb) != 1 || (strcmp(verb, "set") != 0 && strcmp(verb, "press") != 0 && strcmp(verb, "release") != 0
                                             && strcmp(verb, "turn") != 0 && strcmp(verb, "dump") != 0 && strcmp(verb, "send") != 0
-                                            && strcmp(verb, "close") != 0)) {
+                                            && strcmp(verb, "close") != 0 && strcmp(verb, "tap") != 0)) {
         return false;
     }
     SDL_Event event = { 0 };

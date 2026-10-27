@@ -70,6 +70,7 @@ SRC_C += \
 	virtual/board_parts.c \
 	virtual/display_auto.c \
 	virtual/i2c_virtual.c \
+	virtual/midi_in.c \
 	virtual/neopixel_emu.c \
 	virtual/parts.c \
 	virtual/rgbmatrix_virtual.c \

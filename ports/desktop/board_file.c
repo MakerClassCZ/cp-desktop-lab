@@ -33,6 +33,7 @@
 
 #include "gamepad.h"
 #include "i2c_virtual.h"
+#include "midi_in.h"
 #include "spi_virtual.h"
 #include "desktop_pins.h"
 #include "desktop_port.h"
@@ -160,8 +161,9 @@ static char *_unquote(char *s) {
 #define SPI 4
 #define BOARD 5
 #define SHIFTREG 6
-static const char *const _sections[] = { "[pins]", "[neopixel]", "[gamepad]", "[i2c]", "[spi]", "[board]", "[shiftreg]", "[button]", "[switch]", "[led]", "[analog]", "[pwm]", "[touch]", "[i2s]", "[mic]", "[encoder]", "[ir]" };
-static const part_kind_t _kinds[] = { 0, 0, 0, 0, 0, 0, 0, PART_BUTTON, PART_SWITCH, PART_LED, PART_ANALOG, PART_PWM, PART_TOUCH, PART_SPEAKER, PART_MIC, PART_ENCODER, PART_IR };
+#define MIDI 17
+static const char *const _sections[] = { "[pins]", "[neopixel]", "[gamepad]", "[i2c]", "[spi]", "[board]", "[shiftreg]", "[button]", "[switch]", "[led]", "[analog]", "[pwm]", "[touch]", "[i2s]", "[mic]", "[encoder]", "[ir]", "[midi]" };
+static const part_kind_t _kinds[] = { 0, 0, 0, 0, 0, 0, 0, PART_BUTTON, PART_SWITCH, PART_LED, PART_ANALOG, PART_PWM, PART_TOUCH, PART_SPEAKER, PART_MIC, PART_ENCODER, PART_IR, 0 };
 
 static bool _add_part(const char *where, part_kind_t kind, const char *name, const char *options) {
     const mcu_pin_obj_t *pin = _pin(name);
@@ -202,6 +204,21 @@ static bool _add_spi(const char *where, const char *name, const char *spec) {
         return false;
     }
     return true;
+}
+
+// NAME = "keyboard [LOW] [channel=N]": the MIDI keyboard.
+static bool _add_midi(const char *where, const char *name, const char *spec) {
+    const char *why = NULL;
+    bool ok = false;
+    if (strncmp(spec, "keyboard", 8) == 0 && (spec[8] == '\0' || spec[8] == ' ')) {
+        ok = midi_keyboard_add(name, spec + 8 + (spec[8] == ' '), &why);
+    } else {
+        why = "a [midi] part is \"keyboard\"";
+    }
+    if (!ok) {
+        fprintf(stderr, "circuitpython: %s: %s: %s\n", where, name, why);
+    }
+    return ok;
 }
 
 // DATA = "clock=PIN latch=PIN keys=B,A,START,...": the gamepad's buttons behind a shift register.
@@ -275,7 +292,7 @@ static bool _load(const char *path) {
             }
             if (section == NONE) {
                 fprintf(stderr, "circuitpython: %s: unknown section %s ([pins], [neopixel], [gamepad], [i2c], [spi], [board], [shiftreg], [button], "
-                    "[switch], [led], [analog], [pwm], [touch], [i2s], [mic], [encoder] or [ir])\n", where, s);
+                    "[switch], [led], [analog], [pwm], [touch], [i2s], [mic], [encoder], [ir] or [midi])\n", where, s);
                 ok = false;
             } else if (section == GAMEPAD) {
                 gamepad_show();
@@ -312,6 +329,8 @@ static bool _load(const char *path) {
             }
         } else if (section == SPI) {
             ok = _add_spi(where, key, value);
+        } else if (section == MIDI) {
+            ok = _add_midi(where, key, value);
         } else if (section == GAMEPAD || section == I2C) {
             const char *why = NULL;
             ok = section == GAMEPAD ? gamepad_set_keys(key, value, &why) : i2c_virtual_add(key, value, &why);

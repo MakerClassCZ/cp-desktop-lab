@@ -11,11 +11,14 @@
 #include "py/runtime.h"
 
 #include "bus_trace.h"
+#include "midi_in.h"
 
 //| """USB MIDI on a host
 //|
 //| The port is no USB device: ``usb_midi.ports`` is a board's, so ``adafruit_midi`` code runs.
-//| What goes out is traced (``--trace-bus``) as ``MIDI OUT 90 3c 64``; nothing comes in."""
+//| What comes in is what the board panel's MIDI keyboard and CC sliders play (a board file's
+//| ``[midi]`` section, or ``board.attach``), traced as ``MIDI IN 90 3c 64``; what goes out is traced
+//| as ``MIDI OUT 90 3c 64``."""
 
 typedef struct {
     mp_obj_base_t base;
@@ -26,16 +29,29 @@ extern const mp_obj_type_t usb_midi_portout_type;
 
 //| class PortIn:
 //|     def read(self, nbytes: Optional[int] = None) -> Optional[bytes]:
-//|         """None: nothing has come in."""
+//|         """What has come in, at most nbytes; None: nothing."""
 //|     def readinto(self, buf: WriteableBuffer, nbytes: Optional[int] = None) -> Optional[int]:
-//|         """None: nothing has come in."""
+//|         """What has come in, into buf, at most nbytes: how many; None: nothing."""
 static mp_obj_t usb_midi_portin_read(size_t n_args, const mp_obj_t *args) {
-    (void)n_args;
-    (void)args;
-    return mp_const_none;
+    uint8_t buf[MIDI_IN_QUEUE];
+    mp_int_t max = n_args > 1 && args[1] != mp_const_none ? mp_obj_get_int(args[1]) : MIDI_IN_QUEUE;
+    size_t n = midi_in_read(buf, max < 0 ? 0 : max > MIDI_IN_QUEUE ? MIDI_IN_QUEUE : (size_t)max);
+    return n > 0 ? mp_obj_new_bytes(buf, n) : mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usb_midi_portin_read_obj, 1, 2, usb_midi_portin_read);
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usb_midi_portin_readinto_obj, 2, 3, usb_midi_portin_read);
+
+static mp_obj_t usb_midi_portin_readinto(size_t n_args, const mp_obj_t *args) {
+    mp_buffer_info_t buf;
+    mp_get_buffer_raise(args[1], &buf, MP_BUFFER_WRITE);
+    size_t max = buf.len;
+    if (n_args > 2 && args[2] != mp_const_none) {
+        mp_int_t want = mp_obj_get_int(args[2]);
+        max = want < 0 ? 0 : (size_t)want < max ? (size_t)want : max;
+    }
+    size_t n = midi_in_read(buf.buf, max);
+    return n > 0 ? MP_OBJ_NEW_SMALL_INT(n) : mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usb_midi_portin_readinto_obj, 2, 3, usb_midi_portin_readinto);
 
 static const mp_rom_map_elem_t usb_midi_portin_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&usb_midi_portin_read_obj) },

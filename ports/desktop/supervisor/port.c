@@ -37,6 +37,7 @@
 #include "control_api.h"
 #include "desktop_pins.h"
 #include "desktop_port.h"
+#include "midi_in.h"
 #include "parts.h"
 #include "platform.h"
 
@@ -97,6 +98,7 @@ void reset_port(void) {
     audioout_reset();
     #endif
     parts_reset();
+    midi_in_reset();
     reset_all_pins();
     #if CIRCUITPY_FILESYSTEM_POSIX
     // Once CIRCUITPY is up, a directory drive starts reloading on host edits.
