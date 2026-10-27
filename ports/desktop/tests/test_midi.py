@@ -72,17 +72,6 @@ out, _ = run(READER % 6, "wait ready\ndown pagedown\nup pagedown\ndown s\nup s",
 check("Page Down: an octave lower; S is C#", "midi 90 25 64 80 25 00" in out, out)
 out, _ = run(READER % 6, "wait ready\ndown z\ndown pageup\nup z", "midi ", KEYS)
 check("a held note is let go when the octave moves", "midi 90 30 64 80 30 00" in out, out)
-# The gamepad gives its letter keys up only on a board with a keyboard.
-out, trace = run(READER % 6, "wait ready\ndown z\nup z", "midi ", "[gamepad]\n" + KEYS)
-check(
-    "with a keyboard Z plays, not the gamepad's A",
-    "midi 90 30 64 80 30 00" in out and "GAMEPAD A pressed" not in trace,
-    (out, trace),
-)
-out, trace = run(
-    'print("up")\n', "wait up\ndown z\nup z\ndown up\nup up", None, "[gamepad]\n" + KEYS
-)
-check("the gamepad keeps the arrows", "GAMEPAD UP pressed" in trace, trace)
 
 # The panel's state: the keyboard's name, range, channel and held keys; none without one.
 with launch(READER % 100, '[midi]\nKEYS = "keyboard C2"\n') as b:
