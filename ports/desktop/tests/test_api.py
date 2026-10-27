@@ -303,12 +303,11 @@ with launch(LOOP) as b:
     b.wait("Hello")
     first = b.info()
     waited = []
+    end = b.console(since=0)["end"]  # nothing comes after it until the reset
 
     def read_long():
         try:
-            waited.append(
-                b.request("GET", "/api/console?since=999999999&timeout=8000", timeout=30)
-            )
+            waited.append(b.request("GET", "/api/console?since=%d&timeout=8000" % end, timeout=30))
         except Exception as e:
             waited.append(e)
 

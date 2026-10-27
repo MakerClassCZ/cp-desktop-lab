@@ -522,7 +522,8 @@ naming another `Host`, or a browser's preflight, is refused, so a web page canno
 for an expression. A running program is the debugger's (`--debug`); a program that wants to be
 watched prints, and the console stream has it. `state`, `panel` and `display` exist on the
 virtual board. After `microcontroller.reset()` the program listens on the same port with the
-same token.
+same token; a console or trace read that gives the `boot` its offset came from (`&boot=ID`), or an
+offset past the end, reads the new run from its start.
 
 `tools/cpapi.py` is a client with no dependencies beyond Python's own library:
 

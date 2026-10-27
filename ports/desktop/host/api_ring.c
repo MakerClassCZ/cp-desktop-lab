@@ -89,7 +89,8 @@ size_t api_ring_read(api_ring_t *ring, uint64_t since, const char *text, int tim
     pthread_mutex_lock(&ring->lock);
     for (;;) {
         uint64_t oldest = ring->end > ring->cap ? ring->end - ring->cap : 0;
-        uint64_t from = since < oldest ? oldest : since > ring->end ? ring->end : since;
+        // An offset past the end is a client's from before a reset: all of this run is new to it.
+        uint64_t from = since < oldest || since > ring->end ? oldest : since;
         info->lost = since < oldest;
         info->start = from;
         info->end = ring->end;

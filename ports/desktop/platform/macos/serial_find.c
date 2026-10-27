@@ -32,7 +32,7 @@ static int _parent_number(io_object_t service, CFStringRef key) {
 // The port's /dev/cu.* name, the one that opens without waiting for a carrier.
 bool serial_host_find_usb(uint16_t vid, uint16_t pid, char *path, size_t len) {
     io_iterator_t ports;
-    if (IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching(kIOSerialBSDServiceValue), &ports) != KERN_SUCCESS) {
+    if (IOServiceGetMatchingServices(MACH_PORT_NULL, IOServiceMatching(kIOSerialBSDServiceValue), &ports) != KERN_SUCCESS) {
         return false;
     }
     bool found = false;

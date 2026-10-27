@@ -275,6 +275,8 @@ class Board:
         }
         if wait is not None:
             q["wait"] = wait
+        if since is None and self.boot is not None:
+            q["boot"] = self.boot  # the server reads from 0 when a reset has started a new run
         r = self.request("GET", path + "?" + urlencode(q), timeout=timeout + 30)
         if since is None and self.boot is not None and r["boot"] != self.boot:
             # A new process after a reset: its streams start from 0.

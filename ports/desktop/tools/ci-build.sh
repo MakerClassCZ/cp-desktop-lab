@@ -47,7 +47,8 @@ macos)
         hdiutil detach "$MNT" > /dev/null
         rm "$TOOLS/$SDL2.dmg"
     fi
-    make -C "$HERE" -j"$JOBS" BUILD=build-macos SDL_FRAMEWORK_DIR="$TOOLS"
+    # Runs on macOS 11 and later, whatever system builds it.
+    MACOSX_DEPLOYMENT_TARGET=11.0 make -C "$HERE" -j"$JOBS" BUILD=build-macos SDL_FRAMEWORK_DIR="$TOOLS"
     NAME=circuitpython-macos-$(uname -m)
     rm -rf "${OUT:?}/$NAME" && mkdir -p "$OUT/$NAME"
     # strip -x keeps the program's ad hoc signature valid, which Apple silicon needs to run it.

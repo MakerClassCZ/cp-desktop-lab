@@ -297,11 +297,16 @@ static long long _param_int(const request_t *r, const char *name, long long fall
     return _param(r, name, v, sizeof(v)) && v[0] != '\0' ? strtoll(v, NULL, 10) : fallback;
 }
 
-// GET a stream from since: what came, and with wait= when the text came, as JSON.
+// GET a stream from since: what came, and with wait= when the text came, as JSON. since is
+// counted in the run boot= names; from another run (before a reset) it reads from the start.
 static void _stream(request_t *r, api_ring_t *ring) {
     char text[512];
     bool wait = _param(r, "wait", text, sizeof(text)) && text[0] != '\0';
     long long since = _param_int(r, "since", 0);
+    char boot[sizeof(_boot)];
+    if (_param(r, "boot", boot, sizeof(boot)) && boot[0] != '\0' && strcmp(boot, _boot) != 0) {
+        since = 0;
+    }
     long long timeout = _param_int(r, "timeout", 0);
     long long max = _param_int(r, "max", RING_SIZE);
     timeout = timeout < 0 ? 0 : timeout > WAIT_MAX_MS ? WAIT_MAX_MS : timeout;

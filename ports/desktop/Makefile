@@ -153,7 +153,7 @@ ifneq (,$(findstring clang,$(shell $(CC) --version 2>/dev/null)))
 CLANG = 1
 CFLAGS := $(filter-out -fsingle-precision-constant --param max-inline-insns-single=500 -Wimplicit-fallthrough=2,$(CFLAGS))
 # Warning classes clang reads more widely than GCC, which the GCC builds keep checking.
-# Older clang (Xcode 15) does not know every one of these, so unknown ones are let pass.
+# Older clang (Xcode 15 and older) does not know every one of these, so unknown ones are let pass.
 CFLAGS += -Wno-unknown-warning-option -Wno-expansion-to-defined -Wno-unreachable-code -Wno-double-promotion -Wno-literal-conversion \
 	-Wno-c23-extensions -Wno-unused-variable -Wno-unused-but-set-variable
 endif

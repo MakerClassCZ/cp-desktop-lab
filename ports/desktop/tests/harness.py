@@ -38,13 +38,16 @@ class Run:
         return open(self.path, "rb").read().decode(errors="replace")
 
     def wait_for(self, s, timeout=8, count=1):
-        """Whether s has come count times."""
+        """Whether s has come count times; a program that has ended says no more."""
         import time
 
         end = time.time() + timeout
         while time.time() < end:
+            ended = self.p.poll() is not None
             if self.text().count(s) >= count:
                 return True
+            if ended:
+                return False
             time.sleep(0.1)
         return False
 
