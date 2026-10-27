@@ -42,11 +42,12 @@ jobs:
           sudo apt-get install -yq libsdl2-dev p7zip-full
           pip install -q -r requirements-dev.txt
       - name: Version
-        # From adafruit/circuitpython's tags, as its own builds do.
+        # adafruit/circuitpython's tags, from which the port's Makefile takes the version (never
+        # from a desktop-v* tag, which py/version.py would pick on a release build).
         run: |
           git fetch -q --no-recurse-submodules --shallow-since="2021-07-01" --tags https://github.com/adafruit/circuitpython HEAD
           git fetch -q --no-recurse-submodules --shallow-since="2021-07-01" origin $GITHUB_SHA
-          echo "CP_VERSION=$(python py/version.py)" >> $GITHUB_ENV
+          git describe --tags --first-parent --match "[0-9]*"
       - uses: actions/setup-node@v7
         if: matrix.target == 'windows'
         with:
