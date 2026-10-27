@@ -46,7 +46,7 @@ out, _ = run(
     "into ",
     KEYS,
 )
-check("readinto: count and bytes", "into 3 90 30 64" in out, out)
+check("readinto: count and bytes", "into 3 90 30 64" in out, repr(out[-400:]))
 
 # A reload empties the queue and releases the held keys on the panel.
 with launch(READER % 100, KEYS) as b:
@@ -81,7 +81,7 @@ with launch(READER % 100, '[midi]\nKEYS = "keyboard C2"\n') as b:
     check(
         "state: name, range, channel, held",
         s == {"keyboard": "KEYS", "low": "C2", "high": "C4", "channel": 1, "held": ["C2", "E2"]},
-        s,
+        repr((s, b.console(since=0)["data"][-300:], b.trace(since=0)["data"][-300:])),
     )
 with launch('print("up")\n') as b:
     b.wait("up")

@@ -26,7 +26,7 @@ for t in "$@"; do
     echo "$t: rc=$rc $(grep -c '^PASS' "$t.out") PASS $(grep -c '^FAIL' "$t.out") FAIL $(grep -c '^SKIP' "$t.out") SKIP"
     if [ $rc -ne 0 ] || grep -q '^FAIL' "$t.out"; then
         failed="$failed $t"
-        grep '^FAIL' "$t.out" | cut -c1-300
+        grep '^FAIL' "$t.out" | cut -c1-1200
         [ $rc -ne 0 ] && tail -20 "$t.out"
     fi
 done
