@@ -98,12 +98,19 @@ static bool _reset_chip(void) {
     return false;
 }
 
-// Status with a cancelled transfer; false when the engine stays stuck even after a chip reset.
+// The engine idle, a transfer in progress cancelled; false when it stays stuck even after a chip
+// reset. An idle engine is not cancelled: on macOS that leaves it stuck (state 0x62).
 static bool _engine_idle(void) {
     uint8_t cancel[] = { CMD_STATUS, 0, 0x10 };
     uint8_t status[] = { CMD_STATUS };
     uint8_t reply[HID_REPORT_SIZE];
     for (int attempt = 0; attempt < 2; attempt++) {
+        if (!_xfer(status, sizeof(status), reply)) {
+            return false;
+        }
+        if (reply[8] == I2C_STATE_IDLE) {
+            return true;
+        }
         if (!_xfer(cancel, sizeof(cancel), reply) || !_xfer(status, sizeof(status), reply)) {
             return false;
         }
@@ -290,12 +297,6 @@ bool mcp2221_dac_set(uint8_t value) {
 
 // ---- I2C through the chip's engine ----
 
-static bool _i2c_cancel(void) {
-    uint8_t cmd[] = { CMD_STATUS, 0, 0x10 };
-    uint8_t reply[HID_REPORT_SIZE];
-    return _xfer(cmd, sizeof(cmd), reply);
-}
-
 static bool _i2c_state(uint8_t *state) {
     uint8_t cmd[] = { CMD_STATUS };
     uint8_t reply[HID_REPORT_SIZE];
@@ -304,6 +305,20 @@ static bool _i2c_state(uint8_t *state) {
     }
     *state = reply[8];
     return true;
+}
+
+// A transfer in progress cancelled; an idle engine is left alone (see _engine_idle).
+static bool _i2c_cancel(void) {
+    uint8_t state;
+    if (!_i2c_state(&state)) {
+        return false;
+    }
+    if (state == I2C_STATE_IDLE) {
+        return true;
+    }
+    uint8_t cmd[] = { CMD_STATUS, 0, 0x10 };
+    uint8_t reply[HID_REPORT_SIZE];
+    return _xfer(cmd, sizeof(cmd), reply);
 }
 
 static unsigned _i2c_timeout_ms(size_t len) {
