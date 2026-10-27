@@ -247,6 +247,11 @@ BUTTON = ""
 A0 = ""
 ```
 
+`--board-file` may be given more than once. The files are read in order, a later one may use the
+names an earlier one gave, and a part a later file places where an earlier one did, or under its
+name, replaces it: the first file can be a board, the next what is plugged in today
+(`--board-file boards/files/pybadge.toml --board-file today.toml`).
+
 NeoPixel layouts are `"10"` (a row), `"8x8"` (a matrix, filled row by row) or `"16x16
 serpentine GRBW"` (every other row reversed, as most matrices are wired, and the byte order of
 RGBW pixels; `GRB`, the WS2812's, is the default); `--neopixel NAME=LAYOUT` does the same on the

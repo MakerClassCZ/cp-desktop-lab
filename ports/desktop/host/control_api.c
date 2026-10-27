@@ -249,8 +249,8 @@ static void _info(request_t *r) {
     api_buf_add(&b, ", \"board\": ", 11);
     api_buf_json_string(&b, desktop_options.board_name, strlen(desktop_options.board_name));
     api_buf_add(&b, ", \"board_file\": ", 16);
-    api_buf_json_string(&b, desktop_options.board_file,
-        desktop_options.board_file ? strlen(desktop_options.board_file) : 0);
+    const char *board_file = desktop_options.board_file_count > 0 ? desktop_options.board_files[0] : NULL;
+    api_buf_json_string(&b, board_file, board_file ? strlen(board_file) : 0);
     api_buf_add(&b, ", \"drive\": ", 11);
     api_buf_json_string(&b, desktop_options.drive_path, strlen(desktop_options.drive_path));
     char status[64];

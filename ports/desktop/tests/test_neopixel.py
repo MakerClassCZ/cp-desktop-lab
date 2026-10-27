@@ -5,7 +5,7 @@ the command line. What the program writes is checked in the bus trace, which nee
 """
 
 import os
-from harness import T, check, refused, run
+from harness import T, board_file, check, launch, refused, run
 
 FEATHER = """# a few names of a Feather
 [pins]
@@ -162,4 +162,23 @@ else:
         )
         out, trace = run(src, "", "loaded", args=["--board-file", os.path.join(files, name)])
         check("board file " + name, "loaded True True" in out, out)
+# Several board files, read in order: a later one uses an earlier one's names, and its part wins
+first = '[pins]\nMYBTN = "GPIO5"\n[led]\nGPIO6 = "red"\n'
+second = board_file('[led]\nGPIO6 = "green"\n[pins]\nALIAS = "MYBTN"\n', name="second.toml")
+out, _ = run(
+    'import board\nprint("names", board.MYBTN is board.ALIAS)\n',
+    board=first,
+    args=("--board-file", second),
+    expect="names",
+)
+check("two board files: the second uses the first's names", "names True" in out, out)
+with launch('print("up")\n', board=first, args=("--board-file", second)) as b:
+    b.wait("up")
+    leds = [p for p in b.state()["parts"] if p["name"] == "GPIO6"]
+    check(
+        "two board files: the later file's part wins",
+        [p["colour"] for p in leds] == ["20e020"],
+        leds,
+    )
+
 print("DONE")

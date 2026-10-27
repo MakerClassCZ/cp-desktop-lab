@@ -24,7 +24,8 @@ typedef struct {
     const char *gpiochip;       // --gpiochip: the GPIO chip of --board gpiochip
     int i2c_bus;                // --i2c-bus: its /dev/i2c-N
     const char *spidev;         // --spi: its spidev device
-    const char *board_file;     // --board-file: more pin names and NeoPixel layouts, or NULL
+    const char *board_files[8]; // --board-file, read in order: pin names, NeoPixel layouts, parts
+    int board_file_count;
     const char *neopixel[8];    // --neopixel NAME=LAYOUT, as given
     int neopixel_count;
     int api_port;               // --api: the control API's port, 0 = any free one, -1 = off

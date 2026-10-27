@@ -58,7 +58,8 @@ static void usage(const char *prog) {
         "  --board NAME      virtual (default), ft232h or mcp2221 (real pins through that chip on USB),\n"
         "                    gpiochip (this computer's own GPIO, I2C and SPI, as on a Raspberry Pi)\n"
         "  --list-boards     the boards, and whether each one's adapter is plugged in\n"
-        "  --board-file FILE more pin names ([pins]) and NeoPixel layouts ([neopixel]), TOML\n"
+        "  --board-file FILE more pin names ([pins]), NeoPixel layouts and parts, TOML; more than\n"
+        "                    one are read in order, a later one's part replacing an earlier one's\n"
         "  --neopixel N=L    the NeoPixels on pin N laid out as L: 10, 8x8, \"16x16 serpentine GRBW\"\n"
         "  --trace-bus PATH  write every I2C, SPI and UART transfer to PATH (- = stderr)\n"
         "  --uart PORT       busio.UART on board.TX/board.RX uses this serial port (COM5, /dev/ttyUSB0)\n"
@@ -136,7 +137,11 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "--uart") == 0 && i + 1 < argc) {
             desktop_options.uart_path = argv[++i];
         } else if (strcmp(argv[i], "--board-file") == 0 && i + 1 < argc) {
-            desktop_options.board_file = argv[++i];
+            if (desktop_options.board_file_count == 8) {
+                fprintf(stderr, "circuitpython: more than 8 board files\n");
+                return 2;
+            }
+            desktop_options.board_files[desktop_options.board_file_count++] = argv[++i];
         } else if (strcmp(argv[i], "--neopixel") == 0 && i + 1 < argc && desktop_options.neopixel_count < 8) {
             desktop_options.neopixel[desktop_options.neopixel_count++] = argv[++i];
         } else if (strcmp(argv[i], "--gpiochip") == 0 && i + 1 < argc) {

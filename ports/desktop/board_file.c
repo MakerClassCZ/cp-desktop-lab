@@ -327,7 +327,7 @@ static bool _load(const char *path) {
 }
 
 bool board_file_apply(void) {
-    if (desktop_options.board_file == NULL && desktop_options.neopixel_count == 0) {
+    if (desktop_options.board_file_count == 0 && desktop_options.neopixel_count == 0) {
         return true;
     }
     // The static qstrs, to read the board's names before the VM starts; mp_init does it again.
@@ -339,8 +339,10 @@ bool board_file_apply(void) {
     }
     memcpy(_table, map->table, map->used * sizeof(mp_map_elem_t));
     _used = map->used;
-    if (desktop_options.board_file != NULL && !_load(desktop_options.board_file)) {
-        return false;
+    for (int i = 0; i < desktop_options.board_file_count; i++) {
+        if (!_load(desktop_options.board_files[i])) {
+            return false;
+        }
     }
     for (int i = 0; i < desktop_options.neopixel_count; i++) {
         char spec[128];
