@@ -107,7 +107,7 @@ static uint32_t _record_host(audiobusio_pdmin_obj_t *self, void *buffer, uint32_
 static uint32_t _record_generated(audiobusio_pdmin_obj_t *self, void *buffer, uint32_t length) {
     part_t *part = self->part;
     uint64_t start = mp_hal_ticks_ms();
-    double amplitude = (double)part->value / (double)2;
+    double amplitude = part->detached ? 0 : (double)part->value / (double)2;
     double step = (double)part->tone_hz / (double)self->sample_rate;
     for (uint32_t i = 0; i < length; i++) {
         double wave;

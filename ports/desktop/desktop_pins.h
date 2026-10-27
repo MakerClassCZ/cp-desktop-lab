@@ -82,5 +82,7 @@ extern const mp_obj_fun_builtin_var_t desktop_board_exit_obj;
 
 // A host button sets the level a virtual pin reads.
 void desktop_pin_drive(uint8_t number, bool level);
+// And lets it go: the pin reads its pull again.
+void desktop_pin_release(uint8_t number);
 // A virtual pin's direction and level, for the board panel; false off the virtual board.
 bool desktop_virtual_pin(uint8_t number, bool *output, bool *level);

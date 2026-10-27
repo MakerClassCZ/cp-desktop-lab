@@ -64,7 +64,8 @@ void common_hal_analogio_analogin_deinit(analogio_analogin_obj_t *self) {
 
 uint16_t common_hal_analogio_analogin_get_value(analogio_analogin_obj_t *self) {
     if (self->part != NULL) {
-        return ((part_t *)self->part)->value;
+        part_t *part = self->part;
+        return part->detached ? 0 : part->value;
     }
     uint16_t value = 0;
     mcp2221_adc_read(self->channel, &value);

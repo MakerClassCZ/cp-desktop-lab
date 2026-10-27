@@ -135,7 +135,7 @@ part_t *parts_find(uint8_t pin, part_kind_t kind) {
 
 part_t *parts_by_name(const char *name) {
     for (int i = 0; i < _count; i++) {
-        if (strcasecmp(_parts[i].name, name) == 0) {
+        if (!_parts[i].detached && strcasecmp(_parts[i].name, name) == 0) {
             return &_parts[i];
         }
     }
@@ -143,34 +143,80 @@ part_t *parts_by_name(const char *name) {
 }
 
 part_t *parts_at(int i) {
-    return i >= 0 && i < _count ? &_parts[i] : NULL;
+    for (int k = 0; k < _count; k++) {
+        if (!_parts[k].detached && i-- == 0) {
+            return &_parts[k];
+        }
+    }
+    return NULL;
 }
 
 int parts_count(void) {
-    return _count;
+    int n = 0;
+    for (int k = 0; k < _count; k++) {
+        n += !_parts[k].detached;
+    }
+    return n;
+}
+
+void parts_detach(part_t *p) {
+    if (p->detached) {
+        return;
+    }
+    p->detached = true;
+    if (p->kind == PART_BUTTON || p->kind == PART_SWITCH) {
+        desktop_pin_release(p->pin);
+    }
+    if (p->kind == PART_BUTTON || p->kind == PART_TOUCH || p->kind == PART_LED) {
+        p->on = false;
+    }
+    bus_trace_text("PANEL %s detached", p->name);
+    panel_changed();
+}
+
+// Whether something was at the pin and every part there is pulled out: the place was emptied.
+static bool _emptied(uint8_t pin) {
+    bool any = false;
+    for (int i = 0; i < _count; i++) {
+        if (_parts[i].pin == pin && _parts[i].kind != PART_SENSOR) {
+            if (!_parts[i].detached) {
+                return false;
+            }
+            any = true;
+        }
+    }
+    return any;
 }
 
 part_t *parts_add(part_kind_t kind, uint8_t pin, const char *name, const char *options, const char **why) {
+    part_t check = { .kind = kind };
+    if (!_options(&check, options, why)) {
+        return NULL;
+    }
     part_t *p = parts_find(pin, kind);
+    if (p == NULL && _count == PARTS_MAX) {
+        *why = "too many parts";
+        return NULL;
+    }
+    for (int i = 0; i < _count; i++) {
+        part_t *other = &_parts[i];
+        if (other != p && other->kind != PART_SENSOR
+            && (other->pin == pin || strcasecmp(other->name, name) == 0)) {
+            parts_detach(other);
+        }
+    }
     bool fresh = p == NULL;
     if (fresh) {
-        if (_count == PARTS_MAX) {
-            *why = "too many parts";
-            return NULL;
-        }
         p = &_parts[_count++];
         memset(p, 0, sizeof(*p));
     }
     p->kind = kind;
     p->pin = pin;
+    p->detached = false;
+    p->automatic = false;
     snprintf(p->name, sizeof(p->name), "%s", name);
-    if (!_options(p, options, why)) {
-        if (fresh) {
-            _count--;
-        }
-        return NULL;
-    }
-    if (kind == PART_ANALOG || kind == PART_MIC) {
+    _options(p, options, why);
+    if (fresh && (kind == PART_ANALOG || kind == PART_MIC)) {
         p->value = 32768;
     }
     if (kind == PART_BUTTON || kind == PART_SWITCH) {
@@ -199,10 +245,40 @@ void parts_pin_name(uint8_t pin, char *name, size_t len) {
 part_t *parts_for_pin(uint8_t pin, part_kind_t kind) {
     part_t *p = parts_find(pin, kind);
     if (p == NULL) {
-        char name[16];
+        bool emptied = _emptied(pin);
+        char name[24];
         const char *why;
         parts_pin_name(pin, name, sizeof(name));
-        p = parts_add(kind, pin, name, "", &why);
+        if (emptied) {
+            // A slot for common-hal to hold; the place stays empty.
+            if (_count == PARTS_MAX) {
+                return NULL;
+            }
+            p = &_parts[_count++];
+            memset(p, 0, sizeof(*p));
+            p->kind = kind;
+            p->pin = pin;
+            p->detached = true;
+            snprintf(p->name, sizeof(p->name), "%s", name);
+            _options(p, "", &why);
+            p->value = kind == PART_ANALOG || kind == PART_MIC ? 32768 : 0;
+            return p;
+        }
+        // Not parts_add: another kind's part at the pin stays, as it always has.
+        if (_count == PARTS_MAX) {
+            return NULL;
+        }
+        p = &_parts[_count++];
+        memset(p, 0, sizeof(*p));
+        p->kind = kind;
+        p->pin = pin;
+        p->automatic = true;
+        snprintf(p->name, sizeof(p->name), "%s", name);
+        _options(p, "", &why);
+        if (kind == PART_ANALOG || kind == PART_MIC) {
+            p->value = 32768;
+        }
+        panel_changed();
     }
     return p;
 }
@@ -262,10 +338,18 @@ void parts_set(part_t *p, uint32_t value) {
 
 part_t *parts_add_sensor(void *device, int channel) {
     i2c_virtual_device_t *dev = device;
-    if (_count == PARTS_MAX) {
-        return NULL;
+    part_t *p = NULL;
+    for (int i = 0; i < _count && p == NULL; i++) {
+        if (_parts[i].kind == PART_SENSOR && _parts[i].device == device && _parts[i].channel == channel) {
+            p = &_parts[i];
+        }
     }
-    part_t *p = &_parts[_count++];
+    if (p == NULL) {
+        if (_count == PARTS_MAX) {
+            return NULL;
+        }
+        p = &_parts[_count++];
+    }
     memset(p, 0, sizeof(*p));
     p->kind = PART_SENSOR;
     p->pin = 0xff;
@@ -274,6 +358,14 @@ part_t *parts_add_sensor(void *device, int channel) {
     snprintf(p->name, sizeof(p->name), "%s.%s", dev->name, dev->model->channels[channel].name);
     panel_changed();
     return p;
+}
+
+void parts_detach_device(void *device) {
+    for (int i = 0; i < _count; i++) {
+        if (_parts[i].kind == PART_SENSOR && _parts[i].device == device) {
+            parts_detach(&_parts[i]);
+        }
+    }
 }
 
 void parts_set_sensor(part_t *p, double value) {
@@ -322,7 +414,7 @@ part_t *parts_add_shiftreg(uint8_t data, uint8_t clock, uint8_t latch, const cha
 
 bool parts_pin_level(uint8_t pin, bool *level) {
     part_t *p = parts_find(pin, PART_SHIFTREG);
-    if (p == NULL) {
+    if (p == NULL || p->detached) {
         return false;
     }
     *level = p->bit < p->key_count && ((p->latched >> p->bit) & 1);
@@ -400,7 +492,7 @@ void parts_pin_changed(uint8_t pin) {
     _shift(pin);
     part_t *p = parts_find(pin, PART_LED);
     bool output, level;
-    if (p == NULL || !desktop_virtual_pin(pin, &output, &level)) {
+    if (p == NULL || p->detached || !desktop_virtual_pin(pin, &output, &level)) {
         return;
     }
     bool on = output && level;

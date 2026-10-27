@@ -38,6 +38,10 @@ typedef struct {
     part_kind_t kind;
     uint8_t pin;
     char name[24];
+    // Pulled out (board.detach, or replaced at its place): the slot stays, so what common-hal
+    // holds stays valid and works again when a part of this kind is attached here.
+    bool detached;
+    bool automatic;     // added by parts_for_pin, not by a board file or board.attach
     // options
     bool active_high;   // a button: pressed reads high
     uint32_t colour;    // a lamp: 0xRRGGBB
@@ -79,23 +83,33 @@ typedef struct {
 
 #define PARTS_MAX 48
 
-// A part from the board file: options as written there; false with *why set when they are wrong.
+// A part from the board file or board.attach: options as written there; NULL with *why set when
+// they are wrong. The last wins: an attached part of another kind at the pin, or of the same name
+// elsewhere, is detached; one of the same kind at the pin is reused with its state.
 part_t *parts_add(part_kind_t kind, uint8_t pin, const char *name, const char *options, const char **why);
+// The part of a kind at a pin, attached or not.
 part_t *parts_find(uint8_t pin, part_kind_t kind);
+// An attached part by its name.
 part_t *parts_by_name(const char *name);
+// The attached parts, as the panel shows them.
 part_t *parts_at(int i);
 int parts_count(void);
+// Pulled out: what it drives on its pin let go, left out of the panel, its slot kept.
+void parts_detach(part_t *part);
 
 // The user's side, from the panel or the key script: traced, and a button or switch drives its pin.
 void parts_press(part_t *part, bool down);
 void parts_set(part_t *part, uint32_t value);
-// A virtual I2C device's channel, named DEVICE.CHANNEL.
+// A virtual I2C device's channel, named DEVICE.CHANNEL; its earlier part reused, attached again.
 part_t *parts_add_sensor(void *device, int channel);
+// A device pulled out: its channels' parts detached.
+void parts_detach_device(void *device);
 // A sensor's value in its unit, kept in its range.
 void parts_set_sensor(part_t *part, double value);
 // An encoder turned by detents, negative counter-clockwise.
 void parts_turn(part_t *part, int detents);
-// The program's side: a pin used without a board file part gets one now, named as the board names it.
+// The program's side: the part of a kind at a pin, attached or not. A pin nothing was ever at gets
+// one now, named as the board names it; at a pin whose part was pulled out it is added detached.
 part_t *parts_for_pin(uint8_t pin, part_kind_t kind);
 // The name the board gives a pin: the first key whose value it is, else GPIOn.
 void parts_pin_name(uint8_t pin, char *name, size_t len);

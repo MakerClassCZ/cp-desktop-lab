@@ -147,7 +147,7 @@ static bool _live(const board_part_obj_t *self, live_t *l) {
     switch (self->kind->category) {
         case BOARD_PART_PIN:
             l->part = parts_find(self->pin, self->kind->kind);
-            return l->part != NULL;
+            return l->part != NULL && !l->part->detached;
         case BOARD_PART_I2C:
             l->dev = i2c_virtual_at(self->address);
             return l->dev != NULL && l->dev->model == _model(self->kind);
@@ -471,7 +471,18 @@ static mp_obj_t _kind_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const m
     return MP_OBJ_FROM_PTR(self);
 }
 
-// ---- board.attach ----
+// ---- board.attach, board.detach ----
+
+// An attached pin part at a pin, or NULL.
+static part_t *_attached_at(uint8_t pin) {
+    for (int i = 0; i < parts_count(); i++) {
+        part_t *p = parts_at(i);
+        if (p->pin == pin && p->kind != PART_SENSOR) {
+            return p;
+        }
+    }
+    return NULL;
+}
 
 static mp_obj_t _attach(mp_obj_t part_in) {
     board_part_obj_t *self = MP_OBJ_TO_PTR(mp_arg_validate_type(part_in, &board_part_type, MP_QSTR_part));
@@ -481,6 +492,7 @@ static mp_obj_t _attach(mp_obj_t part_in) {
         if (parts_add(kind->kind, self->pin, self->name, self->options, &why) == NULL) {
             mp_raise_ValueError_varg(MP_ERROR_TEXT("%s"), why);
         }
+        neopixel_emu_detach(self->pin);
     } else if (kind->category == BOARD_PART_I2C) {
         i2c_virtual_device_t *dev = i2c_virtual_at(self->address);
         char spec[32];
@@ -499,8 +511,52 @@ static mp_obj_t _attach(mp_obj_t part_in) {
         if (!neopixel_emu_add(self->pin, cols, rows, serpentine, order)) {
             mp_raise_ValueError_varg(MP_ERROR_TEXT("more than %d NeoPixel pins"), NEOPIXEL_EMU_STRIPS);
         }
+        // The strip's data pin is its place: a part there is replaced.
+        for (part_t *p; (p = _attached_at(self->pin)) != NULL;) {
+            parts_detach(p);
+        }
     }
     self->attached = true;
     return part_in;
 }
 MP_DEFINE_CONST_FUN_OBJ_1(board_attach_obj, _attach);
+
+// A part object, or the name of an attached part (a sensor by its device's name).
+static mp_obj_t _detach(mp_obj_t part_in) {
+    if (mp_obj_is_str(part_in)) {
+        const char *name = mp_obj_str_get_str(part_in);
+        part_t *p = parts_by_name(name);
+        i2c_virtual_device_t *dev = i2c_virtual_by_name(name);
+        if (p != NULL && p->kind != PART_SENSOR) {
+            parts_detach(p);
+            return mp_const_none;
+        }
+        if (dev != NULL) {
+            i2c_virtual_detach(dev);
+            return mp_const_none;
+        }
+        for (size_t i = 0; i < neopixel_emu_strips(); i++) {
+            char strip_name[24];
+            uint8_t pin = neopixel_emu_pin(i);
+            parts_pin_name(pin, strip_name, sizeof(strip_name));
+            if (strcmp(strip_name, name) == 0 && neopixel_emu_detach(pin)) {
+                return mp_const_none;
+            }
+        }
+        mp_raise_ValueError_varg(MP_ERROR_TEXT("no part %s on the board"), name);
+    }
+    board_part_obj_t *self = MP_OBJ_TO_PTR(mp_arg_validate_type(part_in, &board_part_type, MP_QSTR_part));
+    live_t l;
+    if (!_live(self, &l)) {
+        mp_raise_ValueError_varg(MP_ERROR_TEXT("%s is not attached"), self->name);
+    }
+    if (l.part != NULL) {
+        parts_detach(l.part);
+    } else if (l.dev != NULL) {
+        i2c_virtual_detach(l.dev);
+    } else {
+        neopixel_emu_detach(self->pin);
+    }
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_1(board_detach_obj, _detach);

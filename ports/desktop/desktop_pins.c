@@ -193,6 +193,12 @@ void desktop_pin_drive(uint8_t number, bool level) {
     }
 }
 
+void desktop_pin_release(uint8_t number) {
+    if (number < DESKTOP_VIRTUAL_PIN_COUNT) {
+        _pins[number].driven = false;
+    }
+}
+
 bool desktop_pin_is_gpio(uint8_t number) {
     return number < DESKTOP_PIN_COUNT
            || (desktop_pin_backend == &desktop_virtual_backend && number >= DESKTOP_PIN_UART_TX && number < DESKTOP_VIRTUAL_PIN_COUNT);

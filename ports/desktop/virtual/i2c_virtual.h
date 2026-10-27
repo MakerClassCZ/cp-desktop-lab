@@ -45,6 +45,9 @@ typedef struct i2c_virtual_device {
     const i2c_virtual_model_t *model;
     char name[12];
     uint8_t address;
+    // Pulled out (board.detach, or replaced at its address): it answers nothing, the slot stays.
+    bool present;
+    bool automatic;             // added by i2c_virtual_attach_default
     uint8_t pointer;
     uint8_t regs[256];
     uint16_t words[256];        // a model with 16-bit registers
@@ -65,14 +68,22 @@ typedef struct i2c_virtual_device {
 
 extern const desktop_i2c_ops_t i2c_virtual_ops;
 
-// A board file line: false with *why set when the model is unknown or the address taken.
+// A board file line or board.attach: false with *why set when the model is unknown. The last
+// wins: another model at the address, or a device of the same name, is detached; the same model
+// at the address is attached again with its values.
 bool i2c_virtual_add(const char *name, const char *spec, const char **why);
+// Pulled out, its channels left out of the panel.
+void i2c_virtual_detach(i2c_virtual_device_t *dev);
+// An attached device by its name, or NULL.
+i2c_virtual_device_t *i2c_virtual_by_name(const char *name);
+// The device that is or was at the address, attached or not, or NULL.
+i2c_virtual_device_t *i2c_virtual_slot(uint16_t address);
 // A channel's value from the panel or the key script: kept within its range and traced.
 void i2c_virtual_set(i2c_virtual_device_t *dev, int channel, double value);
 // A model by its name ("bme280"), or NULL.
 const i2c_virtual_model_t *i2c_virtual_model(const char *name);
-// The device at the address, or NULL.
+// The attached device at the address, or NULL.
 i2c_virtual_device_t *i2c_virtual_at(uint16_t address);
 // A driver looks for a device at an empty address: the first model whose own address it is
-// appears there (named after it, BME280). False when none is, or the address is taken.
+// appears there (named after it, BME280). False when none is, or something is or was there.
 bool i2c_virtual_attach_default(uint8_t address);

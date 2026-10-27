@@ -20,6 +20,7 @@ typedef struct {
     uint8_t pin;
     uint16_t cols, rows;
     bool automatic;             // nobody laid it out: a row as long as the data
+    bool detached;              // pulled out: what is written goes nowhere, the slot stays
     bool serpentine;
     char order[5];
     uint8_t bpp;
@@ -90,6 +91,7 @@ bool neopixel_emu_add(uint8_t pin, uint16_t cols, uint16_t rows, bool serpentine
     s->rows = rows;
     s->serpentine = serpentine;
     s->automatic = false;
+    s->detached = false;
     snprintf(s->order, sizeof(s->order), "%s", order);
     s->bpp = (uint8_t)strlen(s->order);
     s->count = (size_t)cols * rows;
@@ -100,6 +102,9 @@ bool neopixel_emu_add(uint8_t pin, uint16_t cols, uint16_t rows, bool serpentine
 
 void neopixel_emu_write(uint8_t pin, const uint8_t *data, size_t len) {
     strip_t *s = _find(pin);
+    if (s != NULL && s->detached) {
+        return;
+    }
     if (s == NULL || s->automatic) {
         // Nobody laid it out: a row as long as the data, the WS2812's byte order.
         size_t n = len / (s != NULL ? s->bpp : 3);
@@ -129,13 +134,27 @@ void neopixel_emu_write(uint8_t pin, const uint8_t *data, size_t len) {
     panel_changed();
 }
 
+bool neopixel_emu_detach(uint8_t pin) {
+    strip_t *s = _find(pin);
+    if (s == NULL || s->detached) {
+        return false;
+    }
+    s->detached = true;
+    panel_changed();
+    return true;
+}
+
 int neopixel_emu_find(uint8_t pin, bool *rgbw) {
     strip_t *s = _find(pin);
-    if (s == NULL) {
+    if (s == NULL || s->detached) {
         return -1;
     }
     *rgbw = s->bpp == 4;
     return (int)(s - _strips);
+}
+
+uint8_t neopixel_emu_pin(size_t i) {
+    return _strips[i].pin;
 }
 
 size_t neopixel_emu_strips(void) {
@@ -146,10 +165,11 @@ bool neopixel_emu_strip(size_t i, uint16_t *cols, uint16_t *rows, bool *serpenti
     if (i >= _strip_count) {
         return false;
     }
+    bool shown = !_strips[i].detached;
     *cols = _strips[i].cols;
-    *rows = _strips[i].rows;
+    *rows = shown ? _strips[i].rows : 0;
     *serpentine = _strips[i].serpentine;
-    *count = _strips[i].count;
+    *count = shown ? _strips[i].count : 0;
     *rgbw = (const uint8_t(*)[4])_strips[i].rgbw;
     return true;
 }

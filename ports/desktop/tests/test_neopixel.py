@@ -131,7 +131,6 @@ for bad, why in (
         '[i2c]\nX = "bmp999"\n',
         "unknown I2C device bmp999 (lis3dh, bme280, bmp280, mcp9808, ds3231, lc709203f, lsm6ds33, lis3mdl, apds9960, sht31d, crickit or ssd1306)",
     ),
-    ('[i2c]\nA = "lis3dh 0x18"\nB = "mcp9808"\n', "address 0x18 taken"),
 ):
     status, out = refused(board=bad)
     check(

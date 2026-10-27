@@ -46,7 +46,7 @@ void i2cdevice_port_attach(mp_obj_t i2c, uint8_t device_address) {
 
 void i2cdisplaybus_port_attach(busio_i2c_obj_t *i2c, uint16_t device_address) {
     (void)i2c;
-    if (desktop_pin_backend != &desktop_virtual_backend || device_address > 0x77 || i2c_virtual_at((uint8_t)device_address) != NULL) {
+    if (desktop_pin_backend != &desktop_virtual_backend || device_address > 0x77 || i2c_virtual_slot((uint8_t)device_address) != NULL) {
         return;
     }
     char name[12], spec[32];

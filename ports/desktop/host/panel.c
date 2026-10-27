@@ -707,7 +707,7 @@ void panel_state_json(api_buf_t *b) {
         bool serpentine;
         size_t count;
         const uint8_t(*rgbw)[4];
-        if (!neopixel_emu_strip(i, &cols, &rows, &serpentine, &count, &rgbw)) {
+        if (!neopixel_emu_strip(i, &cols, &rows, &serpentine, &count, &rgbw) || count == 0) {
             continue;
         }
         api_buf_printf(b, "%s{\"index\": %u, \"cols\": %u, \"rows\": %u, \"pixels\": [", i ? ", " : "",

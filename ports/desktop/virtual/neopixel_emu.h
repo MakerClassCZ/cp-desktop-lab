@@ -22,8 +22,12 @@ bool neopixel_emu_add(uint8_t pin, uint16_t cols, uint16_t rows, bool serpentine
 bool neopixel_emu_parse(const char *spec, uint16_t *cols, uint16_t *rows, bool *serpentine, char order[5]);
 
 void neopixel_emu_write(uint8_t pin, const uint8_t *data, size_t len);
-// The strips, for the panel: their layout and colours (R, G, B, W each).
+// The strips, for the panel: their layout and colours (R, G, B, W each); a detached one has none.
 size_t neopixel_emu_strips(void);
-// The strip on a pin, its index, and whether it has white; -1 for none.
+// A strip's data pin.
+uint8_t neopixel_emu_pin(size_t i);
+// The attached strip on a pin, its index, and whether it has white; -1 for none.
 int neopixel_emu_find(uint8_t pin, bool *rgbw);
+// Pulled out: writes go nowhere and nothing is laid out there by itself; false when none was there.
+bool neopixel_emu_detach(uint8_t pin);
 bool neopixel_emu_strip(size_t i, uint16_t *cols, uint16_t *rows, bool *serpentine, size_t *count, const uint8_t (**rgbw)[4]);

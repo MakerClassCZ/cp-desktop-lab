@@ -58,6 +58,7 @@ mp_map_elem_t virtual_board_table[] = {
     // Parts plugged in from Python (virtual/board_parts.c).
     { MP_ROM_QSTR(MP_QSTR_parts), MP_OBJ_FROM_PTR(&board_parts_module) },
     { MP_ROM_QSTR(MP_QSTR_attach), MP_OBJ_FROM_PTR(&board_attach_obj) },
+    { MP_ROM_QSTR(MP_QSTR_detach), MP_OBJ_FROM_PTR(&board_detach_obj) },
 };
 const size_t virtual_board_table_count = MP_ARRAY_SIZE(virtual_board_table);
 
