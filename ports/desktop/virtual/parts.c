@@ -188,6 +188,16 @@ static bool _emptied(uint8_t pin) {
     return any;
 }
 
+// The kinds as board.parts names them, for the line an automatic part prints.
+static const char *_kind_name(part_kind_t kind) {
+    static const char *const names[] = {
+        [PART_BUTTON] = "Button", [PART_SWITCH] = "Switch", [PART_LED] = "LED", [PART_ANALOG] = "Potentiometer",
+        [PART_PWM] = "Lamp", [PART_TOUCH] = "Touch", [PART_SPEAKER] = "Speaker", [PART_MIC] = "Mic",
+        [PART_ENCODER] = "Encoder", [PART_SENSOR] = "sensor", [PART_SHIFTREG] = "shift register", [PART_IR] = "IR",
+    };
+    return names[kind];
+}
+
 part_t *parts_add(part_kind_t kind, uint8_t pin, const char *name, const char *options, const char **why) {
     part_t check = { .kind = kind };
     if (!_options(&check, options, why)) {
@@ -222,7 +232,7 @@ part_t *parts_add(part_kind_t kind, uint8_t pin, const char *name, const char *o
     if (kind == PART_BUTTON || kind == PART_SWITCH) {
         _drive(p);
     }
-    panel_changed();
+    panel_part_added();
     return p;
 }
 
@@ -278,7 +288,8 @@ part_t *parts_for_pin(uint8_t pin, part_kind_t kind) {
         if (kind == PART_ANALOG || kind == PART_MIC) {
             p->value = 32768;
         }
-        panel_changed();
+        fprintf(stderr, "virtual: %s %s attached at %s (automatic)\r\n", _kind_name(kind), name, name);
+        panel_part_added();
     }
     return p;
 }
@@ -356,7 +367,7 @@ part_t *parts_add_sensor(void *device, int channel) {
     p->device = device;
     p->channel = (uint8_t)channel;
     snprintf(p->name, sizeof(p->name), "%s.%s", dev->name, dev->model->channels[channel].name);
-    panel_changed();
+    panel_part_added();
     return p;
 }
 

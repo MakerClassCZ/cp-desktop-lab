@@ -187,4 +187,58 @@ with launch('print("up")\n', board='[i2c]\nA = "lis3dh 0x18"\nB = "mcp9808"\n') 
     names = sorted({p["name"].split(".")[0] for p in b.state()["parts"]})
     check("two board file devices at one address: the last wins", names == ["B"], names)
 
+# board.attached: every part on the board; automatic parts announced on stderr; the panel back.
+with launch('print("up")\n', board=PINS + 'D9 = "GPIO20"\n[led]\nD9 = "red"\n') as b:
+    b.wait("up")
+    out = b.exec("import board\nprint(sorted(board.attached))\nprint(repr(board.attached['D9']))")
+    check(
+        "board.attached lists the board file's parts",
+        "['D9']" in out and "<LED D9 on D9: off>" in out,
+        out,
+    )
+    out = b.exec(
+        "from adafruit_bus_device.i2c_device import I2CDevice\nd = I2CDevice(board.I2C(), 0x77)\n"
+        "print(repr(board.attached['BME280']))"
+    )
+    check("an automatic part is marked", "(automatic)" in out, out)
+    check(
+        "an automatic part is announced on stderr",
+        any("virtual: BME280 attached at I2C 0x77 (automatic)" in l for l in b.stderr),
+        b.stderr[-5:],
+    )
+    b.exec("import analogio\na = analogio.AnalogIn(board.D7)")
+    check(
+        "an automatic pin part is announced with its kind",
+        any("virtual: Potentiometer D7 attached at D7 (automatic)" in l for l in b.stderr),
+        b.stderr[-5:],
+    )
+    b.exec("board.attach(board.parts.Button(board.D5))")
+    check(
+        "a part attached from Python is not announced",
+        not any("D5" in l for l in b.stderr),
+        b.stderr[-5:],
+    )
+    b.exec("board.attached['BME280'].temp = 30")
+    check(
+        "an attached part from the dict is a handle",
+        any(
+            p["name"] == "BME280.temp" and abs(p["value"] - 30) < 0.01 for p in b.state()["parts"]
+        ),
+        "",
+    )
+    out = b.exec('board.detach("D5")\nprint("D5" in board.attached, hasattr(board, "nothing"))')
+    check(
+        "a detached part leaves board.attached; other names stay missing",
+        out.strip() == "False False",
+        out,
+    )
+    b.panel("close")
+    check("close hides the panel", b.state().get("panel") == "hidden", b.state().get("panel"))
+    b.exec("board.attach(board.parts.Button(board.D6))")
+    check(
+        "a part added shows a closed panel again",
+        b.state().get("panel") == "shown",
+        b.state().get("panel"),
+    )
+
 print("DONE")

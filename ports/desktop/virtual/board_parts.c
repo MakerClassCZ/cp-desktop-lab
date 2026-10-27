@@ -136,6 +136,7 @@ typedef struct {
     i2c_virtual_device_t *dev;
     int strip;
     bool rgbw;
+    bool automatic;     // put there by the automatic attaching
 } live_t;
 
 // The live part at the object's place, found anew on each access; false when it is not attached.
@@ -147,12 +148,14 @@ static bool _live(const board_part_obj_t *self, live_t *l) {
     switch (self->kind->category) {
         case BOARD_PART_PIN:
             l->part = parts_find(self->pin, self->kind->kind);
+            l->automatic = l->part != NULL && l->part->automatic;
             return l->part != NULL && !l->part->detached;
         case BOARD_PART_I2C:
             l->dev = i2c_virtual_at(self->address);
+            l->automatic = l->dev != NULL && l->dev->automatic;
             return l->dev != NULL && l->dev->model == _model(self->kind);
         default:
-            l->strip = neopixel_emu_find(self->pin, &l->rgbw);
+            l->strip = neopixel_emu_find(self->pin, &l->rgbw, &l->automatic);
             return l->strip >= 0;
     }
 }
@@ -241,6 +244,7 @@ static void _part_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind
     if (_live(self, &l)) {
         mp_print_str(print, ": ");
         _print_values(print, self, &l);
+        mp_print_str(print, l.automatic ? " (automatic)" : "");
     } else {
         mp_print_str(print, ", not attached");
     }
@@ -560,3 +564,71 @@ static mp_obj_t _detach(mp_obj_t part_in) {
     return mp_const_none;
 }
 MP_DEFINE_CONST_FUN_OBJ_1(board_detach_obj, _detach);
+
+// ---- board.attached ----
+
+// The catalogue's kind of a live part: by its category and part kind, or a sensor by its model.
+static const board_part_kind_t *_kind_of(uint8_t category, const part_t *p, const i2c_virtual_model_t *model) {
+    for (size_t i = 0; i < MP_ARRAY_SIZE(_parts_globals_table); i++) {
+        if (!mp_obj_is_type(_parts_globals_table[i].value, &board_part_kind_type)) {
+            continue;
+        }
+        const board_part_kind_t *kind = MP_OBJ_TO_PTR(_parts_globals_table[i].value);
+        if (kind->category != category) {
+            continue;
+        }
+        if ((category == BOARD_PART_NEOPIXEL)
+            || (category == BOARD_PART_I2C && _model(kind) == model)
+            || (category == BOARD_PART_PIN && kind->kind == p->kind && (kind->fixed != NULL) == (p->kind == PART_PWM && p->servo))) {
+            return kind;
+        }
+    }
+    return NULL;
+}
+
+static void _add(mp_obj_t dict, const board_part_kind_t *kind, const char *name, uint8_t pin, uint8_t address) {
+    if (kind == NULL) {
+        return;     // a display, a shift register: no kind in the catalogue
+    }
+    board_part_obj_t *part = mp_obj_malloc(board_part_obj_t, &board_part_type);
+    part->kind = kind;
+    part->pin = pin;
+    part->address = address;
+    part->attached = true;
+    part->options[0] = '\0';
+    snprintf(part->name, sizeof(part->name), "%s", name);
+    mp_obj_dict_store(dict, mp_obj_new_str(name, strlen(name)), MP_OBJ_FROM_PTR(part));
+}
+
+// board.attached, made anew on each read: name -> part object of every part on the board.
+static mp_obj_t _getattr(mp_obj_t attr) {
+    if (mp_obj_str_get_qstr(attr) != MP_QSTR_attached) {
+        // Not found, as the module's own lookup says it: an AttributeError where one is due, and
+        // nothing raised for the lookups that only ask (import's __init__, Tab completion).
+        return MP_OBJ_NULL;
+    }
+    mp_obj_t dict = mp_obj_new_dict(0);
+    for (int i = 0; i < parts_count(); i++) {
+        part_t *p = parts_at(i);
+        if (p->kind != PART_SENSOR) {
+            _add(dict, _kind_of(BOARD_PART_PIN, p, NULL), p->name, p->pin, 0);
+        }
+    }
+    i2c_virtual_device_t *dev;
+    for (int i = 0; (dev = i2c_virtual_device(i)) != NULL; i++) {
+        if (dev->present) {
+            _add(dict, _kind_of(BOARD_PART_I2C, NULL, dev->model), dev->name, 0, dev->address);
+        }
+    }
+    for (size_t i = 0; i < neopixel_emu_strips(); i++) {
+        bool rgbw, automatic;
+        uint8_t pin = neopixel_emu_pin(i);
+        char name[24];
+        if (neopixel_emu_find(pin, &rgbw, &automatic) >= 0) {
+            parts_pin_name(pin, name, sizeof(name));
+            _add(dict, _kind_of(BOARD_PART_NEOPIXEL, NULL, NULL), name, pin, 0);
+        }
+    }
+    return dict;
+}
+MP_DEFINE_CONST_FUN_OBJ_1(board_getattr_obj, _getattr);

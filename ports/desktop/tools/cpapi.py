@@ -318,7 +318,7 @@ class Board:
     # ---- the board panel ----
 
     def panel(self, *lines):
-        """Key script lines (set, press, release, turn, send, down, up), applied in order before
+        """Key script lines (set, press, release, turn, send, down, up, close), applied in order before
         this returns. ApiError naming the first line that failed."""
         return self.request("POST", "/api/panel", body="\n".join(lines))["results"]
 

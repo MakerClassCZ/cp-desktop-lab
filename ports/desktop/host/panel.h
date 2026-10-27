@@ -16,6 +16,7 @@
 // (parts.c), its name, its control and its exact value. Opens once there is something to show.
 
 void panel_changed(void);           // something to draw again
+void panel_part_added(void);        // a part put on the board: a closed panel shows again
 void panel_task(void);              // from the SDL task: open, draw
 bool panel_open(void);
 bool panel_event(const SDL_Event *event);   // true when the event was the panel's

@@ -76,6 +76,8 @@ bool i2c_virtual_add(const char *name, const char *spec, const char **why);
 void i2c_virtual_detach(i2c_virtual_device_t *dev);
 // An attached device by its name, or NULL.
 i2c_virtual_device_t *i2c_virtual_by_name(const char *name);
+// The devices, attached or not, by index; NULL past the last.
+i2c_virtual_device_t *i2c_virtual_device(int i);
 // The device that is or was at the address, attached or not, or NULL.
 i2c_virtual_device_t *i2c_virtual_slot(uint16_t address);
 // A channel's value from the panel or the key script: kept within its range and traced.

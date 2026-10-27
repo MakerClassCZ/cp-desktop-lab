@@ -57,6 +57,24 @@ void panel_changed(void) {
     _dirty = true;
 }
 
+void panel_part_added(void) {
+    if (_hidden) {
+        _hidden = false;
+        if (_window != NULL) {
+            SDL_ShowWindow(_window);
+        }
+    }
+    _dirty = true;
+}
+
+// What the window's close button does: hidden until a part is added.
+static void _close(void) {
+    if (_window != NULL) {
+        SDL_HideWindow(_window);
+    }
+    _hidden = true;
+}
+
 bool panel_open(void) {
     return _window != NULL && !_hidden;
 }
@@ -551,6 +569,10 @@ bool panel_apply(const char *line, char *err, size_t errlen) {
     char verb[16], name[32];
     long value = 0;
     int n = sscanf(line, "%15s %31s %ld", verb, name, &value);
+    if (n == 1 && strcmp(verb, "close") == 0) {
+        _close();
+        return true;
+    }
     if (n >= 2 && (strcmp(verb, "down") == 0 || strcmp(verb, "up") == 0)) {
         // A key of the computer's keyboard, by its SDL name, as the key script plays it.
         char key[32];
@@ -696,7 +718,9 @@ static void _part_json(api_buf_t *b, const part_t *p) {
 }
 
 void panel_state_json(api_buf_t *b) {
-    api_buf_add(b, "{\"parts\": [", 11);
+    // The window: shown, closed by the user, or none (not opened yet, or no video here).
+    api_buf_printf(b, "{\"panel\": \"%s\", ", _hidden ? "hidden" : _window != NULL ? "shown" : "none");
+    api_buf_add(b, "\"parts\": [", 10);
     for (int i = 0; i < parts_count(); i++) {
         api_buf_add(b, i ? ", " : "", i ? 2 : 0);
         _part_json(b, parts_at(i));
@@ -838,8 +862,7 @@ bool panel_event(const SDL_Event *e) {
                 // The display hides the cursor (SDL has one for all windows); the panel needs it.
                 SDL_ShowCursor(SDL_ENABLE);
             } else if (e->window.event == SDL_WINDOWEVENT_CLOSE) {
-                SDL_HideWindow(_window);
-                _hidden = true;
+                _close();
             } else if (e->window.event == SDL_WINDOWEVENT_EXPOSED) {
                 _dirty = true;
             }
@@ -852,7 +875,8 @@ bool panel_event(const SDL_Event *e) {
 bool panel_command(const char *line) {
     char verb[16];
     if (sscanf(line, "%15s", verb) != 1 || (strcmp(verb, "set") != 0 && strcmp(verb, "press") != 0 && strcmp(verb, "release") != 0
-                                            && strcmp(verb, "turn") != 0 && strcmp(verb, "dump") != 0 && strcmp(verb, "send") != 0)) {
+                                            && strcmp(verb, "turn") != 0 && strcmp(verb, "dump") != 0 && strcmp(verb, "send") != 0
+                                            && strcmp(verb, "close") != 0)) {
         return false;
     }
     SDL_Event event = { 0 };

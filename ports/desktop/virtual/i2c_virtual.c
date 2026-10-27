@@ -44,6 +44,10 @@ const i2c_virtual_model_t *i2c_virtual_model(const char *name) {
     return NULL;
 }
 
+i2c_virtual_device_t *i2c_virtual_device(int i) {
+    return i >= 0 && i < _count ? &_devices[i] : NULL;
+}
+
 i2c_virtual_device_t *i2c_virtual_slot(uint16_t address) {
     for (int i = 0; i < _count; i++) {
         if (_devices[i].address == address) {
@@ -92,6 +96,7 @@ bool i2c_virtual_attach_default(uint8_t address) {
                 return false;
             }
             i2c_virtual_slot(address)->automatic = true;
+            fprintf(stderr, "virtual: %s attached at I2C 0x%02x (automatic)\r\n", name, (unsigned)address);
             return true;
         }
     }

@@ -13,6 +13,7 @@
 
 #include "bus_trace.h"
 #include "panel.h"
+#include "parts.h"
 
 #define MAX_PIXELS 4096
 
@@ -97,6 +98,7 @@ bool neopixel_emu_add(uint8_t pin, uint16_t cols, uint16_t rows, bool serpentine
     s->count = (size_t)cols * rows;
     free(s->rgbw);
     s->rgbw = calloc(s->count > 0 ? s->count : 1, 4);
+    panel_part_added();
     return s->rgbw != NULL;
 }
 
@@ -114,6 +116,11 @@ void neopixel_emu_write(uint8_t pin, const uint8_t *data, size_t len) {
         if (s == NULL || s->count != n) {
             if (!neopixel_emu_add(pin, (uint16_t)(n > 0 ? n : 1), 1, false, s != NULL ? s->order : "GRB")) {
                 return;
+            }
+            if (s == NULL) {
+                char name[24];
+                parts_pin_name(pin, name, sizeof(name));
+                fprintf(stderr, "virtual: NeoPixel %s attached at %s (automatic)\r\n", name, name);
             }
             s = _find(pin);
             s->automatic = true;
@@ -144,12 +151,13 @@ bool neopixel_emu_detach(uint8_t pin) {
     return true;
 }
 
-int neopixel_emu_find(uint8_t pin, bool *rgbw) {
+int neopixel_emu_find(uint8_t pin, bool *rgbw, bool *automatic) {
     strip_t *s = _find(pin);
     if (s == NULL || s->detached) {
         return -1;
     }
     *rgbw = s->bpp == 4;
+    *automatic = s->automatic;
     return (int)(s - _strips);
 }
 

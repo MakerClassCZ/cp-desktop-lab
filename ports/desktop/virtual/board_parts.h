@@ -44,3 +44,5 @@ typedef struct {
 extern const mp_obj_module_t board_parts_module;
 MP_DECLARE_CONST_FUN_OBJ_1(board_attach_obj);
 MP_DECLARE_CONST_FUN_OBJ_1(board_detach_obj);
+// The board module's __getattr__: board.attached.
+MP_DECLARE_CONST_FUN_OBJ_1(board_getattr_obj);
