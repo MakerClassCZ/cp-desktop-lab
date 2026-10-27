@@ -25,6 +25,7 @@
 #include "i2c_virtual.h"
 #include "desktop_pins.h"
 #include "desktop_port.h"
+#include "midi_in.h"
 #include "panel.h"
 
 static part_t _parts[PARTS_MAX];
@@ -194,6 +195,7 @@ static const char *_kind_name(part_kind_t kind) {
         [PART_BUTTON] = "Button", [PART_SWITCH] = "Switch", [PART_LED] = "LED", [PART_ANALOG] = "Potentiometer",
         [PART_PWM] = "Lamp", [PART_TOUCH] = "Touch", [PART_SPEAKER] = "Speaker", [PART_MIC] = "Mic",
         [PART_ENCODER] = "Encoder", [PART_SENSOR] = "sensor", [PART_SHIFTREG] = "shift register", [PART_IR] = "IR",
+        [PART_CC] = "CC",
     };
     return names[kind];
 }
@@ -349,10 +351,91 @@ void parts_set(part_t *p, uint32_t value) {
             p->value = (uint16_t)(value > 65535 ? 65535 : value);
             bus_trace_text("PANEL %s = %u (%u%%)", p->name, (unsigned)p->value, (unsigned)((uint32_t)p->value * 100 / 65535));
             break;
+        case PART_CC: {
+            // Sent only when the value changes, so a drag does not flood the queue.
+            uint16_t v = (uint16_t)(value > 127 ? 127 : value);
+            if (v == p->value) {
+                return;
+            }
+            p->value = v;
+            uint8_t msg[3] = { (uint8_t)(0xb0 | (p->midi_channel - 1)), p->cc, (uint8_t)v };
+            midi_in_put(msg, sizeof(msg));
+            break;
+        }
         default:
             return;
     }
     panel_changed();
+}
+
+part_t *parts_add_cc(const char *name, const char *options, const char **why) {
+    int cc = -1, value = 64, channel = 1, numbers = 0;
+    char copy[64];
+    snprintf(copy, sizeof(copy), "%s", options);
+    for (char *word = strtok(copy, " "); word != NULL; word = strtok(NULL, " ")) {
+        char *end;
+        if (strncmp(word, "channel=", 8) == 0) {
+            channel = (int)strtol(word + 8, &end, 10);
+            if (*end != '\0' || channel < 1 || channel > 16) {
+                *why = "bad channel (1-16)";
+                return NULL;
+            }
+            continue;
+        }
+        long n = strtol(word, &end, 10);
+        if (*end != '\0' || n < 0 || n > 127 || numbers == 2) {
+            *why = "bad CC slider (\"cc 74\", \"cc 74 100\", \"cc 74 channel=2\")";
+            return NULL;
+        }
+        *(numbers++ == 0 ? &cc : &value) = (int)n;
+    }
+    if (cc < 0) {
+        *why = "a CC slider needs its controller number (\"cc 74\")";
+        return NULL;
+    }
+    part_t *p = NULL;
+    int sliders = 0;
+    for (int i = 0; i < _count; i++) {
+        if (_parts[i].kind == PART_CC && strcasecmp(_parts[i].name, name) == 0) {
+            p = &_parts[i];
+        } else if (_parts[i].kind == PART_CC && !_parts[i].detached) {
+            sliders++;
+        }
+    }
+    if (sliders >= PARTS_CC_MAX) {
+        *why = "at most 8 CC sliders";
+        return NULL;
+    }
+    if (p == NULL) {
+        if (_count == PARTS_MAX) {
+            *why = "too many parts";
+            return NULL;
+        }
+        p = &_parts[_count++];
+    }
+    bool added = p->kind != PART_CC || p->detached;
+    memset(p, 0, sizeof(*p));
+    p->kind = PART_CC;
+    p->pin = 0xff;
+    p->cc = (uint8_t)cc;
+    p->midi_channel = (uint8_t)channel;
+    p->value = (uint16_t)value;
+    snprintf(p->name, sizeof(p->name), "%s", name);
+    if (added) {
+        panel_part_added();
+    }
+    panel_changed();
+    return p;
+}
+
+void parts_cc_send_all(void) {
+    for (int i = 0; i < _count; i++) {
+        part_t *p = &_parts[i];
+        if (p->kind == PART_CC && !p->detached) {
+            uint8_t msg[3] = { (uint8_t)(0xb0 | (p->midi_channel - 1)), p->cc, (uint8_t)p->value };
+            midi_in_put(msg, sizeof(msg));
+        }
+    }
 }
 
 part_t *parts_add_sensor(void *device, int channel) {

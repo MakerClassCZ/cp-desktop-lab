@@ -26,6 +26,7 @@ typedef enum {
     PART_SENSOR,        // a value of a virtual I2C device (i2c_virtual.c), on no pin
     PART_SHIFTREG,      // a shift register of buttons (keypad.ShiftRegisterKeys) on its data pin
     PART_IR,            // an IR receiver (pulseio.PulseIn): a remote's NEC code sent on a click
+    PART_CC,            // a MIDI CC slider (midi_in.c), on no pin: value 0-127
 } part_kind_t;
 
 typedef enum {
@@ -75,6 +76,8 @@ typedef struct {
     uint8_t ir_code[4];
     bool ir_sent;
     bool clock_level, latch_level;
+    // a CC slider: its controller and channel (1-16); value is 0-127
+    uint8_t cc, midi_channel;
     // a microphone; value is the level
     mic_source_t source;
     uint32_t tone_hz;
@@ -100,6 +103,12 @@ void parts_detach(part_t *part);
 // The user's side, from the panel or the key script: traced, and a button or switch drives its pin.
 void parts_press(part_t *part, bool down);
 void parts_set(part_t *part, uint32_t value);
+// A CC slider: options "74", "74 100" (its starting value), "1 channel=2". One of the same name is
+// reused; at most PARTS_CC_MAX. NULL with *why set when they are wrong.
+#define PARTS_CC_MAX 8
+part_t *parts_add_cc(const char *name, const char *options, const char **why);
+// Each CC slider's value queued as MIDI, as a run's first read gets them.
+void parts_cc_send_all(void);
 // A virtual I2C device's channel, named DEVICE.CHANNEL; its earlier part reused, attached again.
 part_t *parts_add_sensor(void *device, int channel);
 // A device pulled out: its channels' parts detached.

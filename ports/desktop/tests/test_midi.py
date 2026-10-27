@@ -93,3 +93,21 @@ with launch(READER % 100, '[midi]\nKEYS = "keyboard C2"\n') as b:
 with launch('print("up")\n') as b:
     b.wait("up")
     check("state: no keyboard", b.state()["midi"] is None, b.state())
+
+# CC sliders: each one's value on the run's first read, then each change.
+CCS = '[midi]\nCUTOFF = "cc 74"\nRESO = "cc 71 0"\n'
+out, _ = run(READER % 6, "wait ready", "midi ", CCS)
+check("first read: each CC's value", "midi b0 4a 40 b0 47 00" in out, out)
+out, trace = run(READER % 9, "wait ready\nset CUTOFF 100", "midi ", CCS)
+check("set moves the slider and sends", "b0 4a 64" in out and "MIDI IN b0 4a 64" in trace, (out, trace))
+out, _ = run(READER % 9, "wait ready\nset CUTOFF 64\nsleep 1000", "midi ", CCS, timeout=2)
+check("the same value sends nothing new", "midi " not in out, out)
+out, _ = run(READER % 3, "wait ready", "midi ", '[midi]\nMOD = "cc 1 127 channel=3"\n')
+check("a starting value and a channel", "midi b2 01 7f" in out, out)
+with launch(READER % 100, CCS) as b:
+    b.wait("ready")
+    b.panel("set CUTOFF 300")
+    cc = [p for p in b.state()["parts"] if p["name"] == "CUTOFF"][0]
+    check("state: a CC slider, kept in 0-127", cc == {"name": "CUTOFF", "kind": "cc", "cc": 74, "channel": 1, "value": 127}, cc)
+status, out = refused(board="[midi]\n" + "".join('C%d = "cc %d"\n' % (i, i) for i in range(9)))
+check("a ninth CC slider refused", status == 2 and "8 CC" in out, (status, out))

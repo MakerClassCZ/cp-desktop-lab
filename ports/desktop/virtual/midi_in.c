@@ -17,6 +17,7 @@
 
 #include "bus_trace.h"
 #include "panel.h"
+#include "parts.h"
 
 #define KEYBOARD_LOW 48     // C3
 #define KEYBOARD_KEYS 25    // two octaves, C to C
@@ -45,6 +46,7 @@ static uint8_t _queue[MIDI_IN_QUEUE];
 static size_t _head, _used;         // the oldest byte, how many there are
 static size_t _lost;                // bytes dropped this run
 static bool _read;                  // the program has read this run
+static bool _sent_cc;               // the CC sliders' values queued this run
 static bool _lost_traced;
 
 static bool _present;
@@ -90,6 +92,24 @@ void midi_in_put(const uint8_t *msg, size_t len) {
 }
 
 size_t midi_in_read(uint8_t *buf, size_t max) {
+    if (!_sent_cc) {
+        // The sliders' values ahead of what was played before the program first read.
+        _sent_cc = true;
+        static uint8_t played[MIDI_IN_QUEUE];
+        pthread_mutex_lock(&_lock);
+        size_t n = _used;
+        for (size_t k = 0; k < n; k++) {
+            played[k] = _queue[(_head + k) % MIDI_IN_QUEUE];
+        }
+        _head = _used = 0;
+        pthread_mutex_unlock(&_lock);
+        parts_cc_send_all();
+        pthread_mutex_lock(&_lock);
+        for (size_t k = 0; k < n && _used < MIDI_IN_QUEUE; k++) {
+            _queue[(_head + _used++) % MIDI_IN_QUEUE] = played[k];
+        }
+        pthread_mutex_unlock(&_lock);
+    }
     pthread_mutex_lock(&_lock);
     _read = true;
     size_t n = _used < max ? _used : max;
@@ -105,7 +125,7 @@ size_t midi_in_read(uint8_t *buf, size_t max) {
 void midi_in_reset(void) {
     pthread_mutex_lock(&_lock);
     _head = _used = _lost = 0;
-    _read = _lost_traced = false;
+    _read = _lost_traced = _sent_cc = false;
     pthread_mutex_unlock(&_lock);
     memset(_held, 0, sizeof(_held));
     panel_changed();

@@ -206,14 +206,17 @@ static bool _add_spi(const char *where, const char *name, const char *spec) {
     return true;
 }
 
-// NAME = "keyboard [LOW] [channel=N]": the MIDI keyboard.
+// NAME = "keyboard [LOW] [channel=N]": the MIDI keyboard; NAME = "cc N [VALUE] [channel=N]": a
+// CC slider.
 static bool _add_midi(const char *where, const char *name, const char *spec) {
     const char *why = NULL;
     bool ok = false;
     if (strncmp(spec, "keyboard", 8) == 0 && (spec[8] == '\0' || spec[8] == ' ')) {
         ok = midi_keyboard_add(name, spec + 8 + (spec[8] == ' '), &why);
+    } else if (strncmp(spec, "cc ", 3) == 0) {
+        ok = parts_add_cc(name, spec + 3, &why) != NULL;
     } else {
-        why = "a [midi] part is \"keyboard\"";
+        why = "a [midi] part is \"keyboard\" or \"cc N\"";
     }
     if (!ok) {
         fprintf(stderr, "circuitpython: %s: %s: %s\n", where, name, why);

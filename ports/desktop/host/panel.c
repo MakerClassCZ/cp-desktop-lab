@@ -357,6 +357,11 @@ static void _draw_part(const part_t *p, int y) {
             _text(x + 64, cy, "+", 0xffffff);
             snprintf(value, sizeof(value), "%ld detents", (long)(p->steps / 4));
             break;
+        case PART_CC:
+            _fill(x, cy + 10, CTRL_W, 4, 0x606060);
+            _fill(x + (int)((uint32_t)(CTRL_W - 10) * p->value / 127), cy, 10, 24, 0xd0d0d0);
+            snprintf(value, sizeof(value), "cc %u = %u  ch %u", (unsigned)p->cc, (unsigned)p->value, (unsigned)p->midi_channel);
+            break;
         case PART_MIC:
             if (p->source == MIC_HOST) {
                 snprintf(value, sizeof(value), "the computer's microphone");
@@ -618,6 +623,8 @@ static void _slide(part_t *p, int x) {
     if (p->kind == PART_SENSOR) {
         const i2c_virtual_channel_t *ch = _channel(p);
         parts_set_sensor(p, ch->min + (ch->max - ch->min) * v / 65535);
+    } else if (p->kind == PART_CC) {
+        parts_set(p, (uint32_t)((v * 127 + 32767) / 65535));
     } else {
         parts_set(p, (uint32_t)v);
     }
@@ -743,6 +750,7 @@ static const char *_kind_name(part_kind_t kind) {
         [PART_BUTTON] = "button", [PART_SWITCH] = "switch", [PART_LED] = "led", [PART_ANALOG] = "analog",
         [PART_PWM] = "pwm", [PART_TOUCH] = "touch", [PART_SPEAKER] = "speaker", [PART_MIC] = "mic",
         [PART_ENCODER] = "encoder", [PART_SENSOR] = "sensor", [PART_SHIFTREG] = "shiftreg", [PART_IR] = "ir",
+        [PART_CC] = "cc",
     };
     return names[kind];
 }
@@ -757,7 +765,7 @@ static void _part_json(api_buf_t *b, const part_t *p) {
     api_buf_add(b, "{\"name\": ", 9);
     api_buf_json_string(b, p->name, strlen(p->name));
     _json_name(b, "kind", _kind_name(p->kind));
-    if (p->kind != PART_SENSOR) {
+    if (p->kind != PART_SENSOR && p->kind != PART_CC) {
         api_buf_printf(b, ", \"pin\": \"GPIO%u\"", (unsigned)p->pin);
         desktop_virtual_pin(p->pin, &output, &level);
     }
@@ -809,6 +817,10 @@ static void _part_json(api_buf_t *b, const part_t *p) {
         case PART_IR:
             api_buf_printf(b, ", \"code\": \"%u,%u,%u,%u\", \"sent\": %s", p->ir_code[0], p->ir_code[1], p->ir_code[2],
                 p->ir_code[3], p->ir_sent ? "true" : "false");
+            break;
+        case PART_CC:
+            api_buf_printf(b, ", \"cc\": %u, \"channel\": %u, \"value\": %u", (unsigned)p->cc, (unsigned)p->midi_channel,
+                (unsigned)p->value);
             break;
     }
     api_buf_add(b, "}", 1);
@@ -931,7 +943,7 @@ bool panel_event(const SDL_Event *e) {
                 // The - and + keys: a detent counter-clockwise or clockwise.
                 parts_turn(p, e->button.x < CTRL_X + 45 ? -1 : 1);
             } else if ((p->kind == PART_ANALOG && !p->output) || (p->kind == PART_MIC && p->source != MIC_HOST)
-                       || p->kind == PART_SENSOR) {
+                       || p->kind == PART_SENSOR || p->kind == PART_CC) {
                 _drag = p;
                 _slide(p, e->button.x);
             }
@@ -982,6 +994,10 @@ bool panel_event(const SDL_Event *e) {
             part_t *p = _part_at(y);
             if (p != NULL && p->kind == PART_ENCODER) {
                 parts_turn(p, e->wheel.y);
+            } else if (p != NULL && p->kind == PART_CC) {
+                // 8 a notch, Shift 1.
+                int v = p->value + e->wheel.y * ((SDL_GetModState() & KMOD_SHIFT) ? 1 : 8);
+                parts_set(p, (uint32_t)(v < 0 ? 0 : v > 127 ? 127 : v));
             } else if (p != NULL && p->kind == PART_SENSOR) {
                 // A hundredth of the range, Shift a thousandth.
                 const i2c_virtual_channel_t *ch = _channel(p);
