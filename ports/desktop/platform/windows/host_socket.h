@@ -83,6 +83,11 @@ static inline int host_poll(struct pollfd *fds, unsigned count, int timeout_ms) 
     return WSAPoll(fds, count, timeout_ms);
 }
 
+// Winsock raises no SIGPIPE.
+static inline void host_sock_nosigpipe(int fd) {
+    (void)fd;
+}
+
 static inline int host_sock_close(int fd) {
     shutdown(fd, SD_BOTH);
     return closesocket(fd);

@@ -1034,6 +1034,9 @@ static void *_accept_loop(void *arg) {
         sock_t s = accept(_listener, NULL, NULL);
         if (s != BAD_SOCKET) {
             fcntl(s, F_SETFD, FD_CLOEXEC);      // not kept by a reset's exec
+            // A client gone before its answer: EPIPE, not SIGPIPE ending the program.
+            int one = 1;
+            setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
         }
         #else
         sock_t s = accept4(_listener, NULL, NULL, SOCK_CLOEXEC);     // not kept by a reset's exec

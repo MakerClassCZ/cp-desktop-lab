@@ -22,9 +22,20 @@
 #include <unistd.h>
 
 #ifndef MSG_NOSIGNAL
-// macOS: SIGPIPE stays blocked on every thread (platform_start), so a send to a closed peer fails.
+// macOS has no such flag: each socket is made SO_NOSIGPIPE instead (host_sock_nosigpipe).
 #define MSG_NOSIGNAL 0
 #endif
+
+// A send to a peer that has gone fails with EPIPE instead of ending the process with SIGPIPE,
+// which on macOS comes even with the signal blocked.
+static inline void host_sock_nosigpipe(int fd) {
+    #ifdef SO_NOSIGPIPE
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+    #else
+    (void)fd;
+    #endif
+}
 
 #define HOST_SOCK_BUF(p) ((void *)(p))
 #define HOST_SOCK_CBUF(p) ((const void *)(p))

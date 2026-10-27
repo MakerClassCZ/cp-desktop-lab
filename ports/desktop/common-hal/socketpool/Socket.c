@@ -161,6 +161,7 @@ static bool _socketpool_socket(socketpool_socketpool_obj_t *self,
     if (socknum < 0) {
         return false;
     }
+    host_sock_nosigpipe(socknum);
 
     sock->num = socknum;
 
@@ -232,6 +233,9 @@ int socketpool_socket_accept(socketpool_socket_obj_t *self, mp_obj_t *peer_out, 
         RUN_BACKGROUND_TASKS;
         newsoc = accept(self->num, (struct sockaddr *)&peer_addr, &socklen);
         int err = host_sock_errno();
+        if (newsoc != -1) {
+            host_sock_nosigpipe(newsoc);
+        }
         // In non-blocking mode, fail instead of timing out
         if (newsoc == -1 && (self->timeout_ms == 0 || mp_hal_is_interrupted())) {
             return -MP_EAGAIN;
