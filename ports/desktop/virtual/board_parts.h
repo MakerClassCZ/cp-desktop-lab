@@ -18,6 +18,7 @@ typedef enum {
     BOARD_PART_PIN,         // a part_t on a pin
     BOARD_PART_I2C,         // a device on the virtual I2C bus
     BOARD_PART_NEOPIXEL,    // a strip on its data pin
+    BOARD_PART_MIDI,        // the MIDI keyboard or a CC slider (PART_CC), on no pin
 } board_part_category_t;
 
 typedef struct {

@@ -9,12 +9,14 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 #include "py/objstr.h"
 #include "py/runtime.h"
 #include "shared-bindings/microcontroller/Pin.h"
 
 #include "i2c_virtual.h"
+#include "midi_in.h"
 #include "neopixel_emu.h"
 #include "panel.h"
 
@@ -52,6 +54,13 @@ PIN_KIND(Speaker, PART_SPEAKER, MP_QSTRnull, NULL, NULL);
 PIN_KIND(Mic, PART_MIC, MP_QSTR_source, "tone 440", NULL);
 PIN_KIND(Encoder, PART_ENCODER, MP_QSTRnull, NULL, NULL);
 PIN_KIND(IR, PART_IR, MP_QSTR_code, "255,2,247,8", NULL);
+// The MIDI keyboard is no part_t: kind PART_SENSOR marks it apart from the CC slider's PART_CC.
+static const board_part_kind_t _kind_Keyboard = {
+    .base = { &board_part_kind_type }, .name = MP_QSTR_Keyboard, .category = BOARD_PART_MIDI, .kind = PART_SENSOR,
+};
+static const board_part_kind_t _kind_CC = {
+    .base = { &board_part_kind_type }, .name = MP_QSTR_CC, .category = BOARD_PART_MIDI, .kind = PART_CC,
+};
 static const board_part_kind_t _kind_NeoPixel = {
     .base = { &board_part_kind_type }, .name = MP_QSTR_NeoPixel, .category = BOARD_PART_NEOPIXEL,
     .keyword = MP_QSTR_layout, .initial = "10",
@@ -84,6 +93,8 @@ static const mp_rom_map_elem_t _parts_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_Encoder), MP_ROM_PTR(&_kind_Encoder) },
     { MP_ROM_QSTR(MP_QSTR_IR), MP_ROM_PTR(&_kind_IR) },
     { MP_ROM_QSTR(MP_QSTR_NeoPixel), MP_ROM_PTR(&_kind_NeoPixel) },
+    { MP_ROM_QSTR(MP_QSTR_Keyboard), MP_ROM_PTR(&_kind_Keyboard) },
+    { MP_ROM_QSTR(MP_QSTR_CC), MP_ROM_PTR(&_kind_CC) },
     #if CIRCUITPY_VIRTUAL_DEVICES
     { MP_ROM_QSTR(MP_QSTR_APDS9960), MP_ROM_PTR(&_kind_APDS9960) },
     { MP_ROM_QSTR(MP_QSTR_BME280), MP_ROM_PTR(&_kind_BME280) },
@@ -119,6 +130,11 @@ static void _kind_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind
         }
         return;
     }
+    if (kind->category == BOARD_PART_MIDI) {
+        mp_print_str(print, kind->kind == PART_CC ? "CC(number, *, value=64, channel=1, name=None)"
+            : "Keyboard(*, low=\"C3\", channel=1, name=\"KEYS\")");
+        return;
+    }
     mp_printf(print, "%q(pin, *", kind->name);
     if (kind->keyword != MP_QSTRnull) {
         mp_printf(print, ", %q=\"%s\"", kind->keyword, kind->initial);
@@ -137,6 +153,7 @@ typedef struct {
     int strip;
     bool rgbw;
     bool automatic;     // put there by the automatic attaching
+    bool keyboard;      // the MIDI keyboard
 } live_t;
 
 // The live part at the object's place, found anew on each access; false when it is not attached.
@@ -154,6 +171,13 @@ static bool _live(const board_part_obj_t *self, live_t *l) {
             l->dev = i2c_virtual_at(self->address);
             l->automatic = l->dev != NULL && l->dev->automatic;
             return l->dev != NULL && l->dev->model == _model(self->kind);
+        case BOARD_PART_MIDI:
+            if (self->kind->kind == PART_CC) {
+                l->part = parts_by_name(self->name);
+                return l->part != NULL && l->part->kind == PART_CC;
+            }
+            l->keyboard = midi_keyboard_present() && strcasecmp(midi_keyboard_name(), self->name) == 0;
+            return l->keyboard;
         default:
             l->strip = neopixel_emu_find(self->pin, &l->rgbw, &l->automatic);
             return l->strip >= 0;
@@ -177,6 +201,13 @@ static void _place(const board_part_obj_t *self, char *buf, size_t len) {
 
 static void _print_values(const mp_print_t *print, const board_part_obj_t *self, const live_t *l) {
     const part_t *p = l->part;
+    if (l->keyboard) {
+        char from[8], to[8];
+        midi_note_name(midi_keyboard_low(), from, sizeof(from));
+        midi_note_name(midi_keyboard_low() + 24, to, sizeof(to));
+        mp_printf(print, "%s-%s, channel %d", from, to, midi_keyboard_channel());
+        return;
+    }
     if (l->dev != NULL) {
         const i2c_virtual_model_t *m = l->dev->model;
         for (int c = 0; c < m->channel_count; c++) {
@@ -230,6 +261,9 @@ static void _print_values(const mp_print_t *print, const board_part_obj_t *self,
         case PART_IR:
             mp_printf(print, "code=%u,%u,%u,%u", p->ir_code[0], p->ir_code[1], p->ir_code[2], p->ir_code[3]);
             break;
+        case PART_CC:
+            mp_printf(print, "cc %u, value=%u, channel %u", (unsigned)p->cc, (unsigned)p->value, (unsigned)p->midi_channel);
+            break;
         default:
             break;
     }
@@ -240,7 +274,11 @@ static void _part_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind
     char place[24];
     live_t l;
     _place(self, place, sizeof(place));
-    mp_printf(print, "<%q %s on %s", self->kind->name, self->name, place);
+    if (self->kind->category == BOARD_PART_MIDI) {
+        mp_printf(print, "<%q %s", self->kind->name, self->name);
+    } else {
+        mp_printf(print, "<%q %s on %s", self->kind->name, self->name, place);
+    }
     if (_live(self, &l)) {
         mp_print_str(print, ": ");
         _print_values(print, self, &l);
@@ -271,6 +309,10 @@ static bool _is_value(const board_part_obj_t *self, qstr attr, bool *writable) {
     }
     if (self->kind->category == BOARD_PART_NEOPIXEL) {
         return attr == MP_QSTR_colors;
+    }
+    if (self->kind->category == BOARD_PART_MIDI) {
+        *writable = self->kind->kind == PART_CC;
+        return self->kind->kind == PART_CC ? attr == MP_QSTR_value : attr == MP_QSTR_low || attr == MP_QSTR_held;
     }
     switch (self->kind->kind) {
         case PART_BUTTON:
@@ -320,6 +362,21 @@ static mp_obj_t _colors(const live_t *l) {
 }
 
 static mp_obj_t _load(const board_part_obj_t *self, qstr attr, const live_t *l) {
+    if (l->keyboard) {
+        char name[8];
+        if (attr == MP_QSTR_low) {
+            midi_note_name(midi_keyboard_low(), name, sizeof(name));
+            return mp_obj_new_str(name, strlen(name));
+        }
+        mp_obj_t held = mp_obj_new_list(0, NULL);
+        for (int note = 0; note < 128; note++) {
+            if (midi_keyboard_held(note)) {
+                midi_note_name(note, name, sizeof(name));
+                mp_obj_list_append(held, mp_obj_new_str(name, strlen(name)));
+            }
+        }
+        return held;
+    }
     if (l->dev != NULL) {
         return mp_obj_new_float(l->dev->value[_channel(self, attr)]);
     }
@@ -351,6 +408,8 @@ static void _store(const board_part_obj_t *self, qstr attr, const live_t *l, mp_
     if (l->dev != NULL) {
         i2c_virtual_set(l->dev, _channel(self, attr), mp_obj_get_float(value));
         panel_changed();
+    } else if (l->part->kind == PART_CC) {
+        parts_set(l->part, (uint32_t)mp_arg_validate_int_range(mp_obj_get_int(value), 0, 127, MP_QSTR_value));
     } else if (l->part->kind == PART_ANALOG || l->part->kind == PART_MIC) {
         mp_int_t v = mp_obj_get_int(value);
         parts_set(l->part, (uint32_t)(v < 0 ? 0 : v > 65535 ? 65535 : v));
@@ -419,9 +478,61 @@ MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &_part_locals
     );
 
+// Keyboard(*, low="C3", channel=1, name="KEYS") and CC(number, *, value=64, channel=1, name=None):
+// their options as the board file writes them.
+static mp_obj_t _midi_call(const board_part_kind_t *kind, size_t n_args, size_t n_kw, const mp_obj_t *args) {
+    bool cc = kind->kind == PART_CC;
+    enum { ARG_number, ARG_low, ARG_value, ARG_channel, ARG_name };
+    const mp_arg_t allowed[] = {
+        { MP_QSTR_number, cc ? MP_ARG_REQUIRED | MP_ARG_INT : MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
+        { MP_QSTR_low, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        { MP_QSTR_value, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 64} },
+        { MP_QSTR_channel, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 1} },
+        { MP_QSTR_name, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
+    };
+    mp_arg_val_t vals[MP_ARRAY_SIZE(allowed)];
+    mp_map_t kw_args;
+    mp_map_init_fixed_table(&kw_args, n_kw, args + n_args);
+    mp_arg_parse_all(n_args, args, &kw_args, MP_ARRAY_SIZE(allowed), allowed, vals);
+    board_part_obj_t *self = mp_obj_malloc(board_part_obj_t, &board_part_type);
+    self->kind = kind;
+    self->attached = false;
+    mp_int_t channel = mp_arg_validate_int_range(vals[ARG_channel].u_int, 1, 16, MP_QSTR_channel);
+    if (cc) {
+        mp_int_t number = mp_arg_validate_int_range(vals[ARG_number].u_int, 0, 127, MP_QSTR_number);
+        mp_int_t value = mp_arg_validate_int_range(vals[ARG_value].u_int, 0, 127, MP_QSTR_value);
+        snprintf(self->name, sizeof(self->name), "CC%d", (int)number);
+        snprintf(self->options, sizeof(self->options), "%d %d channel=%d", (int)number, (int)value, (int)channel);
+    } else {
+        mp_obj_t low = vals[ARG_low].u_obj;
+        char text[16];
+        if (mp_obj_is_int(low)) {
+            snprintf(text, sizeof(text), "%d", (int)mp_obj_get_int(low));
+        } else {
+            snprintf(text, sizeof(text), "%s", low == mp_const_none ? "C3" : mp_obj_str_get_str(low));
+        }
+        if (midi_note_parse(text) < 0) {
+            mp_raise_ValueError_varg(MP_ERROR_TEXT("bad note %s"), text);
+        }
+        snprintf(self->name, sizeof(self->name), "KEYS");
+        snprintf(self->options, sizeof(self->options), "%s channel=%d", text, (int)channel);
+    }
+    if (vals[ARG_name].u_obj != mp_const_none) {
+        const char *name = mp_obj_str_get_str(vals[ARG_name].u_obj);
+        if (strlen(name) > sizeof(self->name) - 1 || *name == '\0') {
+            mp_raise_ValueError_varg(MP_ERROR_TEXT("a name of 1 to %d characters"), (int)sizeof(self->name) - 1);
+        }
+        strcpy(self->name, name);
+    }
+    return MP_OBJ_FROM_PTR(self);
+}
+
 // A kind called: a part described, not yet on the board.
 static mp_obj_t _kind_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const mp_obj_t *args) {
     const board_part_kind_t *kind = MP_OBJ_TO_PTR(self_in);
+    if (kind->category == BOARD_PART_MIDI) {
+        return _midi_call(kind, n_args, n_kw, args);
+    }
     const i2c_virtual_model_t *m = _model(kind);
     enum { ARG_place, ARG_name, ARG_option };
     mp_arg_t allowed[] = {
@@ -500,6 +611,12 @@ static mp_obj_t _attach(mp_obj_t part_in) {
             mp_raise_ValueError_varg(MP_ERROR_TEXT("%s"), why);
         }
         neopixel_emu_detach(self->pin);
+    } else if (kind->category == BOARD_PART_MIDI) {
+        bool ok = kind->kind == PART_CC ? parts_add_cc(self->name, self->options, &why) != NULL
+            : midi_keyboard_add(self->name, self->options, &why);
+        if (!ok) {
+            mp_raise_ValueError_varg(MP_ERROR_TEXT("%s"), why);
+        }
     } else if (kind->category == BOARD_PART_I2C) {
         char spec[32];
         snprintf(spec, sizeof(spec), "%s 0x%02x", kind->model, (unsigned)self->address);
@@ -536,6 +653,10 @@ static mp_obj_t _detach(mp_obj_t part_in) {
             parts_detach(p);
             return mp_const_none;
         }
+        if (midi_keyboard_present() && strcasecmp(midi_keyboard_name(), name) == 0) {
+            midi_keyboard_remove();
+            return mp_const_none;
+        }
         if (dev != NULL && dev->model->attach == NULL) {
             i2c_virtual_detach(dev);
             return mp_const_none;
@@ -555,7 +676,9 @@ static mp_obj_t _detach(mp_obj_t part_in) {
     if (!_live(self, &l)) {
         mp_raise_ValueError_varg(MP_ERROR_TEXT("%s is not attached"), self->name);
     }
-    if (l.part != NULL) {
+    if (l.keyboard) {
+        midi_keyboard_remove();
+    } else if (l.part != NULL) {
         parts_detach(l.part);
     } else if (l.dev != NULL) {
         i2c_virtual_detach(l.dev);
@@ -638,11 +761,20 @@ static mp_obj_t _getattr(mp_obj_t attr) {
     mp_obj_t dict = mp_obj_new_dict(0);
     for (int i = 0; i < parts_count(); i++) {
         part_t *p = parts_at(i);
-        if (p->kind != PART_SENSOR) {
-            char options[64];
+        char options[64];
+        if (p->kind == PART_CC) {
+            snprintf(options, sizeof(options), "%u %u channel=%u", (unsigned)p->cc, (unsigned)p->value, (unsigned)p->midi_channel);
+            _add(dict, &_kind_CC, p->name, 0, 0, options);
+        } else if (p->kind != PART_SENSOR) {
             _options_of(p, options, sizeof(options));
             _add(dict, _kind_of(BOARD_PART_PIN, p, NULL), p->name, p->pin, 0, options);
         }
+    }
+    if (midi_keyboard_present()) {
+        char options[32], low[8];
+        midi_note_name(midi_keyboard_low(), low, sizeof(low));
+        snprintf(options, sizeof(options), "%s channel=%d", low, midi_keyboard_channel());
+        _add(dict, &_kind_Keyboard, midi_keyboard_name(), 0, 0, options);
     }
     i2c_virtual_device_t *dev;
     for (int i = 0; (dev = i2c_virtual_device(i)) != NULL; i++) {

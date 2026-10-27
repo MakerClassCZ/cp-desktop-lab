@@ -111,3 +111,26 @@ with launch(READER % 100, CCS) as b:
     check("state: a CC slider, kept in 0-127", cc == {"name": "CUTOFF", "kind": "cc", "cc": 74, "channel": 1, "value": 127}, cc)
 status, out = refused(board="[midi]\n" + "".join('C%d = "cc %d"\n' % (i, i) for i in range(9)))
 check("a ninth CC slider refused", status == 2 and "8 CC" in out, (status, out))
+
+# From Python: board.parts.Keyboard and board.parts.CC, attached, read, set and detached.
+with launch('print("up")\n') as b:
+    b.wait("up")
+    b.exec(
+        "import board\nk = board.attach(board.parts.Keyboard(low='C2'))\n"
+        "c = board.attach(board.parts.CC(74, name='CUTOFF'))\n"
+    )
+    names = b.eval("sorted(board.attached)")
+    check("attached lists them", "'CUTOFF'" in names and "'KEYS'" in names, names)
+    b.exec("c.value = 100")
+    cc = [p for p in b.state()["parts"] if p["name"] == "CUTOFF"][0]
+    check("CC value set from Python moves the slider", cc["value"] == 100, cc)
+    check("a CC's value read back", b.eval("c.value") == "100", b.eval("c.value"))
+    check("repr", "<Keyboard KEYS: C2-C4" in b.eval("repr(k)"), b.eval("repr(k)"))
+    b.panel("press KEYS D2")
+    check("held and low", b.eval("(k.low, k.held)") == "('C2', ['D2'])", b.eval("(k.low, k.held)"))
+    r = b.run("board.attach(board.parts.Keyboard(name='K2'))")
+    check("a second keyboard refused", "ValueError" in str(r.get("error")), r)
+    b.exec("board.detach(k)\nboard.detach('CUTOFF')")
+    check("detached: no keyboard in state", b.state()["midi"] is None, b.state()["midi"])
+    check("detached by name: no CC slider", not [p for p in b.state()["parts"] if p["name"] == "CUTOFF"], b.state()["parts"])
+    check("the catalogue lists them", "CC" in b.eval("dir(board.parts)") and "Keyboard" in b.eval("dir(board.parts)"))
