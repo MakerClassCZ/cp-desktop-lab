@@ -92,7 +92,12 @@ bool i2c_virtual_attach_default(uint8_t address) {
                 name[k] = (char)toupper((unsigned char)m->name[k]);
             }
             name[k] = '\0';
-            if (!i2c_virtual_add(name, m->name, &why)) {
+            for (int n = 2; i2c_virtual_by_name(name) != NULL && n < 10; n++) {
+                snprintf(name + k, sizeof(name) - k, "_%d", n);
+            }
+            char spec[32];
+            snprintf(spec, sizeof(spec), "%s 0x%02x", m->name, (unsigned)address);
+            if (!i2c_virtual_add(name, spec, &why)) {
                 return false;
             }
             i2c_virtual_slot(address)->automatic = true;
@@ -150,9 +155,14 @@ bool i2c_virtual_add(const char *name, const char *spec, const char **why) {
         *why = strlen(name) >= sizeof(_devices[0].name) ? "a name of 11 characters at most" : "more than 12 I2C devices";
         return false;
     }
+    if (dev != NULL && dev->present && dev->model != model && dev->model->attach != NULL) {
+        snprintf(message, sizeof(message), "address 0x%02x taken by the display %s", address, dev->name);
+        *why = message;
+        return false;
+    }
     for (int i = 0; i < _count; i++) {
         i2c_virtual_device_t *other = &_devices[i];
-        if (other == dev ? other->model != model : strcasecmp(other->name, name) == 0) {
+        if (other == dev ? other->model != model : strcasecmp(other->name, name) == 0 && other->model->attach == NULL) {
             i2c_virtual_detach(other);
         }
     }

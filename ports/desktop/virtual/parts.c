@@ -216,6 +216,7 @@ part_t *parts_add(part_kind_t kind, uint8_t pin, const char *name, const char *o
         }
     }
     bool fresh = p == NULL;
+    bool added = fresh || p->detached;
     if (fresh) {
         p = &_parts[_count++];
         memset(p, 0, sizeof(*p));
@@ -232,7 +233,14 @@ part_t *parts_add(part_kind_t kind, uint8_t pin, const char *name, const char *o
     if (kind == PART_BUTTON || kind == PART_SWITCH) {
         _drive(p);
     }
-    panel_part_added();
+    // An LED shows what the program already drives on its pin.
+    if (kind == PART_LED) {
+        parts_pin_changed(pin);
+    }
+    if (added) {
+        panel_part_added();
+    }
+    panel_changed();
     return p;
 }
 
@@ -355,6 +363,7 @@ part_t *parts_add_sensor(void *device, int channel) {
             p = &_parts[i];
         }
     }
+    bool added = p == NULL || p->detached;
     if (p == NULL) {
         if (_count == PARTS_MAX) {
             return NULL;
@@ -367,7 +376,10 @@ part_t *parts_add_sensor(void *device, int channel) {
     p->device = device;
     p->channel = (uint8_t)channel;
     snprintf(p->name, sizeof(p->name), "%s.%s", dev->name, dev->model->channels[channel].name);
-    panel_part_added();
+    if (added) {
+        panel_part_added();
+    }
+    panel_changed();
     return p;
 }
 

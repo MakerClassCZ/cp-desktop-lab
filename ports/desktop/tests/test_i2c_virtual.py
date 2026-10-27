@@ -36,7 +36,7 @@ for i in range(100):
     time.sleep(0.05)
 print("tilted", x)
 """,
-    "wait g8\nset ACCEL.x -0.5\n",
+    "wait g8 (\nset ACCEL.x -0.5\n",  # "g8" alone is in a version's git hash
     "tilted",
     '[i2c]\nACCEL = "lis3dh 0x19"\n',
 )

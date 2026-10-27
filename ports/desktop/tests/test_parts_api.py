@@ -240,5 +240,71 @@ with launch('print("up")\n', board=PINS + 'D9 = "GPIO20"\n[led]\nD9 = "red"\n') 
         b.state().get("panel") == "shown",
         b.state().get("panel"),
     )
+    b.panel("close")
+    b.exec("board.attach(board.parts.Button(board.D6))")
+    check(
+        "the same part attached again (code.py on every run) leaves a closed panel closed",
+        b.state().get("panel") == "hidden",
+        b.state().get("panel"),
+    )
+
+# Attached again, renamed, rebuilt from board.attached: the part as it was, under its new name.
+BOARD5 = PINS + 'OLED_PIN = "GPIO21"\n[i2c]\nOLED = "ssd1306"\n'
+with launch('print("up")\n', board=BOARD5) as b:
+    b.wait("up")
+    out = b.exec(
+        "import board, digitalio\nfrom adafruit_bus_device.i2c_device import I2CDevice\n"
+        "I2CDevice(board.I2C(), 0x77)\n"
+        'env = board.attach(board.parts.BME280(name="ENV"))\n'
+        "print(sorted(board.attached), repr(env))"
+    )
+    check(
+        "an automatic sensor attached under a name takes it, and is no longer automatic",
+        "'ENV'" in out and "'BME280'" not in out and "(automatic)" not in out,
+        out,
+    )
+    out = b.exec('board.detach("ENV")\nprint("ENV" in board.attached)')
+    check("and is detached by that name", out.strip() == "False", out)
+
+    out = b.exec(
+        "servo = board.attach(board.parts.Servo(board.D5))\nagain = board.attached['D5']\n"
+        "board.detach(again)\nboard.attach(again)\nprint(repr(board.attached['D5']))"
+    )
+    check("a servo from board.attached attached again stays a servo", "<Servo D5" in out, out)
+    out = b.exec(
+        'board.attach(board.parts.NeoPixel(board.D6, layout="3x2 RGB"))\nstrip = board.attached["D6"]\n'
+        "board.detach(strip)\nboard.attach(strip)\nprint(len(strip.colors))"
+    )
+    check("a strip from board.attached attached again keeps its layout", out.strip() == "6", out)
+    out = b.exec(
+        'try:\n    board.parts.NeoPixel(board.D6, name="RING")\nexcept ValueError as e:\n    print("err", e)'
+    )
+    check("a strip is named after its pin, and says so", "err" in out, out)
+
+    out = b.exec(
+        "d = digitalio.DigitalInOut(board.D7)\nd.switch_to_output(True)\n"
+        "led = board.attach(board.parts.LED(board.D7))\nprint(led.value)"
+    )
+    check("an LED attached to a pin the program drives shows it", out.strip() == "True", out)
+
+    out = b.exec('try:\n    board.detach("OLED")\nexcept ValueError as e:\n    print("err", e)')
+    check("a display is not pulled out from Python", "err" in out and "OLED" in out, out)
+    out = b.exec(
+        "try:\n    board.attach(board.parts.MCP9808(address=0x3c))\nexcept ValueError as e:\n    print('err', e)"
+    )
+    check("nor replaced by a sensor", "err" in out and "OLED" in out, out)
+
+with launch('print("up")\n') as b:
+    b.wait("up")
+    out = b.exec(
+        "import board\nfrom adafruit_bus_device.i2c_device import I2CDevice\n"
+        "board.attach(board.parts.BME280(address=0x76))\nI2CDevice(board.I2C(), 0x77)\n"
+        "print(sorted(board.attached))"
+    )
+    check(
+        "the automatic attaching never pulls out a part of the same name",
+        "'BME280'" in out and "'BME280_2'" in out,
+        out,
+    )
 
 print("DONE")

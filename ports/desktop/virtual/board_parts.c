@@ -457,6 +457,9 @@ static mp_obj_t _kind_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const m
         }
         self->pin = pin->number;
     }
+    if (vals[ARG_name].u_obj != mp_const_none && kind->category == BOARD_PART_NEOPIXEL) {
+        mp_raise_ValueError(MP_ERROR_TEXT("a NeoPixel strip is named after its pin"));
+    }
     if (vals[ARG_name].u_obj != mp_const_none) {
         const char *name = mp_obj_str_get_str(vals[ARG_name].u_obj);
         if (strlen(name) > limit || *name == '\0') {
@@ -498,11 +501,9 @@ static mp_obj_t _attach(mp_obj_t part_in) {
         }
         neopixel_emu_detach(self->pin);
     } else if (kind->category == BOARD_PART_I2C) {
-        i2c_virtual_device_t *dev = i2c_virtual_at(self->address);
         char spec[32];
         snprintf(spec, sizeof(spec), "%s 0x%02x", kind->model, (unsigned)self->address);
-        // The same model at the address stays, with its values.
-        if ((dev == NULL || dev->model != _model(kind)) && !i2c_virtual_add(self->name, spec, &why)) {
+        if (!i2c_virtual_add(self->name, spec, &why)) {
             mp_raise_ValueError_varg(MP_ERROR_TEXT("%s"), why);
         }
     } else {
@@ -531,11 +532,11 @@ static mp_obj_t _detach(mp_obj_t part_in) {
         const char *name = mp_obj_str_get_str(part_in);
         part_t *p = parts_by_name(name);
         i2c_virtual_device_t *dev = i2c_virtual_by_name(name);
-        if (p != NULL && p->kind != PART_SENSOR) {
+        if (p != NULL && p->kind != PART_SENSOR && p->kind != PART_SHIFTREG) {
             parts_detach(p);
             return mp_const_none;
         }
-        if (dev != NULL) {
+        if (dev != NULL && dev->model->attach == NULL) {
             i2c_virtual_detach(dev);
             return mp_const_none;
         }
@@ -586,7 +587,7 @@ static const board_part_kind_t *_kind_of(uint8_t category, const part_t *p, cons
     return NULL;
 }
 
-static void _add(mp_obj_t dict, const board_part_kind_t *kind, const char *name, uint8_t pin, uint8_t address) {
+static void _add(mp_obj_t dict, const board_part_kind_t *kind, const char *name, uint8_t pin, uint8_t address, const char *options) {
     if (kind == NULL) {
         return;     // a display, a shift register: no kind in the catalogue
     }
@@ -595,9 +596,36 @@ static void _add(mp_obj_t dict, const board_part_kind_t *kind, const char *name,
     part->pin = pin;
     part->address = address;
     part->attached = true;
-    part->options[0] = '\0';
+    snprintf(part->options, sizeof(part->options), "%s", options);
     snprintf(part->name, sizeof(part->name), "%s", name);
     mp_obj_dict_store(dict, mp_obj_new_str(name, strlen(name)), MP_OBJ_FROM_PTR(part));
+}
+
+// A live pin part's options, as the board file writes them.
+static void _options_of(const part_t *p, char *buf, size_t len) {
+    switch (p->kind) {
+        case PART_BUTTON:
+            snprintf(buf, len, "%s", p->active_high ? "high" : "low");
+            break;
+        case PART_LED:
+            snprintf(buf, len, "#%06lx", (unsigned long)p->colour);
+            break;
+        case PART_PWM:
+            snprintf(buf, len, p->servo ? "servo" : "#%06lx", (unsigned long)p->colour);
+            break;
+        case PART_MIC:
+            if (p->source == MIC_TONE) {
+                snprintf(buf, len, "tone %lu", (unsigned long)p->tone_hz);
+            } else {
+                snprintf(buf, len, "%s", p->source == MIC_NOISE ? "noise" : "mic");
+            }
+            break;
+        case PART_IR:
+            snprintf(buf, len, "%u,%u,%u,%u", p->ir_code[0], p->ir_code[1], p->ir_code[2], p->ir_code[3]);
+            break;
+        default:
+            buf[0] = '\0';
+    }
 }
 
 // board.attached, made anew on each read: name -> part object of every part on the board.
@@ -611,13 +639,15 @@ static mp_obj_t _getattr(mp_obj_t attr) {
     for (int i = 0; i < parts_count(); i++) {
         part_t *p = parts_at(i);
         if (p->kind != PART_SENSOR) {
-            _add(dict, _kind_of(BOARD_PART_PIN, p, NULL), p->name, p->pin, 0);
+            char options[64];
+            _options_of(p, options, sizeof(options));
+            _add(dict, _kind_of(BOARD_PART_PIN, p, NULL), p->name, p->pin, 0, options);
         }
     }
     i2c_virtual_device_t *dev;
     for (int i = 0; (dev = i2c_virtual_device(i)) != NULL; i++) {
         if (dev->present) {
-            _add(dict, _kind_of(BOARD_PART_I2C, NULL, dev->model), dev->name, 0, dev->address);
+            _add(dict, _kind_of(BOARD_PART_I2C, NULL, dev->model), dev->name, 0, dev->address, "");
         }
     }
     for (size_t i = 0; i < neopixel_emu_strips(); i++) {
@@ -625,8 +655,16 @@ static mp_obj_t _getattr(mp_obj_t attr) {
         uint8_t pin = neopixel_emu_pin(i);
         char name[24];
         if (neopixel_emu_find(pin, &rgbw, &automatic) >= 0) {
+            uint16_t cols, rows;
+            bool serpentine;
+            size_t count;
+            const uint8_t(*colors)[4];
+            char layout[48];
+            neopixel_emu_strip(i, &cols, &rows, &serpentine, &count, &colors);
+            snprintf(layout, sizeof(layout), "%ux%u%s %s", (unsigned)cols, (unsigned)rows,
+                serpentine ? " serpentine" : "", neopixel_emu_order(i));
             parts_pin_name(pin, name, sizeof(name));
-            _add(dict, _kind_of(BOARD_PART_NEOPIXEL, NULL, NULL), name, pin, 0);
+            _add(dict, _kind_of(BOARD_PART_NEOPIXEL, NULL, NULL), name, pin, 0, layout);
         }
     }
     return dict;

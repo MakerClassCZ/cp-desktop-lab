@@ -81,6 +81,7 @@ static strip_t *_find(uint8_t pin) {
 
 bool neopixel_emu_add(uint8_t pin, uint16_t cols, uint16_t rows, bool serpentine, const char *order) {
     strip_t *s = _find(pin);
+    bool added = s == NULL || s->detached;
     if (s == NULL) {
         if (_strip_count == NEOPIXEL_EMU_STRIPS) {
             return false;
@@ -98,7 +99,10 @@ bool neopixel_emu_add(uint8_t pin, uint16_t cols, uint16_t rows, bool serpentine
     s->count = (size_t)cols * rows;
     free(s->rgbw);
     s->rgbw = calloc(s->count > 0 ? s->count : 1, 4);
-    panel_part_added();
+    if (added) {
+        panel_part_added();
+    }
+    panel_changed();
     return s->rgbw != NULL;
 }
 
@@ -163,6 +167,10 @@ int neopixel_emu_find(uint8_t pin, bool *rgbw, bool *automatic) {
 
 uint8_t neopixel_emu_pin(size_t i) {
     return _strips[i].pin;
+}
+
+const char *neopixel_emu_order(size_t i) {
+    return _strips[i].order;
 }
 
 size_t neopixel_emu_strips(void) {

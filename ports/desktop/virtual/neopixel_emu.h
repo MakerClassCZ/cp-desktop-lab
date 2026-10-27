@@ -24,8 +24,9 @@ bool neopixel_emu_parse(const char *spec, uint16_t *cols, uint16_t *rows, bool *
 void neopixel_emu_write(uint8_t pin, const uint8_t *data, size_t len);
 // The strips, for the panel: their layout and colours (R, G, B, W each); a detached one has none.
 size_t neopixel_emu_strips(void);
-// A strip's data pin.
+// A strip's data pin, and its colours' order on the wire ("GRB").
 uint8_t neopixel_emu_pin(size_t i);
+const char *neopixel_emu_order(size_t i);
 // The attached strip on a pin, its index, whether it has white and whether nobody laid it out;
 // -1 for none.
 int neopixel_emu_find(uint8_t pin, bool *rgbw, bool *automatic);
