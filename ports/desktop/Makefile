@@ -153,7 +153,8 @@ ifneq (,$(findstring clang,$(shell $(CC) --version 2>/dev/null)))
 CLANG = 1
 CFLAGS := $(filter-out -fsingle-precision-constant --param max-inline-insns-single=500 -Wimplicit-fallthrough=2,$(CFLAGS))
 # Warning classes clang reads more widely than GCC, which the GCC builds keep checking.
-CFLAGS += -Wno-expansion-to-defined -Wno-unreachable-code -Wno-double-promotion -Wno-literal-conversion \
+# Older clang (Xcode 15) does not know every one of these, so unknown ones are let pass.
+CFLAGS += -Wno-unknown-warning-option -Wno-expansion-to-defined -Wno-unreachable-code -Wno-double-promotion -Wno-literal-conversion \
 	-Wno-c23-extensions -Wno-unused-variable -Wno-unused-but-set-variable
 endif
 ifeq ($(WINDOWS),1)
@@ -241,7 +242,6 @@ ifeq ($(CLANG),1)
 $(patsubst %.c,$(BUILD)/%.o,$(SRC_MBEDTLS)) $(OBJ_MBEDTLS): CFLAGS += \
 	-Wno-array-bounds \
 	-Wno-undef \
-	-Wno-unknown-warning-option \
 	-Wno-uninitialized-const-pointer
 else
 $(patsubst %.c,$(BUILD)/%.o,$(SRC_MBEDTLS)) $(OBJ_MBEDTLS): CFLAGS += \

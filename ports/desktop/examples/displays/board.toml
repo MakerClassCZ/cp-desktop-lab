@@ -1,0 +1,25 @@
+# Displays on the virtual buses: a TFT on SPI, an OLED on I2C and a HUB75 matrix, beside the
+# window (board.DISPLAY). README.md says how to run it.
+
+[pins]
+MTX_R1 = "GPIO14"
+MTX_G1 = "GPIO15"
+MTX_B1 = "GPIO16"
+MTX_R2 = "GPIO17"
+MTX_G2 = "GPIO18"
+MTX_B2 = "GPIO19"
+MTX_ADDRA = "GPIO20"
+MTX_ADDRB = "GPIO21"
+MTX_ADDRC = "GPIO22"
+MTX_ADDRD = "GPIO23"
+MTX_CLK = "GPIO24"
+MTX_LAT = "GPIO25"
+MTX_OE = "GPIO26"
+TFT_CS = "GPIO27"
+TFT_DC = "TX"
+
+[spi]
+TFT = "st7789 240x240 cs=TFT_CS dc=TFT_DC"
+
+[i2c]
+OLED = "ssd1306 128x64"
