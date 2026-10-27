@@ -17,6 +17,8 @@ rest of the tree is CircuitPython as it is upstream.
   keyboard and game controllers as buttons, sound. A board panel shows NeoPixels, buttons,
   switches, sliders and LEDs; virtual I2C sensors (BME280, LIS3DH, SHT31D…) and SPI and I2C
   displays (ST7789, ILI9341, SSD1306…) come from a board file.
+- **A MIDI keyboard** on the panel, played with the mouse or the computer's keys, and CC sliders:
+  `usb_midi` reads them, so a `synthio` synth with `adafruit_midi` runs as on a board.
 - **Real pins:** an FT232H or an MCP2221A on USB, or a Raspberry Pi's own GPIO, I2C and SPI
   (`--board gpiochip`).
 - **CIRCUITPY is a folder:** save a file and `code.py` reloads, as on a board. The web workflow

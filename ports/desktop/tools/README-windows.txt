@@ -18,6 +18,12 @@ sensor:
 
     circuitpython.exe --drive examples\parts\CIRCUITPY
 
+A MIDI keyboard and CC sliders on the board panel, which usb_midi.ports[0] reads as from a USB
+MIDI keyboard (play it with the mouse or the computer keys Y X C ... and Q W E ...); examples\synth
+is a synthio synth with a filter and an echo on three sliders:
+
+    circuitpython.exe --drive examples\synth\CIRCUITPY --board-file examples\synth\board.toml
+
 README.md is the whole manual: the board panel, virtual sensors and displays, --fast-time,
 --trace-bus, the web workflow, the network, the MCP server.
 

@@ -283,15 +283,43 @@ Every change goes to `--trace-bus`, the user's and the program's: `NEOPIXEL GPIO
 `pulseio.PulseOut`'s pulses in microseconds; `send()` takes as long as they last). Reads are not traced. The key script
 (`CIRCUITPY_SDL_KEYS`) takes `set NAME VALUE`, `press NAME` and `release NAME` (a part, or a
 gamepad button: `press START`) `turn NAME DETENTS` (an encoder, negative counter-clockwise), `send NAME [CODE]` (an IR receiver: its
-code, or `255,2,127,128`) and `close` (the panel window, as its close button does), so a test moves
+code, or `255,2,127,128`), `tap KEYS C4` (a MIDI keyboard's note) and `close` (the panel window, as its close button does), so a test moves
 the panel without a window. `pwmio`, `touchio` and `pulseio` exist on the virtual board only, `audiobusio` on every board (a record of
 the generator takes as long as its samples last, as on a board); `analogio`
 uses the MCP2221's ADC and DAC on `--board mcp2221`.
 
 `usb_hid` and `usb_midi` are there on every board, with a board's devices and ports, so code
 written for `adafruit_hid` and `adafruit_midi` runs; the port is no USB device, so what they send
-goes to the trace only, `HID KEYBOARD 02 00 04 00 00 00 00 00`, `MIDI OUT 90 3c 64`, and nothing
-comes in.
+goes to the trace only, `HID KEYBOARD 02 00 04 00 00 00 00 00`, `MIDI OUT 90 3c 64`. What comes in
+on `usb_midi.ports[0]` is what the MIDI keyboard below plays.
+
+### A MIDI keyboard and CC sliders
+
+A `[midi]` section puts a two-octave keyboard and sliders that send MIDI Control Changes on the
+board panel; the program reads them from `usb_midi.ports[0]`, as from a USB MIDI keyboard on a
+board, so `adafruit_midi` code (a `synthio` synth, a MIDI controller's code) runs unchanged:
+
+```
+[midi]
+KEYS = "keyboard"              # from C3; "keyboard C2" from C2; "keyboard channel=2"
+CUTOFF = "cc 74"               # CC 74 at 64; "cc 74 100" starts at 100; "cc 1 channel=2"
+```
+
+The keys are clicked (the lower on a key, the louder) or played on the computer's keyboard by
+position, as trackers lay it out: the lower octave on `Z X C V B N M , . /` (`Y X C ...` on a
+QWERTZ keyboard) with its black keys on `S D  G H J  L ;`, the upper on `Q W E R T Y U I O P` with
+its black keys on `2 3  5 6 7  9 0`; each key on the panel shows its computer key. Page Up and Page
+Down move the keyboard an octave. On a board with a keyboard those keys play notes, so the
+gamepad gives up Z, X, A, S, Q and W and keeps its other keys. A slider sends its 0-127 value as
+it moves (the wheel 8, Shift+wheel 1), and each slider's value comes first on a run's first read.
+Each run starts with nothing queued. Everything that comes in is traced as `MIDI IN 90 3c 64`.
+
+From Python, `board.attach(board.parts.Keyboard(low="C2"))` and
+`board.attach(board.parts.CC(74, name="CUTOFF", value=64))`; a CC slider's `value` moves it, a
+keyboard's `held` lists the notes held. The key script and the control API play them:
+`tap KEYS C4`, `press KEYS C4`, `release KEYS 60`, `set CUTOFF 100`; `/api/state` has
+`"midi": {"keyboard": "KEYS", "low": "C3", "high": "C5", "channel": 1, "held": [...]}`.
+`examples/synth` is a synth with a filter and an echo on three sliders.
 
 ### Virtual I2C devices
 

@@ -1,0 +1,8 @@
+# The synth's controls on the board panel: a keyboard and three CC sliders. README.md says how
+# to run it.
+
+[midi]
+KEYS = "keyboard"
+CUTOFF = "cc 74 80"
+RESO = "cc 71 20"
+ECHO = "cc 91 0"
