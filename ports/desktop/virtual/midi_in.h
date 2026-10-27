@@ -46,5 +46,5 @@ bool midi_keyboard_key(int scancode, bool down);
 int midi_keyboard_scancode(int offset);
 // The keyboard an octave up (1) or down (-1), its held notes let go first.
 void midi_keyboard_shift(int octaves);
-// Every held note let go (the window lost the keyboard's focus).
+// Every held note let go.
 void midi_keyboard_release_all(void);

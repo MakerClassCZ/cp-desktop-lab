@@ -298,10 +298,7 @@ void desktop_sdl_task(void) {
                 break;
             case SDL_WINDOWEVENT:
                 // The display's window (the panel takes its own events): no cursor over it.
-                if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
-                    // Its key-up goes to another window: no note hangs.
-                    midi_keyboard_release_all();
-                } else if (event.window.event == SDL_WINDOWEVENT_ENTER) {
+                if (event.window.event == SDL_WINDOWEVENT_ENTER) {
                     SDL_ShowCursor(SDL_DISABLE);
                 } else if (event.window.event == SDL_WINDOWEVENT_EXPOSED
                            || event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {

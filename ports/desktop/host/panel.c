@@ -1021,8 +1021,6 @@ bool panel_event(const SDL_Event *e) {
             if (e->window.event == SDL_WINDOWEVENT_ENTER) {
                 // The display hides the cursor (SDL has one for all windows); the panel needs it.
                 SDL_ShowCursor(SDL_ENABLE);
-            } else if (e->window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
-                midi_keyboard_release_all();
             } else if (e->window.event == SDL_WINDOWEVENT_CLOSE) {
                 _close();
             } else if (e->window.event == SDL_WINDOWEVENT_EXPOSED) {
