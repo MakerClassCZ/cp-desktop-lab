@@ -67,6 +67,7 @@ SRC_C += \
 	host/host_net.c \
 	host/panel.c \
 	host/png_write.c \
+	virtual/board_parts.c \
 	virtual/display_auto.c \
 	virtual/i2c_virtual.c \
 	virtual/neopixel_emu.c \

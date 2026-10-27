@@ -7,6 +7,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 // The virtual parts on the virtual board's pins: what the board panel (panel.c) shows and the
@@ -96,6 +97,8 @@ void parts_set_sensor(part_t *part, double value);
 void parts_turn(part_t *part, int detents);
 // The program's side: a pin used without a board file part gets one now, named as the board names it.
 part_t *parts_for_pin(uint8_t pin, part_kind_t kind);
+// The name the board gives a pin: the first key whose value it is, else GPIOn.
+void parts_pin_name(uint8_t pin, char *name, size_t len);
 // A virtual pin the program wrote or reconfigured: an LED on it follows.
 void parts_pin_changed(uint8_t pin);
 // A shift register of the gamepad's buttons: keys names them in the order they shift out, a

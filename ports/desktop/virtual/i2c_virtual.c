@@ -35,6 +35,15 @@ static const i2c_virtual_model_t *const _models[] = {
     NULL
 };
 
+const i2c_virtual_model_t *i2c_virtual_model(const char *name) {
+    for (size_t i = 0; _models[i] != NULL; i++) {
+        if (strcasecmp(name, _models[i]->name) == 0) {
+            return _models[i];
+        }
+    }
+    return NULL;
+}
+
 i2c_virtual_device_t *i2c_virtual_at(uint16_t address) {
     for (int i = 0; i < _count; i++) {
         if (_devices[i].address == address) {

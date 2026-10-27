@@ -180,8 +180,7 @@ part_t *parts_add(part_kind_t kind, uint8_t pin, const char *name, const char *o
     return p;
 }
 
-// The name the board gives a pin: the first key whose value it is.
-static void _pin_name(uint8_t pin, char *name, size_t len) {
+void parts_pin_name(uint8_t pin, char *name, size_t len) {
     const mcu_pin_obj_t *obj = desktop_pin_obj(pin);
     const mp_map_t *map = &board_module_globals.map;
     for (size_t i = 0; obj != NULL && i < map->used; i++) {
@@ -202,7 +201,7 @@ part_t *parts_for_pin(uint8_t pin, part_kind_t kind) {
     if (p == NULL) {
         char name[16];
         const char *why;
-        _pin_name(pin, name, sizeof(name));
+        parts_pin_name(pin, name, sizeof(name));
         p = parts_add(kind, pin, name, "", &why);
     }
     return p;

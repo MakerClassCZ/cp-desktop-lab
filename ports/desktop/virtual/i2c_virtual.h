@@ -69,6 +69,8 @@ extern const desktop_i2c_ops_t i2c_virtual_ops;
 bool i2c_virtual_add(const char *name, const char *spec, const char **why);
 // A channel's value from the panel or the key script: kept within its range and traced.
 void i2c_virtual_set(i2c_virtual_device_t *dev, int channel, double value);
+// A model by its name ("bme280"), or NULL.
+const i2c_virtual_model_t *i2c_virtual_model(const char *name);
 // The device at the address, or NULL.
 i2c_virtual_device_t *i2c_virtual_at(uint16_t address);
 // A driver looks for a device at an empty address: the first model whose own address it is

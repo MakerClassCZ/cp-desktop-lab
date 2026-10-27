@@ -8,6 +8,7 @@
 #include "shared-module/displayio/__init__.h"
 
 #include "desktop_pins.h"
+#include "virtual/board_parts.h"
 
 // The virtual board, the default. Its id is the runtime board's, not the build's (desktop).
 static const MP_DEFINE_STR_OBJ(virtual_board_id_obj, "virtual");
@@ -53,6 +54,10 @@ mp_map_elem_t virtual_board_table[] = {
     { MP_ROM_QSTR(MP_QSTR_DISPLAY), MP_OBJ_FROM_PTR(&displays[0].framebuffer_display) },
 
     { MP_ROM_QSTR(MP_QSTR_exit), MP_OBJ_FROM_PTR(&desktop_board_exit_obj) },
+
+    // Parts plugged in from Python (virtual/board_parts.c).
+    { MP_ROM_QSTR(MP_QSTR_parts), MP_OBJ_FROM_PTR(&board_parts_module) },
+    { MP_ROM_QSTR(MP_QSTR_attach), MP_OBJ_FROM_PTR(&board_attach_obj) },
 };
 const size_t virtual_board_table_count = MP_ARRAY_SIZE(virtual_board_table);
 

@@ -129,6 +129,15 @@ void neopixel_emu_write(uint8_t pin, const uint8_t *data, size_t len) {
     panel_changed();
 }
 
+int neopixel_emu_find(uint8_t pin, bool *rgbw) {
+    strip_t *s = _find(pin);
+    if (s == NULL) {
+        return -1;
+    }
+    *rgbw = s->bpp == 4;
+    return (int)(s - _strips);
+}
+
 size_t neopixel_emu_strips(void) {
     return _strip_count;
 }
