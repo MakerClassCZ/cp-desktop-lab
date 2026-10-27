@@ -40,3 +40,11 @@ int midi_keyboard_channel(void);       // 1-16
 bool midi_keyboard_held(int note);
 // A key pressed or let go: Note On (velocity 1-127) or Note Off queued, a repeat ignored.
 void midi_keyboard_note(int note, bool down, int velocity);
+// A computer key (an SDL scancode): true when it is the keyboard's, played or moving the octave.
+bool midi_keyboard_key(int scancode, bool down);
+// The computer key that plays a key of the keyboard (0-24 from its lowest note), or 0 for none.
+int midi_keyboard_scancode(int offset);
+// The keyboard an octave up (1) or down (-1), its held notes let go first.
+void midi_keyboard_shift(int octaves);
+// Every held note let go (the window lost the keyboard's focus).
+void midi_keyboard_release_all(void);

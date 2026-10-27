@@ -62,3 +62,20 @@ with launch(READER % 100, KEYS) as b:
 
 status, out = refused(board='[midi]\nA = "keyboard"\nB = "keyboard"\n')
 check("second keyboard refused", status == 2 and "one keyboard" in out, (status, out))
+
+# Computer keys, by position: Z is C3 and Q C4; Page Down an octave lower, S its C#.
+out, _ = run(READER % 12, "wait ready\ndown z\nup z\ndown q\nup q", "midi ", KEYS)
+check("Z plays C3, Q plays C4", "midi 90 30 64 80 30 00 90 3c 64 80 3c 00" in out, out)
+out, _ = run(READER % 6, "wait ready\ndown pagedown\nup pagedown\ndown s\nup s", "midi ", KEYS)
+check("Page Down: an octave lower; S is C#", "midi 90 25 64 80 25 00" in out, out)
+out, _ = run(READER % 6, "wait ready\ndown z\ndown pageup\nup z", "midi ", KEYS)
+check("a held note is let go when the octave moves", "midi 90 30 64 80 30 00" in out, out)
+# The gamepad gives its letter keys up only on a board with a keyboard.
+out, trace = run(READER % 6, "wait ready\ndown z\nup z", "midi ", "[gamepad]\n" + KEYS)
+check(
+    "with a keyboard Z plays, not the gamepad's A",
+    "midi 90 30 64 80 30 00" in out and "GAMEPAD A pressed" not in trace,
+    (out, trace),
+)
+out, trace = run('print("up")\n', "wait up\ndown z\nup z\ndown up\nup up", None, "[gamepad]\n" + KEYS)
+check("the gamepad keeps the arrows", "GAMEPAD UP pressed" in trace, trace)

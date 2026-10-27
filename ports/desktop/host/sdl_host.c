@@ -17,6 +17,7 @@
 
 #include "gamepad.h"
 #include "desktop_port.h"
+#include "midi_in.h"
 #include "panel.h"
 #include "sdl_host.h"
 
@@ -290,11 +291,17 @@ void desktop_sdl_task(void) {
                     desktop_sdl_request_screenshot();
                     break;
                 }
+                if (midi_keyboard_key(event.key.keysym.scancode, pressed)) {
+                    break;
+                }
                 button = gamepad_key_button(event.key.keysym.sym);
                 break;
             case SDL_WINDOWEVENT:
                 // The display's window (the panel takes its own events): no cursor over it.
-                if (event.window.event == SDL_WINDOWEVENT_ENTER) {
+                if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
+                    // Its key-up goes to another window: no note hangs.
+                    midi_keyboard_release_all();
+                } else if (event.window.event == SDL_WINDOWEVENT_ENTER) {
                     SDL_ShowCursor(SDL_DISABLE);
                 } else if (event.window.event == SDL_WINDOWEVENT_EXPOSED
                            || event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {

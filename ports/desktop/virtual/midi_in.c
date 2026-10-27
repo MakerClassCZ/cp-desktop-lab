@@ -13,10 +13,32 @@
 #include <string.h>
 #include <strings.h>
 
+#include <SDL.h>
+
 #include "bus_trace.h"
 #include "panel.h"
 
 #define KEYBOARD_LOW 48     // C3
+#define KEYBOARD_KEYS 25    // two octaves, C to C
+
+// The computer keys by position, as trackers lay them out: the lower octave on Z X C ... with its
+// black keys on the row above, the upper on Q W E ... with its black keys on the digits. Each is
+// the semitone above the keyboard's lowest note.
+static const struct {
+    SDL_Scancode key;
+    int8_t offset;
+} _keys[] = {
+    { SDL_SCANCODE_Z, 0 }, { SDL_SCANCODE_S, 1 }, { SDL_SCANCODE_X, 2 }, { SDL_SCANCODE_D, 3 },
+    { SDL_SCANCODE_C, 4 }, { SDL_SCANCODE_V, 5 }, { SDL_SCANCODE_G, 6 }, { SDL_SCANCODE_B, 7 },
+    { SDL_SCANCODE_H, 8 }, { SDL_SCANCODE_N, 9 }, { SDL_SCANCODE_J, 10 }, { SDL_SCANCODE_M, 11 },
+    { SDL_SCANCODE_COMMA, 12 }, { SDL_SCANCODE_L, 13 }, { SDL_SCANCODE_PERIOD, 14 },
+    { SDL_SCANCODE_SEMICOLON, 15 }, { SDL_SCANCODE_SLASH, 16 },
+    { SDL_SCANCODE_Q, 12 }, { SDL_SCANCODE_2, 13 }, { SDL_SCANCODE_W, 14 }, { SDL_SCANCODE_3, 15 },
+    { SDL_SCANCODE_E, 16 }, { SDL_SCANCODE_R, 17 }, { SDL_SCANCODE_5, 18 }, { SDL_SCANCODE_T, 19 },
+    { SDL_SCANCODE_6, 20 }, { SDL_SCANCODE_Y, 21 }, { SDL_SCANCODE_7, 22 }, { SDL_SCANCODE_U, 23 },
+    { SDL_SCANCODE_I, 24 }, { SDL_SCANCODE_9, 25 }, { SDL_SCANCODE_O, 26 }, { SDL_SCANCODE_0, 27 },
+    { SDL_SCANCODE_P, 28 },
+};
 
 static pthread_mutex_t _lock = PTHREAD_MUTEX_INITIALIZER;
 static uint8_t _queue[MIDI_IN_QUEUE];
@@ -153,9 +175,7 @@ bool midi_keyboard_add(const char *name, const char *options, const char **why) 
 }
 
 void midi_keyboard_remove(void) {
-    for (int note = 0; note < 128; note++) {
-        midi_keyboard_note(note, false, 0);
-    }
+    midi_keyboard_release_all();
     _present = false;
     panel_changed();
 }
@@ -189,4 +209,54 @@ void midi_keyboard_note(int note, bool down, int velocity) {
                        (uint8_t)(down ? (velocity < 1 ? 1 : velocity > 127 ? 127 : velocity) : 0) };
     midi_in_put(msg, sizeof(msg));
     panel_changed();
+}
+
+bool midi_keyboard_key(int scancode, bool down) {
+    if (!_present) {
+        return false;
+    }
+    if (scancode == SDL_SCANCODE_PAGEUP || scancode == SDL_SCANCODE_PAGEDOWN) {
+        if (down) {
+            midi_keyboard_shift(scancode == SDL_SCANCODE_PAGEUP ? 1 : -1);
+        }
+        return true;
+    }
+    for (size_t i = 0; i < sizeof(_keys) / sizeof(_keys[0]); i++) {
+        if ((int)_keys[i].key == scancode) {
+            // A key past the keyboard's top note plays nothing, but is still the keyboard's.
+            if (_keys[i].offset < KEYBOARD_KEYS) {
+                midi_keyboard_note(_low + _keys[i].offset, down, 100);
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+int midi_keyboard_scancode(int offset) {
+    // Where both rows play a key, the upper row's: the lower row ends where the upper begins.
+    int key = 0;
+    for (size_t i = 0; i < sizeof(_keys) / sizeof(_keys[0]); i++) {
+        if (_keys[i].offset == offset) {
+            key = _keys[i].key;
+        }
+    }
+    return key;
+}
+
+void midi_keyboard_shift(int octaves) {
+    int low = _low + 12 * octaves;
+    if (low < 12 || low > 96) {         // C0 to C7: its top C is 127 at most
+        return;
+    }
+    midi_keyboard_release_all();
+    _low = low;
+    bus_trace_text("MIDI %s octave %+d", _name, octaves);
+    panel_changed();
+}
+
+void midi_keyboard_release_all(void) {
+    for (int note = 0; note < 128; note++) {
+        midi_keyboard_note(note, false, 0);
+    }
 }
