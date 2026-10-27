@@ -1,3 +1,0 @@
-Adafruit CircuitPython 11.0.0-alpha.2-44-gf7319a1c03-dirty on 2026-10-27; Windows desktop with x86_64
-Board ID:virtual
-UID:00000000000000000000000000000000
