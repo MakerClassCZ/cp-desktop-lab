@@ -22,6 +22,8 @@
 #include "sdl_host.h"
 
 #define FRAME_MS 16
+// Pixels that changed this recently are still changing.
+#define CHANGING_MS 250
 
 static SDL_Window *_window;
 static SDL_Renderer *_renderer;
@@ -334,15 +336,21 @@ void desktop_sdl_task(void) {
         }
     }
     // A refresh presents its frame; this catches the window's own needs and pixels written
-    // without one.
+    // without one. While they keep changing they are compared at every tick, so a frame shows as
+    // soon as it is drawn; a still picture is compared once a frame.
     static uint64_t last_check_ms;
+    static uint64_t last_change_ms;
     uint64_t now = desktop_host_ms();
-    if (_pixels == NULL || now - _last_frame_ms < FRAME_MS || now - last_check_ms < FRAME_MS) {
+    uint64_t every = now - last_change_ms < CHANGING_MS ? 0 : FRAME_MS;
+    if (_pixels == NULL || now - _last_frame_ms < FRAME_MS || now - last_check_ms < every) {
         return;
     }
     last_check_ms = now;
-    if (_stale || __atomic_load_n(&_screenshot_requested, __ATOMIC_ACQUIRE)
-        || (_shown != NULL && memcmp(_shown, _pixels, (size_t)_width * _height * 2) != 0)) {
+    bool changed = _shown != NULL && memcmp(_shown, _pixels, (size_t)_width * _height * 2) != 0;
+    if (changed) {
+        last_change_ms = now;
+    }
+    if (changed || _stale || __atomic_load_n(&_screenshot_requested, __ATOMIC_ACQUIRE)) {
         desktop_sdl_present();
     }
 }

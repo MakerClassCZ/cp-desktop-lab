@@ -35,6 +35,12 @@ static pthread_mutex_t _irq_lock;
 // The alarms, in CLOCK_MONOTONIC nanoseconds; 0 = not armed.
 static pthread_mutex_t _timer_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t _timer_cond = PTHREAD_COND_INITIALIZER;
+#ifdef _WIN32
+// MinGW's pthread_cond_timedwait wakes on the 15.6 ms system tick whatever timeBeginPeriod says,
+// so on Windows the thread waits on a high-resolution timer and an event for a changed alarm.
+static HANDLE _timer_event;
+static HANDLE _timer;
+#endif
 static bool _tick_enabled;
 static uint64_t _next_tick_ns;
 static uint64_t _wake_ns;
@@ -177,6 +183,42 @@ static uint64_t _due(uint64_t *slot, uint64_t now, bool *fired, uint64_t next) {
     return next == 0 || *slot < next ? *slot : next;
 }
 
+// With _timer_lock held: until an alarm changes, or ns have passed (0 = no time bound).
+static void _timer_wait(uint64_t ns) {
+    #ifdef _WIN32
+    if (_timer_event != NULL && _timer != NULL) {
+        pthread_mutex_unlock(&_timer_lock);
+        HANDLE handles[2] = { _timer_event, _timer };
+        DWORD count = 1;
+        if (ns != 0) {
+            LARGE_INTEGER due;
+            due.QuadPart = -(LONGLONG)((ns + 99) / 100);    // relative, in 100 ns units
+            SetWaitableTimer(_timer, &due, 0, NULL, NULL, FALSE);
+            count = 2;
+        }
+        WaitForMultipleObjects(count, handles, FALSE, INFINITE);
+        pthread_mutex_lock(&_timer_lock);
+        return;
+    }
+    #endif
+    if (ns == 0) {
+        pthread_cond_wait(&_timer_cond, &_timer_lock);
+    } else {
+        struct timespec deadline = _realtime_after(ns);
+        pthread_cond_timedwait(&_timer_cond, &_timer_lock, &deadline);
+    }
+}
+
+// With _timer_lock held: an alarm changed.
+static void _timer_signal(void) {
+    pthread_cond_signal(&_timer_cond);
+    #ifdef _WIN32
+    if (_timer_event != NULL) {
+        SetEvent(_timer_event);
+    }
+    #endif
+}
+
 static void *_timer_main(void *arg) {
     (void)arg;
     pthread_mutex_lock(&_timer_lock);
@@ -214,12 +256,7 @@ static void *_timer_main(void *arg) {
             pthread_mutex_lock(&_timer_lock);
             continue;
         }
-        if (next == 0) {
-            pthread_cond_wait(&_timer_cond, &_timer_lock);
-        } else {
-            struct timespec deadline = _realtime_after(next - now);
-            pthread_cond_timedwait(&_timer_cond, &_timer_lock, &deadline);
-        }
+        _timer_wait(next == 0 ? 0 : next - now);
     }
     return NULL;
 }
@@ -227,6 +264,13 @@ static void *_timer_main(void *arg) {
 bool desktop_interrupts_init(void) {
     #ifdef _WIN32
     timeBeginPeriod(1);     // the scheduler's default 15.6 ms would quantise the tick
+    _timer_event = CreateEventW(NULL, FALSE, FALSE, NULL);
+    // A high-resolution timer where Windows has one (10 1803 and later), else a plain one.
+    _timer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+        TIMER_ALL_ACCESS);
+    if (_timer == NULL) {
+        _timer = CreateWaitableTimerW(NULL, FALSE, NULL);
+    }
     #endif
     pthread_attr_t attr;
     pthread_attr_init(&attr);
@@ -240,7 +284,7 @@ bool desktop_interrupts_init(void) {
 static void _arm(uint64_t *slot, uint64_t ns) {
     pthread_mutex_lock(&_timer_lock);
     *slot = _now_ns() + (ns > 0 ? ns : 1);
-    pthread_cond_signal(&_timer_cond);
+    _timer_signal();
     pthread_mutex_unlock(&_timer_lock);
 }
 
@@ -248,7 +292,7 @@ void port_enable_tick(void) {
     pthread_mutex_lock(&_timer_lock);
     _tick_enabled = true;
     _next_tick_ns = _now_ns() + TICK_NS;
-    pthread_cond_signal(&_timer_cond);
+    _timer_signal();
     pthread_mutex_unlock(&_timer_lock);
 }
 
