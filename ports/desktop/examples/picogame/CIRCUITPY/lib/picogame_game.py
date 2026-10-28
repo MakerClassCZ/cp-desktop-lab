@@ -9,9 +9,20 @@
 import board
 import picogame as pg
 
+# The bundle's release, so a board can be asked what it is actually running. A stale .mpy bundle
+# shadowing an edited .py is the classic silent failure here (sys.path order, not a suffix rule),
+# and "which libs are on this board?" had no answer before. Bump this with the git tag.
+VERSION = "0.3.2"
+
+try:
+    from picogame_debug import note as _debug   # optional diagnostics (settings.toml PICOGAME_DEBUG=1)
+except ImportError:                             # not deployed -> silent no-op, never a dependency
+    def _debug(*args):
+        pass
+
 
 def setup(display=None, strip_h=None, background=0, fast=True, top=0, bottom=0, left=0, right=0,
-          rgb444=False):
+          rgb444=None):
     """Take over the display and return (scene, buffer_a, buffer_b).
 
     Disables displayio auto-refresh, clears the root group and builds a Scene. On a
@@ -37,7 +48,13 @@ def setup(display=None, strip_h=None, background=0, fast=True, top=0, bottom=0, 
     SPI traffic -> more FPS on transfer-bound (full-screen/scrolling) scenes, 4096 colours
     (plenty for PAL8 art). Needs a controller with COLMOD 12-bit (ST7789/ST7735; not ILI9341).
     rgb444="auto" enables it only where the board reports support (picogame.RGB444_SUPPORTED),
-    so one codebase runs optimally on ST7789 and safely (RGB565) on ILI9341 - no per-board code."""
+    so one codebase runs optimally on ST7789 and safely (RGB565) on ILI9341 - no per-board code.
+    rgb444=None (the default) reads PICOGAME_RGB444 from settings.toml: 1 = "auto", unset/0 =
+    RGB565. That is the per-board switch for a transfer-bound panel (PyBadge); a game's explicit
+    True/False/"auto" wins over it."""
+    _debug("picogame libs", VERSION)
+    if rgb444 is None:
+        rgb444 = "auto" if _toml_flag("PICOGAME_RGB444") else False
     if rgb444 == "auto":
         rgb444 = getattr(pg, "RGB444_SUPPORTED", False)
     if strip_h is None:
@@ -52,8 +69,19 @@ def setup(display=None, strip_h=None, background=0, fast=True, top=0, bottom=0, 
     #   PICOGAME_MADCTL     absolute MADCTL byte (0x36 register: mirrors + BGR order). Absolute on
     #                       purpose - the register can't be read back, so bit-flips would need a
     #                       per-board baseline. PicoPad values: 0x60 stock | 0x68 BGR panel |
-    #                       0xA0 mounted 180 deg | 0xA8 both. (DIY boards: use the custom-board
-    #                       PICOGAME_FLIP/PICOGAME_BGR keys instead - their launcher rebuilds.)
+    #                       0xA0 mounted 180 deg | 0xA8 both; an ILI9341 counts from 0x38.
+    #
+    #                       Orientation has TWO keys, and they are two PHASES, not two options:
+    #                         PICOGAME_FLIP ("", "h", "v", "hv") is where the answer LIVES. The
+    #                           boot.py / launcher that builds the display bakes it into the panel
+    #                           init, so the panel is right from power-on - the REPL and a
+    #                           traceback get it too - and no game code changes. Set once per box.
+    #                         PICOGAME_MADCTL is for FINDING the answer. It is applied here, at
+    #                           setup(), and settings.toml is re-read on every reload, so values
+    #                           can be tried with a save instead of the hard reset boot.py needs.
+    #                       Delete MADCTL once FLIP is set: this send happens AFTER the init, so
+    #                       an absolute byte silently overrides whatever FLIP baked in. The check
+    #                       below says so rather than leaving you to find it.
     #   PICOGAME_BRIGHTNESS backlight, integer PERCENT 0-100 (settings.toml has no floats).
     try:
         import os
@@ -61,18 +89,18 @@ def setup(display=None, strip_h=None, background=0, fast=True, top=0, bottom=0, 
         _mad = os.getenv("PICOGAME_MADCTL")
         _bri = os.getenv("PICOGAME_BRIGHTNESS")
         if _inv is not None or _mad is not None or _bri is not None:
-            import board as _board
-            _d = _board.DISPLAY
+            _d = _current_display()          # supervisor.runtime.display (the primary display)
             if _inv is not None:
-                _on = (_inv != 0) if isinstance(_inv, int) else \
-                    str(_inv).strip().lower() not in ("", "0", "false", "no")
-                pg.invert(_d, _on)
+                pg.invert(_d, _toml_flag("PICOGAME_INVERT"))
             if _mad is not None:
+                if os.getenv("PICOGAME_FLIP"):
+                    print("picogame: settings.toml has both PICOGAME_MADCTL and PICOGAME_FLIP - "
+                          "MADCTL wins (it is sent after the panel init). Drop one.")
                 _d.bus.send(0x36, bytes([int(str(_mad), 0) & 0xFF]))
             if _bri is not None:
                 _d.brightness = max(0, min(100, int(_bri))) / 100
     except Exception:
-        pass                                  # no board.DISPLAY / no invert (sim variants): ignore
+        pass                                  # no display / no invert (sim variants): ignore
     backend, is_fb = resolve_display(display)
     if is_fb:
         # Framebuffer target (WASM playground, Fruit Jam DVI): the scene composites straight
@@ -97,15 +125,29 @@ def setup(display=None, strip_h=None, background=0, fast=True, top=0, bottom=0, 
     buf_b = bytearray(w * strip_h * 2)
     # Use the fast DMA Display where the firmware provides it; otherwise (a port without
     # the backend, e.g. ESP32) fall back to the plain busdisplay -> Scene's portable renderer.
-    if fast and hasattr(pg, "Display"):
+    if fast and getattr(pg, "FAST_DISPLAY_SUPPORTED", hasattr(pg, "Display")):
         backend = pg.Display(backend, rgb444=rgb444)
     scene = pg.Scene(backend, buf_a, buf_b, background=background,
                      top=top, bottom=bottom, left=left, right=right)
     return scene, buf_a, buf_b
 
 
+def _toml_flag(name):
+    """settings.toml boolean: an int (`KEY = 1`) or a string (`KEY = "yes"`); unset = False."""
+    try:
+        import os
+        v = os.getenv(name)
+    except Exception:
+        return False
+    if v is None:
+        return False
+    if isinstance(v, int):
+        return v != 0
+    return str(v).strip().lower() not in ("", "0", "false", "no")
+
+
 _RESOLVED = {}   # id(display) -> (display, backend, is_fb): setup() and every HUD that normalizes
-                 # board.DISPLAY share ONE wrapper (no per-frame Framebuffer realloc). The original
+                 # the display share ONE wrapper (no per-frame Framebuffer realloc). The original
                  # display is kept as a STRONG ref in the tuple so its id can't be reused by a later
                  # object (stale-alias guard), and the hit is re-verified with `is` before reuse.
 
@@ -119,11 +161,17 @@ def open_framebuffer(width, height, color_depth=None):
     Lets a game pick its OWN resolution in code (fresh interpreter per game via the launcher),
     so nothing has to be hand-set in settings.toml. Behaviour by board:
       - a DVI/framebuffer board that exposes the picodvi pins (Fruit Jam: board.CKP/CKN/D0P...):
-        if the current display already matches width x height it is reused (no realloc / flicker,
-        and this cleanly absorbs a resolution left behind by the previous game across a soft
-        reload); otherwise release_displays() + a fresh picodvi.Framebuffer at this size;
+        if the current display already matches width x height x color_depth it is reused (no
+        realloc / flicker, and this cleanly absorbs a mode left behind by the previous game
+        across a soft reload); otherwise release_displays() + a fresh picodvi.Framebuffer;
       - a fixed-panel board (ST7789 SPI PicoPad) or the sim: a NO-OP - returns the existing
-        board.DISPLAY unchanged (the panel is a fixed size; the request is simply ignored).
+        display unchanged (the panel is a fixed size; the request is simply ignored).
+
+    If the new size does not fit in internal SRAM, the PREVIOUS mode is rebuilt and republished
+    before the MemoryError propagates - a failed switch must never leave the board displayless
+    (a soft reload does not re-run the firmware's display auto-construct, so that state survives
+    until a power cycle). CALL THIS BEFORE importing any module that captures the display at
+    import time.
 
     color_depth defaults to 16 (RGB565) for <= 320x240 and 8 (RGB332) above - 8-bit is the only
     depth picodvi offers at 640x480, and the engine already renders RGB332. 640x480 needs PSRAM.
@@ -132,7 +180,7 @@ def open_framebuffer(width, height, color_depth=None):
         import board
     except ImportError:
         return None
-    cur = getattr(board, "DISPLAY", None)
+    cur = _display_or_none()          # the display in use right now, if any
     # fixed-panel board / sim: no picodvi module or no DVI pins -> use whatever display exists
     try:
         import picodvi
@@ -142,37 +190,92 @@ def open_framebuffer(width, height, color_depth=None):
         return cur
     if not hasattr(board, "CKP"):
         return cur
-    if cur is not None and getattr(cur, "width", None) == width \
-            and getattr(cur, "height", None) == height:
-        return cur                              # already the right size -> reuse
     if color_depth is None:
         color_depth = 16 if width * height <= 320 * 240 else 8
+    prev = None                                 # the mode we are leaving: (w, h, depth)
+    if cur is not None:
+        fb = getattr(cur, "framebuffer", None)  # the picodvi.Framebuffer under the display
+        cur_depth = getattr(fb, "color_depth", None)
+        prev = (getattr(cur, "width", 0), getattr(cur, "height", 0),
+                cur_depth if cur_depth is not None else color_depth)
+        if prev == (width, height, color_depth):
+            return cur                          # already this mode -> reuse
+    # release_displays() frees the scanout buffer we are about to reuse the memory of, so it
+    # has to happen first - which is exactly why a failure here would otherwise leave the board
+    # with NO display until a power cycle (a soft reload does not re-run the firmware's
+    # auto-construct): `prev` is what a failed switch puts back.
     displayio.release_displays()
-    fb = picodvi.Framebuffer(
-        width, height,
-        clk_dp=board.CKP, clk_dn=board.CKN,
-        red_dp=board.D0P, red_dn=board.D0N,
-        green_dp=board.D1P, green_dn=board.D1N,
-        blue_dp=board.D2P, blue_dn=board.D2N,
-        color_depth=color_depth)
-    disp = framebufferio.FramebufferDisplay(fb, auto_refresh=False)
-    # Best-effort: make the new display visible via board.DISPLAY too, so code that reads
-    # board.DISPLAY.width/height directly (e.g. a game's asset scaler) sees the new size. board
-    # is a C module and may reject attribute writes -> ignore; such callers should use the
-    # returned display (or supervisor.runtime.display) instead. CALL THIS BEFORE importing any
-    # module that captures board.DISPLAY at import time.
+    _RESOLVED.clear()                           # CircuitPython rebuilds the display (and its
+    _TARGET.clear()                             # picodvi bus) in the SAME static slot, so the
+                                                # id()-keyed memos would hand back a wrapper of
+                                                # the released buffer at the old depth
+
+    def _build(w, h, depth):
+        fb = picodvi.Framebuffer(
+            w, h,
+            clk_dp=board.CKP, clk_dn=board.CKN,
+            red_dp=board.D0P, red_dn=board.D0N,
+            green_dp=board.D1P, green_dn=board.D1N,
+            blue_dp=board.D2P, blue_dn=board.D2N,
+            color_depth=depth)
+        return framebufferio.FramebufferDisplay(fb, auto_refresh=False)
+
     try:
-        board.DISPLAY = disp
+        disp = _build(width, height, color_depth)
+    except MemoryError:
+        if prev is None or prev[:2] == (width, height):
+            raise MemoryError(_scanout_hint(width, height, color_depth))
+        try:                                    # put the previous mode back, then report
+            disp = _build(prev[0], prev[1], prev[2])
+        except MemoryError:
+            raise MemoryError(
+                "no memory for %dx%d, and %dx%d could not be restored - power-cycle the board"
+                % (width, height, prev[0], prev[1]))
+        _publish(disp)
+        raise MemoryError("%s (kept %dx%d)"
+                          % (_scanout_hint(width, height, color_depth), prev[0], prev[1]))
+    _publish(disp)
+    return disp
+
+
+def _scanout_hint(width, height, depth):
+    """Explain a failed mode switch in terms of the resource that actually ran out.
+
+    A bare MemoryError sends people to gc.mem_free(), which on a PSRAM board (Fruit Jam) cheerfully
+    reports megabytes free and even hands out a 599 kB bytearray - while the scanout buffer needs
+    CONTIGUOUS SRAM that the GC heap has already taken. Measured 2026-08-23: 640x480x8 = 307200 B
+    fails from code.py with ~8 MB of heap 'free'. The heap number is not the constraint; when it is
+    claimed is."""
+    return ("no memory for %dx%d: the scanout buffer needs %d B of CONTIGUOUS SRAM, which gc.mem_free() "
+            "does not measure (the heap may live in PSRAM). Claim the mode in boot.py, before the "
+            "heap grows into SRAM." % (width, height, width * height * (depth // 8)))
+
+
+def _publish(disp):
+    """Make `disp` the display everything else finds.
+
+    Publishing it as the PRIMARY display is not best-effort: release_displays() cleared the primary
+    slot, and display()/screen() read nothing else - a swallowed failure here would surface later
+    as "no display" from setup(). Only a host without supervisor is tolerated. board.DISPLAY is
+    set too where the slot is writable, as a courtesy to code that still reads it directly."""
+    try:
+        import board
+        board.DISPLAY = disp                 # boards with a settable slot (our custom-board builds)
     except (AttributeError, TypeError):
         pass
-    return disp
+    try:
+        import supervisor
+    except ImportError:
+        supervisor = None
+    if supervisor is not None:
+        supervisor.runtime.display = disp
 
 
 def target(display):
     """Immediate-render target for pg.render: a framebuffer board's FramebufferDisplay -> its
     pg.Framebuffer (memoized via resolve_display); a BusDisplay / pg.Display / pg.Framebuffer (none of
     which carry a `.framebuffer` attr) passes straight through. Lets HUD / Label / overlay / cutscene
-    helpers accept a bare `board.DISPLAY` on every platform. Resolver errors (bad rotation / colour
+    helpers accept a bare display object on every platform. Resolver errors (bad rotation / colour
     depth / old firmware) propagate - the caller sees the real reason, not a later 'expected a BusDisplay'."""
     if getattr(display, "framebuffer", None) is None:
         return display
@@ -185,13 +288,60 @@ def target(display):
     return backend
 
 
+def _display_or_none():
+    """The board's primary display, or None where nothing published one (no raise)."""
+    try:
+        import supervisor
+        return supervisor.runtime.display
+    except (ImportError, AttributeError):
+        return None
+
+
+def _current_display():
+    """The board's display, wherever it comes from - use this instead of `board.DISPLAY` so a game
+    runs on every board:
+
+        hud = ui.HudBar(pg, picogame_game.display(), bufA, 0, 0, W, BAR, BG)
+
+    The source is `supervisor.runtime.display` - the board's PRIMARY display - and only that, so
+    there is ONE way a display reaches a game on every platform:
+      - the firmware built one: CircuitPython selects it right after board_init(), before boot.py;
+      - a boot.py, a launcher or open_framebuffer() built one: they publish it with
+        `supervisor.runtime.display = disp` (it survives into code.py - reset_displays() does not
+        clear the primary slot);
+      - the simulator and the WASM playground ship a `supervisor` shim whose runtime.display
+        proxies their own display.
+    Reading it (rather than a board's static DISPLAY) also means a RELEASED display reads back as
+    None instead of a stale handle. A host without `supervisor` - another MicroPython embedding -
+    adds the same small shim; it has no `board.DISPLAY` either, so there is nothing to fall back to.
+    """
+    d = _display_or_none()
+    if d is None:
+        raise RuntimeError("no display: build one in boot.py and publish it with "
+                           "`supervisor.runtime.display = disp` (see CUSTOM_BOARD)")
+    return d
+
+
+display = _current_display          # public name (resolve_display's parameter shadows it inside)
+
+
+def screen():
+    """Screen size as `(width, height)` - the size-independent way to lay a game out:
+
+        W, H = picogame_game.screen()
+
+    Same source as display(), so it works on every board and in the sim/playground alike."""
+    d = _current_display()
+    return (d.width, d.height)
+
+
 def resolve_display(display=None):
     """Find and normalize the render target. Returns (backend, is_framebuffer).
 
-    Search order: the explicit `display` -> `board.DISPLAY` -> `supervisor.runtime.display`
-    (boards whose display the supervisor auto-constructs, e.g. the Fruit Jam DVI output).
+    Search order: the explicit `display` -> `supervisor.runtime.display` (the primary display: set
+    by the firmware, or published by boot.py / a launcher / the sim+playground supervisor shim).
     Normalization:
-      - a `pg.Framebuffer` passes through unchanged (the WASM playground's board.DISPLAY);
+      - a `pg.Framebuffer` passes through unchanged (the WASM playground's display);
       - a framebuffer display (has `.framebuffer`, e.g. framebufferio.FramebufferDisplay
         over picodvi) is unwrapped: auto-refresh off, root group cleared, and its RAW
         scanout buffer wrapped as `pg.Framebuffer(..., native_rgb565=True)` - requires the
@@ -199,16 +349,13 @@ def resolve_display(display=None):
       - anything else is a busdisplay (SPI) returned as-is; setup() picks fast/portable.
     Shared by setup() and picogame_scene.load() so the platform logic lives ONCE."""
     if display is None:
-        display = getattr(board, "DISPLAY", None)
-    if display is None:
         try:
-            import supervisor
-            display = supervisor.runtime.display
-        except (ImportError, AttributeError):
-            display = None
-    if display is None:
-        raise RuntimeError("no display found; on a DVI board set "
-                           "CIRCUITPY_PICODVI_ENABLE=\"always\" in settings.toml")
+            display = _current_display()          # the board's primary display
+        except RuntimeError:
+            raise RuntimeError("no display: if you just added boot.py press RESET once (boot.py runs "
+                               "only at power-on, not on save/reload); on a DVI board set "
+                               "CIRCUITPY_PICODVI_ENABLE=\"always\" in settings.toml; on a bare "
+                               "board publish yours with `supervisor.runtime.display = disp`")
     key = id(display)
     hit = _RESOLVED.get(key)
     if hit is not None and hit[0] is display:      # verify identity: guards a reused id() (stale alias)
