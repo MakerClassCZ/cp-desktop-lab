@@ -118,7 +118,7 @@ UP = "W, Up"
 ```
 
 `boards/files/picopad.toml` is such a file. The keys work in the panel's window as in the
-display's.
+display's. `examples/gamepad` flies a ship with them.
 
 `audioio.AudioOut(board.SPEAKER)` plays through SDL2 audio: samples, `audiomixer` and `synthio`.
 
