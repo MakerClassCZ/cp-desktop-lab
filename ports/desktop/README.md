@@ -118,7 +118,8 @@ UP = "W, Up"
 ```
 
 `boards/files/picopad.toml` is such a file. The keys work in the panel's window as in the
-display's. `examples/gamepad` flies a ship with them.
+display's. `examples/gamepad` flies a ship with them, and `examples/picogame` the same ship in
+`picogame`, with a flame and sparks.
 
 `audioio.AudioOut(board.SPEAKER)` plays through SDL2 audio: samples, `audiomixer` and `synthio`.
 
