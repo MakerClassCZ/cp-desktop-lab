@@ -34,6 +34,9 @@ static bool _fullscreen;
 static uint64_t _last_frame_ms;
 // The window shows something other than the pixels: drawn again at the next frame.
 static bool _stale;
+// The pixels last presented: a program that writes the buffer without a refresh (picogame on a
+// framebuffer) is presented when they differ.
+static uint16_t *_shown;
 static int _screenshot_requested;
 static int _screenshot_count;
 
@@ -210,6 +213,8 @@ bool desktop_sdl_show(uint16_t *pixels, int width, int height) {
     SDL_RenderSetLogicalSize(_renderer, width, height);
     SDL_RenderSetIntegerScale(_renderer, SDL_TRUE);
     bool was_showing = _pixels != NULL;
+    free(_shown);
+    _shown = malloc((size_t)width * height * 2);
     _pixels = pixels;
     _width = width;
     _height = height;
@@ -226,6 +231,8 @@ void desktop_sdl_hide(void) {
         return;
     }
     _pixels = NULL;
+    free(_shown);
+    _shown = NULL;
     supervisor_disable_tick();
     SDL_SetRenderDrawColor(_renderer, 0, 0, 0, 255);
     SDL_RenderClear(_renderer);
@@ -248,6 +255,9 @@ void desktop_sdl_present(void) {
         return;
     }
     SDL_UpdateTexture(_texture, NULL, _pixels, _width * 2);
+    if (_shown != NULL) {
+        memcpy(_shown, _pixels, (size_t)_width * _height * 2);
+    }
     uint8_t level = (uint8_t)(_brightness * 255 + 0.5f);
     SDL_SetTextureColorMod(_texture, level, level, level);
     SDL_SetRenderDrawColor(_renderer, 0, 0, 0, 255);
@@ -323,9 +333,16 @@ void desktop_sdl_task(void) {
             gamepad_press(button, pressed);
         }
     }
-    // A refresh presents its frame; this catches the window's own needs.
-    if (_pixels != NULL && (_stale || __atomic_load_n(&_screenshot_requested, __ATOMIC_ACQUIRE))
-        && desktop_host_ms() - _last_frame_ms >= FRAME_MS) {
+    // A refresh presents its frame; this catches the window's own needs and pixels written
+    // without one.
+    static uint64_t last_check_ms;
+    uint64_t now = desktop_host_ms();
+    if (_pixels == NULL || now - _last_frame_ms < FRAME_MS || now - last_check_ms < FRAME_MS) {
+        return;
+    }
+    last_check_ms = now;
+    if (_stale || __atomic_load_n(&_screenshot_requested, __ATOMIC_ACQUIRE)
+        || (_shown != NULL && memcmp(_shown, _pixels, (size_t)_width * _height * 2) != 0)) {
         desktop_sdl_present();
     }
 }
