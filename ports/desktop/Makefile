@@ -160,6 +160,9 @@ CFLAGS += -Wno-unknown-warning-option -Wno-expansion-to-defined -Wno-unreachable
 endif
 ifeq ($(WINDOWS),1)
 CFLAGS += -D_WIN32_WINNT=0x0A00
+else
+# A 64-bit time_t and file offsets on a 32-bit Linux too (glibc 2.34+), so dates past 2038 work.
+CFLAGS += -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64
 endif
 CFLAGS += -D_GNU_SOURCE -fno-common
 # The MP3 decoder names the x86 hosts it has assembly for; any other (a Pi's aarch64) takes its C.
