@@ -53,7 +53,13 @@ with Board.launch("ports/desktop/build-linux/circuitpython", "/tmp/repro/CIRCUIT
 - `b.trace()`/`b.trace_wait(text)`: every I2C, SPI and UART transfer.
 - `b.state()`, `b.panel("set ENV.temp 24.5", "press A")`: parts, buttons, sensors.
 - `fast_time=True`: sleeps return at once and move the clock on, for code that waits long.
-- `tools/cp_mcp.py` serves the same to an agent over MCP.
+- `b.ble`: the phone of a Bluetooth LE program (`BLERadio()`, `_bleio`). `scan()` is what it
+  advertises (`name`, `services`); `p = b.ble.connect()`, then `p.services()`, `p.read(uuid)`,
+  `p.write(uuid, data, response=True)`, `p.subscribe(uuid)` and `p.notifications(uuid)`,
+  `p.uart_write(text)` and `p.uart_read()` for the Nordic UART, `p.disconnect()`;
+  `cpapi.bluefruit.color(r, g, b)` (and `button`, `accelerometer`) are Bluefruit Connect's
+  packets. The trace has `BLE ADV`, `BLE CONNECT`, `BLE ATT <-`/`->` and `BLE DISCONNECT`.
+- `tools/cp_mcp.py` serves the same to an agent over MCP (`ble_scan`, `ble_connect`, ...).
 
 ## Good evidence for an issue or a PR
 
@@ -73,6 +79,9 @@ with Board.launch("ports/desktop/build-linux/circuitpython", "/tmp/repro/CIRCUIT
   KB). A wild pointer often crashes here too, but not always.
 - A board's memory: the heap is 16 MB unless `--ram MB` (`args=["--ram", "1"]`) says less.
 - 64-bit sizes: use the i386 program when `size_t`, pointers or `mp_int_t` may matter.
+- The nRF port's own `_bleio`: BLE here is the HCI host stack the AirLift boards use
+  (`devices/ble_hci`), as a peripheral only (no scanning or connecting from `code.py`, no
+  pairing), at an MTU of 23. A bug of a CLUE's SoftDevice code needs the board.
 
 ## Tests
 

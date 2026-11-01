@@ -239,6 +239,29 @@ A board file of a board without Bluetooth says `[board] ble = "off"`; `--ble` wi
 AirLift code that builds its own `_bleio.Adapter(uart=...)` over `--uart` runs with `--ble off`
 (there is one adapter). `--fast-time` refuses `--ble PORT`: a real controller keeps real time.
 
+With the virtual controller a test or an agent is the phone, through the control API
+(`/api/ble`, below) or `cpapi`, as Bluefruit Connect or nRF Connect would be:
+
+```python
+with cpapi.Board.launch("circuitpython", "CIRCUITPY") as b:
+    b.wait("ready")
+    print(b.ble.scan())                       # Advertisement(name='CLUE', services=[...])
+    p = b.ble.connect()                       # the MTU exchanged
+    print(p.services())                       # GAP, GATT and the program's, with characteristics
+    p.uart_write(cpapi.bluefruit.color(255, 0, 0))   # a Bluefruit Connect colour packet
+    print(p.uart_read(timeout=2))             # what the program wrote to its Nordic UART
+    p.write(0x1235, b"on")                    # a characteristic by UUID; read(), subscribe(),
+    p.disconnect()                            # notifications() too
+```
+
+The MCP server has the same as `ble_scan`, `ble_connect`, `ble_services`, `ble_read`,
+`ble_write`, `ble_notifications` and `ble_disconnect`. With either controller the trace has
+`BLE ADV "CLUE" connectable 02 01 06 ...`, `BLE CONNECT 7c:10:c9:1c:37:89`, `BLE ATT <- WRITE_CMD
+0x000b 68 69 "hi"` (to the program) and `->` (from it), `BLE DISCONNECT 0x13`; `--ble-log PATH`
+writes every HCI packet as btsnoop, which Wireshark opens; the board panel has a BLE row. The
+stack is a peripheral at an MTU of 23 (20 bytes a notification): no scanning or connecting from
+`code.py` yet, no pairing.
+
 ## The board panel: NeoPixels, buttons, sliders and other boards' pin names
 
 On the virtual board the program's parts appear in a window, "CircuitPython board": NeoPixels
@@ -591,6 +614,10 @@ naming another `Host`, or a browser's preflight, is refused, so a web page canno
 | `POST /api/panel` | key script lines (`set ENV.temp 24.5`, `press A`, `turn ENC 2`, `send IR_RX`, `down Z`), applied before the answer |
 | `GET /api/display?name=NAME` | the window (`DISPLAY`), or a board file's display, as PNG |
 | `GET /api/trace?since=N&wait=TEXT&timeout=MS` | the bus trace, as the console; with or without `--trace-bus` |
+| `GET /api/ble` | the Bluetooth controller (`virtual`, `serial`, `off`), what is advertised (`data`, `scan_response` in hex, `name`, `connectable`), the address, the connection |
+| `POST /api/ble/connect`, `/disconnect` | the phone joins what the program advertises, or leaves (409 with a real controller) |
+| `POST /api/ble/att` | an ATT PDU from the phone to the program, as hex |
+| `GET /api/ble/att?wait=MS` | the ATT PDUs the program sent the phone since the last call (`pdus`, hex), waiting for the first |
 
 `exec` types the code into the REPL as one line, so it runs as a person typing would: after
 `code.py` has ended, in the REPL's variables, which last from one `exec` to the next. While

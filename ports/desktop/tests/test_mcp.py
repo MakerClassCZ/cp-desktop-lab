@@ -113,6 +113,13 @@ want = {
     "list_files",
     "read_file",
     "write_file",
+    "ble_scan",
+    "ble_connect",
+    "ble_services",
+    "ble_read",
+    "ble_write",
+    "ble_notifications",
+    "ble_disconnect",
 }
 check(
     "tools/list names every tool, each with a schema",
@@ -269,6 +276,42 @@ r = c.call("stop")
 r = c.call("launch", drive=drive('print("again")\n'))
 r2 = c.call("console", wait="again", timeout=15)
 check("launch after a program ended", not r.get("isError") and "again" in text(r2), (r, r2))
+r = c.call("stop")
+
+# Bluetooth LE: the phone's tools on a program that advertises a characteristic it echoes
+ECHO = """import _bleio, time
+a = _bleio.adapter
+C = _bleio.Characteristic
+s = _bleio.Service(_bleio.UUID(0x1234))
+c = C.add_to_service(s, _bleio.UUID(0x1235), properties=C.READ | C.WRITE | C.NOTIFY,
+    read_perm=_bleio.Attribute.OPEN, write_perm=_bleio.Attribute.OPEN, max_length=20, initial_value=b"hi")
+a.start_advertising(bytes([2, 1, 6, 5, 9]) + b"echo", connectable=True)
+print("ready")
+last = b"hi"
+while True:
+    if c.value != last:
+        last = c.value
+        c.value = bytes(last).upper()
+        last = c.value
+    time.sleep(0.01)
+"""
+r = c.call("launch", drive=drive(ECHO))
+c.call("console", wait="ready", timeout=15)
+r = c.call("ble_scan")
+check("ble_scan: the name", not r.get("isError") and '"echo"' in text(r), r)
+r = c.call("ble_connect")
+check("ble_connect", not r.get("isError") and "MTU" in text(r), r)
+r = c.call("ble_services")
+check("ble_services lists the program's", not r.get("isError") and "00001235-" in text(r), r)
+r = c.call("ble_read", uuid="0x1235")
+check("ble_read: hex and text", not r.get("isError") and '68 69  "hi"' in text(r), r)
+r = c.call("ble_notifications", uuid="0x1235", timeout=0.2)
+r = c.call("ble_write", uuid="0x1235", text="abc")
+check("ble_write", not r.get("isError"), r)
+r = c.call("ble_notifications", uuid="0x1235", timeout=3)
+check("ble_notifications: what the program notified", '"ABC"' in text(r), r)
+r = c.call("ble_disconnect")
+check("ble_disconnect", not r.get("isError"), r)
 r = c.call("stop")
 r = c.call("launch", drive=drive('print("fast")\n'), fast_time=True)
 check(

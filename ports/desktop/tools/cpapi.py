@@ -468,6 +468,11 @@ class Board:
         except (ConnectionError, http.client.HTTPException, OSError):
             pass
 
+    @property
+    def ble(self):
+        """The phone of the virtual Bluetooth controller: scan(), connect() (a Ble)."""
+        return Ble(self)
+
     def close(self):
         """Quit; a program that does not end in 5 s is killed."""
         if self.process is None or self.process.poll() is not None:
@@ -484,6 +489,310 @@ class Board:
 
     def __exit__(self, *exc):
         self.close()
+
+
+# ---- Bluetooth LE: the phone of the virtual controller ----
+
+BASE_UUID = "-0000-1000-8000-00805f9b34fb"
+
+
+def uuid(u):
+    """A UUID as its full lowercase text: 0x2A00, "2a00", "0x2a00" or a 128-bit one."""
+    if isinstance(u, int):
+        return "%08x%s" % (u, BASE_UUID)
+    u = u.lower()
+    if u.startswith("0x"):
+        u = u[2:]
+    if len(u) <= 8 and "-" not in u:
+        return "%08x%s" % (int(u, 16), BASE_UUID)
+    return u
+
+
+def _uuid_from_le(data):
+    """A UUID from ATT's little-endian bytes (2 or 16 of them)."""
+    if len(data) == 2:
+        return uuid(data[0] | data[1] << 8)
+    h = bytes(reversed(data)).hex()
+    return "%s-%s-%s-%s-%s" % (h[:8], h[8:12], h[12:16], h[16:20], h[20:])
+
+
+class Advertisement:
+    """What the program advertises: name, services (UUIDs), manufacturer data, raw bytes."""
+
+    def __init__(self, state):
+        self.raw = bytes.fromhex(state.get("data", "")) + bytes.fromhex(
+            state.get("scan_response", "")
+        )
+        self.connectable = state.get("connectable", False)
+        self.name, self.services, self.manufacturer = None, [], b""
+        i = 0
+        while i + 1 < len(self.raw) and self.raw[i]:
+            length, kind = self.raw[i], self.raw[i + 1]
+            value = self.raw[i + 2 : i + 1 + length]
+            if kind in (0x08, 0x09) and (self.name is None or kind == 0x09):
+                self.name = value.decode(errors="replace")
+            elif kind in (0x02, 0x03):
+                self.services += [
+                    uuid(value[k] | value[k + 1] << 8) for k in range(0, len(value) - 1, 2)
+                ]
+            elif kind in (0x06, 0x07):
+                self.services += [
+                    _uuid_from_le(value[k : k + 16]) for k in range(0, len(value) - 15, 16)
+                ]
+            elif kind == 0xFF:
+                self.manufacturer = value
+            i += 1 + length
+
+    def __repr__(self):
+        return "Advertisement(name=%r, services=%r)" % (self.name, self.services)
+
+
+class Characteristic:
+    def __init__(self, uuid, handle, properties):
+        self.uuid, self.handle, self.properties = uuid, handle, properties
+        self.cccd = None  # the handle of its Client Characteristic Configuration, if it has one
+
+    def __repr__(self):
+        return "Characteristic(%s, 0x%04x)" % (self.uuid, self.handle)
+
+
+class Service:
+    def __init__(self, uuid, start, end):
+        self.uuid, self.start, self.end, self.characteristics = uuid, start, end, []
+
+    def __repr__(self):
+        return "Service(%s, 0x%04x-0x%04x)" % (self.uuid, self.start, self.end)
+
+
+class AttError(Exception):
+    """An ATT Error Response: the request's opcode, the handle, the error code."""
+
+    def __init__(self, opcode, handle, code):
+        super().__init__("ATT error 0x%02x on 0x%02x at handle 0x%04x" % (code, opcode, handle))
+        self.opcode, self.handle, self.code = opcode, handle, code
+
+
+NUS_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+NUS_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"  # the phone writes here
+NUS_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"  # the program notifies here
+
+
+class Peer:
+    """The phone connected to the program: a GATT client over ATT PDUs through the control API."""
+
+    def __init__(self, board, mtu=247):
+        self.board = board
+        self.mtu = 23
+        self._pending = []  # PDUs read but not yet asked for
+        self._notified = {}  # value handle: [values]
+        self._services = None
+        answer = self._request(bytes([0x02]) + struct.pack("<H", mtu), 0x03)
+        self.mtu = max(23, min(mtu, struct.unpack("<H", answer[1:3])[0]))
+
+    def _send(self, pdu):
+        self.board.request("POST", "/api/ble/att", pdu.hex())
+
+    def _take(self, timeout):
+        """The PDUs the program sent, waiting up to timeout for the first one."""
+        pdus = self.board.request("GET", "/api/ble/att?wait=%d" % int(timeout * 1000))["pdus"]
+        for hexed in pdus:
+            pdu = bytes.fromhex(hexed)
+            if pdu[:1] in (b"\x1b", b"\x1d"):
+                handle = struct.unpack("<H", pdu[1:3])[0]
+                self._notified.setdefault(handle, []).append(pdu[3:])
+                if pdu[0] == 0x1D:
+                    self._send(b"\x1e")  # an indication is confirmed
+            else:
+                self._pending.append(pdu)
+
+    def _request(self, pdu, answer, timeout=5):
+        """pdu sent; the program's answer of opcode answer, or AttError."""
+        self._send(pdu)
+        end = time.time() + timeout
+        while True:
+            for i, got in enumerate(self._pending):
+                if got[0] == answer or (got[0] == 0x01 and got[1] == pdu[0]):
+                    del self._pending[i]
+                    if got[0] == 0x01:
+                        raise AttError(got[1], struct.unpack("<H", got[2:4])[0], got[4])
+                    return got
+            left = end - time.time()
+            if left <= 0:
+                raise TimeoutError("no answer to ATT 0x%02x" % pdu[0])
+            self._take(min(left, 1))
+
+    def _each(self, opcode, answer, start, end, extra):
+        """The answers of a request repeated over a handle range: (handle, entry) pairs."""
+        while start <= end:
+            try:
+                got = self._request(
+                    bytes([opcode]) + struct.pack("<HH", start, end) + extra, answer
+                )
+            except AttError as e:
+                if e.code == 0x0A:  # attribute not found: the range is done
+                    return
+                raise
+            size = got[1]
+            last = start
+            for k in range(2, len(got) - size + 1, size):
+                entry = got[k : k + size]
+                last = struct.unpack("<H", entry[2:4] if opcode == 0x10 else entry[:2])[0]
+                yield entry
+            if last >= 0xFFFF:
+                return
+            start = last + 1
+
+    def services(self):
+        """The program's services, each with its characteristics."""
+        if self._services is not None:
+            return self._services
+        found = []
+        for e in self._each(0x10, 0x11, 1, 0xFFFF, struct.pack("<H", 0x2800)):
+            s, end = struct.unpack("<HH", e[:4])
+            found.append(Service(_uuid_from_le(e[4:]), s, end))
+        for s in found:
+            for e in self._each(0x08, 0x09, s.start, s.end, struct.pack("<H", 0x2803)):
+                props, value = e[2], struct.unpack("<H", e[3:5])[0]
+                s.characteristics.append(Characteristic(_uuid_from_le(e[5:]), value, props))
+            # A characteristic's descriptors lie between its value and the next declaration.
+            for i, c in enumerate(s.characteristics):
+                last = (
+                    s.characteristics[i + 1].handle - 2
+                    if i + 1 < len(s.characteristics)
+                    else s.end
+                )
+                if c.handle + 1 > last:
+                    continue
+                try:
+                    got = self._request(b"\x04" + struct.pack("<HH", c.handle + 1, last), 0x05)
+                except AttError:
+                    continue
+                size = 4 if got[1] == 1 else 18
+                for k in range(2, len(got) - size + 1, size):
+                    h = struct.unpack("<H", got[k : k + 2])[0]
+                    if got[k + 2 : k + size] == b"\x02\x29":
+                        c.cccd = h
+        self._services = found
+        return found
+
+    def characteristic(self, u):
+        u = uuid(u)
+        for s in self.services():
+            for c in s.characteristics:
+                if c.uuid == u:
+                    return c
+        raise KeyError("no characteristic %s" % u)
+
+    def read(self, u):
+        """A characteristic's value, read whole (Read Blob for the rest of a long one)."""
+        c = self.characteristic(u)
+        value = self._request(b"\x0a" + struct.pack("<H", c.handle), 0x0B)[1:]
+        while len(value) and len(value) % (self.mtu - 1) == 0:
+            more = self._request(b"\x0c" + struct.pack("<HH", c.handle, len(value)), 0x0D)[1:]
+            if not more:
+                break
+            value += more
+        return value
+
+    def write(self, u, data, response=True):
+        """A Write Request (answered) or a Write Command (not) of data."""
+        c = self.characteristic(u)
+        data = data.encode() if isinstance(data, str) else bytes(data)
+        if len(data) > self.mtu - 3:
+            raise ValueError("%d bytes is more than an MTU of %d takes" % (len(data), self.mtu))
+        if response:
+            self._request(b"\x12" + struct.pack("<H", c.handle) + data, 0x13)
+        else:
+            self._send(b"\x52" + struct.pack("<H", c.handle) + data)
+
+    def subscribe(self, u, indicate=False):
+        """Notifications (or indications) of a characteristic on."""
+        c = self.characteristic(u)
+        if c.cccd is None:
+            raise ValueError("%s has no notifications" % c.uuid)
+        self._request(b"\x12" + struct.pack("<HH", c.cccd, 2 if indicate else 1), 0x13)
+
+    def notifications(self, u, timeout=1):
+        """The values notified since the last call, waiting up to timeout for the first."""
+        c = self.characteristic(u)
+        end = time.time() + timeout
+        while not self._notified.get(c.handle):
+            left = end - time.time()
+            if left <= 0:
+                break
+            self._take(min(left, 1))
+        self._take(0)
+        return self._notified.pop(c.handle, [])
+
+    def _uart(self):
+        """The UART's TX, notifications on: on before the first write, as a phone's app has them."""
+        c = self.characteristic(NUS_TX)
+        if not getattr(c, "subscribed", False):
+            self.subscribe(NUS_TX)
+            c.subscribed = True
+        return c
+
+    def uart_write(self, text):
+        """Text (or bytes) to the program's Nordic UART service, in pieces an MTU takes."""
+        self._uart()
+        data = text.encode() if isinstance(text, str) else bytes(text)
+        for k in range(0, len(data), self.mtu - 3):
+            self.write(NUS_RX, data[k : k + self.mtu - 3], response=False)
+
+    def uart_read(self, timeout=1):
+        """What the program wrote to its Nordic UART since the last call."""
+        self._uart()
+        return b"".join(self.notifications(NUS_TX, timeout)).decode(errors="replace")
+
+    def disconnect(self):
+        self.board.request("POST", "/api/ble/disconnect")
+
+
+class Ble:
+    """The phone's side of the virtual Bluetooth controller."""
+
+    def __init__(self, board):
+        self.board = board
+
+    def state(self):
+        return self.board.request("GET", "/api/ble")
+
+    def scan(self):
+        """What the program advertises now, or None when it advertises nothing."""
+        s = self.state()
+        return Advertisement(s) if s.get("advertising") else None
+
+    def connect(self, timeout=5):
+        """The phone joins the program's advertisement: a Peer, its MTU exchanged."""
+        end = time.time() + timeout
+        while True:
+            try:
+                self.board.request("POST", "/api/ble/connect")
+                return Peer(self.board)
+            except ApiError as e:
+                if e.status != 409 or time.time() > end:
+                    raise
+                time.sleep(0.05)
+
+
+class bluefruit:
+    """Bluefruit Connect's packets, as its app sends them to the Nordic UART."""
+
+    @staticmethod
+    def _packet(body):
+        return body + bytes([~sum(body) & 0xFF])
+
+    @staticmethod
+    def color(r, g, b):
+        return bluefruit._packet(b"!C" + bytes([r, g, b]))
+
+    @staticmethod
+    def button(n, pressed):
+        return bluefruit._packet(b"!B" + b"%d" % n + (b"1" if pressed else b"0"))
+
+    @staticmethod
+    def accelerometer(x, y, z):
+        return bluefruit._packet(b"!A" + struct.pack("<fff", x, y, z))
 
 
 # The terminal's escapes (the window title, line erases), left out of what run prints.

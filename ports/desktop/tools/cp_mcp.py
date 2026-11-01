@@ -171,6 +171,44 @@ TOOLS = [
         "when its drive changes (at the REPL too).",
         _schema({"path": STRING, "content": STRING}, ["path", "content"]),
     ),
+    (
+        "ble_scan",
+        "What the program advertises over Bluetooth LE (the virtual controller): name, service "
+        "UUIDs, manufacturer data, raw bytes; or that it advertises nothing.",
+        _schema(),
+    ),
+    (
+        "ble_connect",
+        "Connect as a phone to what the program advertises, as Bluefruit Connect or nRF Connect "
+        "would; the other ble_ tools then use this connection.",
+        _schema(),
+    ),
+    (
+        "ble_services",
+        "The connected program's GATT services, their characteristics' UUIDs, handles and properties.",
+        _schema(),
+    ),
+    (
+        "ble_read",
+        "Read a characteristic by UUID (0x2A00, or a 128-bit one): its value as hex and as text.",
+        _schema({"uuid": STRING}, ["uuid"]),
+    ),
+    (
+        "ble_write",
+        "Write a characteristic by UUID: text, or hex bytes. response false sends a Write Command "
+        "(no answer), as the Nordic UART's RX is written.",
+        _schema(
+            {"uuid": STRING, "text": STRING, "hex": STRING, "response": {"type": "boolean"}},
+            ["uuid"],
+        ),
+    ),
+    (
+        "ble_notifications",
+        "The values a characteristic notified since the last call (its notifications are turned on "
+        "at the first call), waiting up to timeout for the first one.",
+        _schema({"uuid": STRING, "timeout": SECONDS}, ["uuid"]),
+    ),
+    ("ble_disconnect", "The phone leaves: the program sees the disconnect.", _schema()),
 ]
 
 
@@ -190,6 +228,7 @@ class Server:
     def __init__(self, program):
         self.program = program
         self.board = None
+        self.peer = None  # ble_connect's phone
         self.drive = None  # the drive's path on this computer
 
     # ---- the board ----
@@ -240,6 +279,7 @@ class Server:
         if self.launched:
             self.board.close()
         self.board = None
+        self.peer = None
         self.drive = None
 
     # ---- tools ----
@@ -475,6 +515,78 @@ class Server:
             pass
 
     # ---- the protocol ----
+
+    # ---- Bluetooth LE: the phone ----
+
+    def _peer(self):
+        if self.peer is None:
+            raise ToolError("no BLE connection: ble_connect first")
+        return self.peer
+
+    @staticmethod
+    def _value(data):
+        text = data.decode(errors="replace")
+        printable = all(32 <= c < 127 for c in data)
+        return "%s%s" % (data.hex(" "), '  "%s"' % text if printable and data else "")
+
+    def t_ble_scan(self):
+        ad = self._api(self._need().ble.scan)
+        if ad is None:
+            return "the program advertises nothing"
+        return json.dumps(
+            {
+                "name": ad.name,
+                "connectable": ad.connectable,
+                "services": ad.services,
+                "manufacturer": ad.manufacturer.hex(),
+                "raw": ad.raw.hex(),
+            },
+            indent=1,
+        )
+
+    def t_ble_connect(self):
+        self.peer = self._api(self._need().ble.connect)
+        return "connected, MTU %d" % self.peer.mtu
+
+    def t_ble_services(self):
+        services = self._api(self._peer().services)
+        return json.dumps(
+            [
+                {
+                    "uuid": s.uuid,
+                    "characteristics": [
+                        {"uuid": c.uuid, "handle": c.handle, "properties": c.properties}
+                        for c in s.characteristics
+                    ],
+                }
+                for s in services
+            ],
+            indent=1,
+        )
+
+    def t_ble_read(self, uuid):
+        return self._value(self._api(self._peer().read, uuid))
+
+    def t_ble_write(self, uuid, text=None, hex=None, response=True):
+        if (text is None) == (hex is None):
+            raise ToolError("give text or hex")
+        data = text.encode() if text is not None else bytes.fromhex(hex)
+        self._api(self._peer().write, uuid, data, response=response)
+        return "written %d bytes" % len(data)
+
+    def t_ble_notifications(self, uuid, timeout=1):
+        peer = self._peer()
+        c = self._api(peer.characteristic, uuid)
+        if not getattr(c, "subscribed", False):
+            self._api(peer.subscribe, uuid)
+            c.subscribed = True
+        values = self._api(peer.notifications, uuid, min(float(timeout), MAX_WAIT))
+        return "\n".join(self._value(v) for v in values) or "no notifications"
+
+    def t_ble_disconnect(self):
+        self._api(self._peer().disconnect)
+        self.peer = None
+        return "disconnected"
 
     def call(self, name, arguments):
         """A tools/call result."""
