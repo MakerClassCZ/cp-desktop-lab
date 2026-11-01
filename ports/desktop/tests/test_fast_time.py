@@ -322,7 +322,7 @@ time.sleep(0.5)
 print("elapsed", time.monotonic() - t)
 """
     ),
-    1.5,
+    1.49,  # monotonic()'s float can put exactly 1.5 s a hair below
     1.6,
     2,
 )
