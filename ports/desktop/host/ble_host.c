@@ -136,6 +136,10 @@ void ble_host_attach_adapter(void) {
     bleio_set_adapter(MP_OBJ_FROM_PTR(adapter));
 }
 
+const char *ble_host_controller(void) {
+    return !_on ? "off" : _real ? "serial" : "virtual";
+}
+
 void ble_host_packet(bool to_controller, const uint8_t *h4, size_t len) {
     (void)to_controller;
     (void)h4;

@@ -38,6 +38,8 @@ typedef int sock_t;
 
 #include "api_json.h"
 #include "api_ring.h"
+#include "ble_controller.h"
+#include "ble_host.h"
 #include "bus_trace.h"
 #include "desktop_port.h"
 #include "png_write.h"
@@ -836,6 +838,132 @@ static void _quit(request_t *r) {
     desktop_power_off(0);
 }
 
+// ---- Bluetooth LE: the phone ----
+
+static void _buf_hex(api_buf_t *b, const uint8_t *data, size_t len) {
+    static const char digits[] = "0123456789abcdef";
+    for (size_t i = 0; i < len; i++) {
+        char two[2] = { digits[data[i] >> 4], digits[data[i] & 0xf] };
+        api_buf_add(b, two, 2);
+    }
+}
+
+// Hex text (spaces allowed) to bytes; -1 when it is not hex.
+static int _unhex(const char *text, size_t text_len, uint8_t *out, size_t cap) {
+    size_t n = 0;
+    int high = -1;
+    for (size_t i = 0; i < text_len; i++) {
+        char c = text[i];
+        int v = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10
+            : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+        if (v < 0) {
+            if (c == ' ' || c == '\n' || c == '\r' || c == '\t') {
+                continue;
+            }
+            return -1;
+        }
+        if (high < 0) {
+            high = v;
+        } else {
+            if (n == cap) {
+                return -1;
+            }
+            out[n++] = (uint8_t)(high << 4 | v);
+            high = -1;
+        }
+    }
+    return high < 0 ? (int)n : -1;
+}
+
+static void _ble_state(request_t *r) {
+    api_buf_t b = {0};
+    const char *controller = ble_host_controller();
+    api_buf_printf(&b, "{\"controller\": \"%s\"", controller);
+    if (strcmp(controller, "virtual") == 0) {
+        ble_controller_state_t s;
+        ble_controller_state(&s);
+        char address[18];
+        snprintf(address, sizeof(address), "%02x:%02x:%02x:%02x:%02x:%02x",
+            s.address[5], s.address[4], s.address[3], s.address[2], s.address[1], s.address[0]);
+        api_buf_printf(&b, ", \"advertising\": %s, \"connectable\": %s, \"connected\": %s, \"public\": %s, "
+            "\"address\": \"%s\", \"data\": \"", s.advertising ? "true" : "false",
+            s.connectable ? "true" : "false", s.connected ? "true" : "false", s.public ? "true" : "false",
+            address);
+        _buf_hex(&b, s.data, s.data_len);
+        api_buf_add(&b, "\", \"scan_response\": \"", 21);
+        _buf_hex(&b, s.scan_response, s.scan_response_len);
+        api_buf_add(&b, "\"", 1);
+    }
+    api_buf_add(&b, "}", 1);
+    _answer_json(r, 200, &b);
+    api_buf_free(&b);
+}
+
+static void _ble(request_t *r, bool get, bool post) {
+    if (strcmp(r->path, "/api/ble") == 0 && get) {
+        _ble_state(r);
+        return;
+    }
+    bool att = strcmp(r->path, "/api/ble/att") == 0;
+    if (!(post && (strcmp(r->path, "/api/ble/connect") == 0 || strcmp(r->path, "/api/ble/disconnect") == 0 || att))
+        && !(get && att)) {
+        _error(r, 404, "no such endpoint");
+        return;
+    }
+    if (strcmp(ble_host_controller(), "virtual") != 0) {
+        _error(r, 409, "no virtual controller: the phone is a real one, or there is no Bluetooth");
+        return;
+    }
+    if (strcmp(r->path, "/api/ble/connect") == 0) {
+        if (ble_controller_connect() != 0) {
+            _error(r, 409, "the program advertises nothing connectable, or a phone is connected");
+            return;
+        }
+        _ok(r);
+    } else if (strcmp(r->path, "/api/ble/disconnect") == 0) {
+        // 0x13: the remote user ended it, as a phone that leaves does.
+        ble_controller_disconnect(0x13);
+        _ok(r);
+    } else if (post) {
+        uint8_t pdu[512];
+        int n = r->body == NULL ? -1 : _unhex(r->body, r->body_len, pdu, sizeof(pdu));
+        if (n <= 0) {
+            _error(r, 400, "the body is an ATT PDU in hex");
+        } else if (!ble_controller_att_send(pdu, (size_t)n)) {
+            _error(r, 409, "no phone is connected");
+        } else {
+            _ok(r);
+        }
+    } else {
+        // Every PDU the program has sent the phone; with wait=MS, the first one waited for.
+        long long wait = _param_int(r, "wait", 0);
+        wait = wait < 0 ? 0 : wait > WAIT_MAX_MS ? WAIT_MAX_MS : wait;
+        api_buf_t b = {0};
+        api_buf_add(&b, "{\"pdus\": [", 10);
+        uint8_t pdu[512];
+        bool first = true;
+        for (long long waited = 0;;) {
+            size_t n = ble_controller_att_take(pdu, sizeof(pdu));
+            if (n > 0) {
+                api_buf_add(&b, first ? "\"" : ", \"", first ? 1 : 3);
+                _buf_hex(&b, pdu, n);
+                api_buf_add(&b, "\"", 1);
+                first = false;
+                continue;
+            }
+            if (!first || waited >= wait) {
+                break;
+            }
+            struct timespec t = { 0, 5 * 1000 * 1000 };
+            nanosleep(&t, NULL);
+            waited += 5;
+        }
+        api_buf_add(&b, "]}", 2);
+        _answer_json(r, 200, &b);
+        api_buf_free(&b);
+    }
+}
+
 static void _route(request_t *r) {
     bool get = strcmp(r->method, "GET") == 0, post = strcmp(r->method, "POST") == 0;
     if (strcmp(r->path, "/api/info") == 0 && get) {
@@ -875,6 +1003,8 @@ static void _route(request_t *r) {
         if (_panel_board(r)) {
             _vm_call(r, VM_PANEL, r->body ? r->body : "");
         }
+    } else if (strncmp(r->path, "/api/ble", 8) == 0) {
+        _ble(r, get, post);
     } else {
         _error(r, 404, "no such endpoint");
     }

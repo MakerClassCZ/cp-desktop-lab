@@ -25,5 +25,7 @@ bool ble_host_board_setting(const char *value);
 bool ble_host_init(void);
 // _bleio.adapter bound to it, disabled, kept across reloads; nothing without a controller.
 void ble_host_attach_adapter(void);
+// "virtual", "serial" (--ble PORT) or "off".
+const char *ble_host_controller(void);
 // Every complete H4 packet, to_controller or from it.
 void ble_host_packet(bool to_controller, const uint8_t *h4, size_t len);

@@ -23,7 +23,15 @@
 #define H4_ACL 0x02
 #define H4_EVENT 0x04
 
+#define EVT_DISCONNECTION_COMPLETE 0x05
 #define EVT_COMMAND_COMPLETE 0x0e
+#define EVT_COMMAND_STATUS 0x0f
+#define EVT_NUMBER_OF_COMPLETED_PACKETS 0x13
+#define EVT_LE_META 0x3e
+#define EVT_VENDOR 0xff
+
+#define L2CAP_CID_ATT 0x0004
+#define HANDLE 0x0040          // the one connection's, as the CYW43439 numbers its first
 
 #define ERR_UNKNOWN_COMMAND 0x01
 
@@ -44,11 +52,26 @@ static uint8_t _random_address[6];
 
 // What the program advertises.
 static uint8_t _adv_type;
+static uint8_t _adv_own_address_type;
 static uint8_t _adv_data[31];
 static uint8_t _adv_len;
 static uint8_t _scan_rsp[31];
 static uint8_t _scan_rsp_len;
 static bool _advertising;
+
+// The phone: a random static address, as a phone's is; the connection to it.
+static const uint8_t _phone_address[6] = { 0x89, 0x37, 0x1c, 0xc9, 0x10, 0x7c };
+static bool _connected;
+
+// ATT PDUs the program sent the phone, oldest first; the L2CAP frame being reassembled.
+#define PDU_MAX 512
+#define PDU_COUNT 256
+static uint8_t _pdus[PDU_COUNT][PDU_MAX];
+static uint16_t _pdu_len[PDU_COUNT];
+static size_t _pdu_head;
+static size_t _pdu_count;
+static uint8_t _frame[PDU_MAX + 4];
+static size_t _frame_have;
 
 static void _put(const uint8_t *data, size_t len) {
     for (size_t i = 0; i < len && _out_count < sizeof(_out); i++) {
@@ -72,6 +95,21 @@ static void _complete(uint16_t opcode, const uint8_t *ret, uint8_t len) {
     _event(EVT_COMMAND_COMPLETE, params, (uint8_t)(3 + len));
 }
 
+static void _status(uint16_t opcode, uint8_t status) {
+    uint8_t params[4] = { status, 1, opcode & 0xff, opcode >> 8 };
+    _event(EVT_COMMAND_STATUS, params, sizeof(params));
+}
+
+static void _disconnected(uint8_t reason) {
+    if (!_connected) {
+        return;
+    }
+    _connected = false;
+    _frame_have = 0;
+    uint8_t params[4] = { 0, HANDLE & 0xff, HANDLE >> 8, reason };
+    _event(EVT_DISCONNECTION_COMPLETE, params, sizeof(params));
+}
+
 static void _ok(uint16_t opcode) {
     uint8_t status = 0;
     _complete(opcode, &status, 1);
@@ -82,6 +120,7 @@ static void _command(uint16_t opcode, const uint8_t *p, uint8_t len) {
     switch (opcode) {
         case 0x0c03:            // Reset
             _advertising = false;
+            _connected = false;
             _adv_len = _scan_rsp_len = 0;
             _ok(opcode);
             break;
@@ -118,8 +157,9 @@ static void _command(uint16_t opcode, const uint8_t *p, uint8_t len) {
             _ok(opcode);
             break;
         case 0x2006:            // LE Set Advertising Parameters
-            if (len >= 5) {
+            if (len >= 6) {
                 _adv_type = p[4];
+                _adv_own_address_type = p[5];
             }
             _ok(opcode);
             break;
@@ -135,6 +175,10 @@ static void _command(uint16_t opcode, const uint8_t *p, uint8_t len) {
         case 0x200a:            // LE Set Advertising Enable
             _advertising = len >= 1 && p[0] != 0;
             _ok(opcode);
+            break;
+        case 0x0406:            // Disconnect: the host ends the connection
+            _status(opcode, _connected ? 0 : 0x02);
+            _disconnected(0x16);
             break;
         case 0x2018:            // LE Rand
             common_hal_os_urandom(ret + 1, 8);
@@ -152,12 +196,43 @@ static void _command(uint16_t opcode, const uint8_t *p, uint8_t len) {
     }
 }
 
+// ACL data from the host to the phone: an L2CAP frame, maybe in fragments; an ATT one goes
+// to the phone's queue. Each packet is acknowledged, so the host's credit comes back.
+static void _acl(const uint8_t *p, size_t len) {
+    uint16_t flags = p[2] >> 4;
+    size_t n = len - 5;
+    if ((flags & 0x3) != 0x1) {
+        _frame_have = 0;   // the first fragment of a frame
+    }
+    if (_frame_have + n <= sizeof(_frame)) {
+        memcpy(_frame + _frame_have, p + 5, n);
+        _frame_have += n;
+    }
+    uint8_t done[5] = { 1, HANDLE & 0xff, HANDLE >> 8, 1, 0 };
+    _event(EVT_NUMBER_OF_COMPLETED_PACKETS, done, sizeof(done));
+    if (_frame_have < 4) {
+        return;
+    }
+    size_t frame_len = (size_t)(_frame[0] | _frame[1] << 8);
+    uint16_t cid = (uint16_t)(_frame[2] | _frame[3] << 8);
+    if (_frame_have < 4 + frame_len) {
+        return;
+    }
+    if (_connected && cid == L2CAP_CID_ATT && frame_len <= PDU_MAX && _pdu_count < PDU_COUNT) {
+        size_t slot = (_pdu_head + _pdu_count++) % PDU_COUNT;
+        memcpy(_pdus[slot], _frame + 4, frame_len);
+        _pdu_len[slot] = (uint16_t)frame_len;
+    }
+    _frame_have = 0;
+}
+
 // A whole command or ACL packet from the host.
 static void _from_host(const uint8_t *p, size_t len) {
     if (p[0] == H4_COMMAND) {
         _command((uint16_t)(p[1] | p[2] << 8), p + 4, p[3]);
+    } else if (p[0] == H4_ACL && len >= 5) {
+        _acl(p, len);
     }
-    (void)len;
 }
 
 void ble_controller_reset(void) {
@@ -166,6 +241,9 @@ void ble_controller_reset(void) {
     _in_have = 0;
     _advertising = false;
     _adv_len = _scan_rsp_len = 0;
+    _connected = false;
+    _pdu_head = _pdu_count = 0;
+    _frame_have = 0;
     // Addresses of this lab, from its UID: the public one and the static one in the "FICR".
     uint8_t uid[COMMON_HAL_MCU_PROCESSOR_UID_LENGTH];
     common_hal_mcu_processor_get_uid(uid);
@@ -221,4 +299,81 @@ int ble_controller_write(const uint8_t *data, size_t len) {
     }
     pthread_mutex_unlock(&_lock);
     return (int)len;
+}
+
+void ble_controller_state(ble_controller_state_t *state) {
+    pthread_mutex_lock(&_lock);
+    state->advertising = _advertising;
+    // ADV_IND and ADV_DIRECT_IND take a connection; scannable and non-connectable ones do not.
+    state->connectable = _adv_type == 0x00 || _adv_type == 0x01;
+    state->connected = _connected;
+    memcpy(state->data, _adv_data, _adv_len);
+    state->data_len = _adv_len;
+    memcpy(state->scan_response, _scan_rsp, _scan_rsp_len);
+    state->scan_response_len = _scan_rsp_len;
+    // The address advertising uses: the random one the host set, or the public one.
+    state->public = _adv_own_address_type == 0x00;
+    memcpy(state->address, state->public ? _public_address : _random_address, 6);
+    pthread_mutex_unlock(&_lock);
+}
+
+int ble_controller_connect(void) {
+    pthread_mutex_lock(&_lock);
+    int result = -1;
+    if (_advertising && (_adv_type == 0x00 || _adv_type == 0x01) && !_connected) {
+        _advertising = false;
+        _connected = true;
+        _pdu_head = _pdu_count = 0;
+        // LE Connection Complete: the lab is the peripheral, the phone the central; a 30 ms
+        // interval, no latency, a 2 s supervision timeout.
+        uint8_t params[19] = { 0x01, 0x00, HANDLE & 0xff, HANDLE >> 8, 0x01, 0x01 };
+        memcpy(params + 6, _phone_address, 6);
+        params[12] = 0x18;
+        params[16] = 0xc8;
+        _event(EVT_LE_META, params, sizeof(params));
+        // A vendor event, as the CYW43439 sends right after a connection: a host must let it pass.
+        uint8_t vendor[5] = { 0x55, 0x00, 0x00, HANDLE & 0xff, HANDLE >> 8 };
+        _event(EVT_VENDOR, vendor, sizeof(vendor));
+        result = 0;
+    }
+    pthread_mutex_unlock(&_lock);
+    return result;
+}
+
+void ble_controller_disconnect(uint8_t reason) {
+    pthread_mutex_lock(&_lock);
+    _disconnected(reason);
+    pthread_mutex_unlock(&_lock);
+}
+
+bool ble_controller_att_send(const uint8_t *pdu, size_t len) {
+    pthread_mutex_lock(&_lock);
+    bool ok = _connected && len <= PDU_MAX;
+    if (ok) {
+        // ACL to the host: the first (and only) fragment of an L2CAP frame on the ATT channel.
+        uint8_t head[9] = {
+            H4_ACL, HANDLE & 0xff, (HANDLE >> 8) | 0x20, (uint8_t)(len + 4), (uint8_t)((len + 4) >> 8),
+            (uint8_t)len, (uint8_t)(len >> 8), L2CAP_CID_ATT & 0xff, L2CAP_CID_ATT >> 8,
+        };
+        _put(head, sizeof(head));
+        _put(pdu, len);
+    }
+    pthread_mutex_unlock(&_lock);
+    return ok;
+}
+
+size_t ble_controller_att_take(uint8_t *pdu, size_t max) {
+    pthread_mutex_lock(&_lock);
+    size_t len = 0;
+    if (_pdu_count > 0) {
+        len = _pdu_len[_pdu_head];
+        if (len > max) {
+            len = max;
+        }
+        memcpy(pdu, _pdus[_pdu_head], len);
+        _pdu_head = (_pdu_head + 1) % PDU_COUNT;
+        _pdu_count--;
+    }
+    pthread_mutex_unlock(&_lock);
+    return len;
 }
