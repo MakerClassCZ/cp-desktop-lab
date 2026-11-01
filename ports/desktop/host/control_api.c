@@ -879,16 +879,18 @@ static void _ble_state(request_t *r) {
     api_buf_t b = {0};
     const char *controller = ble_host_controller();
     api_buf_printf(&b, "{\"controller\": \"%s\"", controller);
-    if (strcmp(controller, "virtual") == 0) {
-        ble_controller_state_t s;
-        ble_controller_state(&s);
+    if (strcmp(controller, "off") != 0) {
+        ble_host_state_t s;
+        ble_host_state(&s);
         char address[18];
         snprintf(address, sizeof(address), "%02x:%02x:%02x:%02x:%02x:%02x",
             s.address[5], s.address[4], s.address[3], s.address[2], s.address[1], s.address[0]);
         api_buf_printf(&b, ", \"advertising\": %s, \"connectable\": %s, \"connected\": %s, \"public\": %s, "
-            "\"address\": \"%s\", \"data\": \"", s.advertising ? "true" : "false",
+            "\"address\": \"%s\", \"name\": ", s.advertising ? "true" : "false",
             s.connectable ? "true" : "false", s.connected ? "true" : "false", s.public ? "true" : "false",
             address);
+        api_buf_json_string(&b, s.name, strlen(s.name));
+        api_buf_add(&b, ", \"data\": \"", 11);
         _buf_hex(&b, s.data, s.data_len);
         api_buf_add(&b, "\", \"scan_response\": \"", 21);
         _buf_hex(&b, s.scan_response, s.scan_response_len);

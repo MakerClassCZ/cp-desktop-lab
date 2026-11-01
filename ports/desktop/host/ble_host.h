@@ -27,5 +27,24 @@ bool ble_host_init(void);
 void ble_host_attach_adapter(void);
 // "virtual", "serial" (--ble PORT) or "off".
 const char *ble_host_controller(void);
-// Every complete H4 packet, to_controller or from it.
+
+// What the HCI shows, the same for every controller (host/ble_watch.c).
+typedef struct {
+    bool advertising;
+    bool connectable;
+    bool connected;
+    bool public;                // address is the controller's public one, else the random one
+    uint8_t address[6];         // the address advertising uses, least significant byte first
+    uint8_t peer[6];            // the one connected
+    char name[32];              // the advertised local name
+    uint8_t data[31];
+    uint8_t data_len;
+    uint8_t scan_response[31];
+    uint8_t scan_response_len;
+} ble_host_state_t;
+
+// Every complete H4 packet, to_controller or from it: the state, the trace, the log.
 void ble_host_packet(bool to_controller, const uint8_t *h4, size_t len);
+void ble_host_state(ble_host_state_t *state);
+// --ble-log PATH: every packet as btsnoop; false (the cause printed) when it does not open.
+bool ble_host_open_log(const char *path);

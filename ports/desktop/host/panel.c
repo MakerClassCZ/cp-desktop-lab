@@ -11,11 +11,14 @@
 #include <string.h>
 #include <strings.h>
 
+#include "common-hal/_bleio/Adapter.h"
+#include "shared-bindings/_bleio/__init__.h"
 #include "shared-bindings/displayio/Bitmap.h"
 #include "shared-module/fontio/BuiltinFont.h"
 #include "supervisor/shared/tick.h"
 
 #include "api_json.h"
+#include "ble_host.h"
 #include "gamepad.h"
 #include "i2c_virtual.h"
 #include "desktop_pins.h"
@@ -221,6 +224,27 @@ static void _draw_displays(void) {
     }
 }
 
+// The BLE row: while the program has the adapter on.
+static bool _ble_row(void) {
+    return strcmp(ble_host_controller(), "off") != 0 && common_hal_bleio_adapter_obj.enabled;
+}
+
+// "advertising", "connected" or "on"; "off" with no adapter on.
+static const char *_ble_status(ble_host_state_t *s) {
+    ble_host_state(s);
+    return !_ble_row() ? "off" : s->connected ? "connected" : s->advertising ? "advertising" : "on";
+}
+
+static void _draw_ble(int y) {
+    ble_host_state_t s;
+    const char *status = _ble_status(&s);
+    char value[64];
+    snprintf(value, sizeof(value), s.advertising ? "%s \"%s\"" : "%s", status, s.name);
+    _text(PAD, y + 4, "BLE", 0xd0d0d0);
+    _fill(CTRL_X, y + 4, 24, 24, s.connected ? 0x3080e0 : s.advertising ? 0x205090 : 0x303030);
+    _text(CTRL_X + 36, y + 8, value, 0xd0d0d0);
+}
+
 static int _height(void) {
     int h = PAD;
     uint16_t cols, rows;
@@ -243,7 +267,7 @@ static int _height(void) {
         h += KEYBOARD_H + PAD;
     }
     _parts_top = h;
-    return h + parts_count() * ROW + PAD;
+    return h + (parts_count() + (_ble_row() ? 1 : 0)) * ROW + PAD;
 }
 
 static void _draw_neopixels(void) {
@@ -569,6 +593,9 @@ static void _draw(void) {
     for (int i = 0; i < parts_count(); i++) {
         _draw_part(parts_at(i), _parts_top + i * ROW);
     }
+    if (_ble_row()) {
+        _draw_ble(_parts_top + parts_count() * ROW);
+    }
     SDL_RenderPresent(_renderer);
     _last_frame_ms = desktop_host_ms();
     _dirty = false;
@@ -833,6 +860,11 @@ static void _part_json(api_buf_t *b, const part_t *p) {
 void panel_state_json(api_buf_t *b) {
     // The window: shown, closed by the user, or none (not opened yet, or no video here).
     api_buf_printf(b, "{\"panel\": \"%s\", ", _hidden ? "hidden" : _window != NULL ? "shown" : "none");
+    ble_host_state_t ble;
+    const char *ble_status = _ble_status(&ble);
+    api_buf_printf(b, "\"ble\": {\"state\": \"%s\", \"name\": ", ble_status);
+    api_buf_json_string(b, ble.name, strlen(ble.name));
+    api_buf_add(b, "}, ", 3);
     api_buf_add(b, "\"parts\": [", 10);
     for (int i = 0; i < parts_count(); i++) {
         api_buf_add(b, i ? ", " : "", i ? 2 : 0);

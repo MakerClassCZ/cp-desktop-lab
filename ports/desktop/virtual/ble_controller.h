@@ -18,19 +18,6 @@ int ble_controller_read(uint8_t *data, size_t len);
 int ble_controller_write(const uint8_t *data, size_t len);
 
 // The phone's side, for the control API.
-typedef struct {
-    bool advertising;
-    bool connectable;
-    bool connected;
-    bool public;                // address is the public one, else the random one in use
-    uint8_t address[6];         // least significant byte first, as HCI has it
-    uint8_t data[31];
-    uint8_t data_len;
-    uint8_t scan_response[31];
-    uint8_t scan_response_len;
-} ble_controller_state_t;
-
-void ble_controller_state(ble_controller_state_t *state);
 // 0, or -1 when the program advertises nothing connectable or a phone is connected already.
 int ble_controller_connect(void);
 void ble_controller_disconnect(uint8_t reason);

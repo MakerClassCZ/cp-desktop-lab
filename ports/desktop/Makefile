@@ -61,6 +61,7 @@ SRC_C += \
 	host/api_json.c \
 	host/api_ring.c \
 	host/ble_host.c \
+	host/ble_watch.c \
 	host/bus_trace.c \
 	host/control_api.c \
 	host/debug_hook.c \

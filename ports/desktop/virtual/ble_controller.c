@@ -301,22 +301,6 @@ int ble_controller_write(const uint8_t *data, size_t len) {
     return (int)len;
 }
 
-void ble_controller_state(ble_controller_state_t *state) {
-    pthread_mutex_lock(&_lock);
-    state->advertising = _advertising;
-    // ADV_IND and ADV_DIRECT_IND take a connection; scannable and non-connectable ones do not.
-    state->connectable = _adv_type == 0x00 || _adv_type == 0x01;
-    state->connected = _connected;
-    memcpy(state->data, _adv_data, _adv_len);
-    state->data_len = _adv_len;
-    memcpy(state->scan_response, _scan_rsp, _scan_rsp_len);
-    state->scan_response_len = _scan_rsp_len;
-    // The address advertising uses: the random one the host set, or the public one.
-    state->public = _adv_own_address_type == 0x00;
-    memcpy(state->address, state->public ? _public_address : _random_address, 6);
-    pthread_mutex_unlock(&_lock);
-}
-
 int ble_controller_connect(void) {
     pthread_mutex_lock(&_lock);
     int result = -1;

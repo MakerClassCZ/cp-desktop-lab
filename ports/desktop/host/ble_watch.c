@@ -1,0 +1,240 @@
+// This file is part of the CircuitPython project: https://circuitpython.org
+//
+// SPDX-FileCopyrightText: Copyright (c) 2026 Vladimir Smitka
+//
+// SPDX-License-Identifier: MIT
+
+// What the port sees of the HCI between _bleio and its controller, the same for the virtual one
+// and a real one: the state (advertising, the name, the connection) for the API and the panel,
+// a line in the bus trace for what matters (BLE ADV, CONNECT, ATT, DISCONNECT), and every packet
+// in a btsnoop file with --ble-log, which Wireshark opens.
+
+#include <pthread.h>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+
+#include "ble_host.h"
+#include "bus_trace.h"
+
+static pthread_mutex_t _lock = PTHREAD_MUTEX_INITIALIZER;
+static ble_host_state_t _state;
+static uint8_t _public_address[6];
+static uint8_t _random_address[6];
+static uint8_t _own_address_type;
+static uint8_t _adv_type;
+static FILE *_log;
+
+bool ble_host_open_log(const char *path) {
+    _log = fopen(path, "wb");
+    if (_log == NULL) {
+        perror(path);
+        return false;
+    }
+    // btsnoop: version 1, datalink 1002 (HCI with its H4 type byte first).
+    static const uint8_t header[16] = { 'b', 't', 's', 'n', 'o', 'o', 'p', 0, 0, 0, 0, 1, 0, 0, 0x03, 0xea };
+    fwrite(header, 1, sizeof(header), _log);
+    fflush(_log);
+    return true;
+}
+
+static void _be32(uint8_t *p, uint32_t v) {
+    p[0] = v >> 24;
+    p[1] = v >> 16;
+    p[2] = v >> 8;
+    p[3] = v;
+}
+
+static void _log_packet(bool to_controller, const uint8_t *h4, size_t len) {
+    uint8_t record[24];
+    _be32(record, (uint32_t)len);
+    _be32(record + 4, (uint32_t)len);
+    // Bit 0: received (controller to host); bit 1: a command or an event, not data.
+    _be32(record + 8, (to_controller ? 0 : 1) | (h4[0] == 0x01 || h4[0] == 0x04 ? 2 : 0));
+    _be32(record + 12, 0);
+    // Microseconds since year 0, as btsnoop counts them.
+    struct timespec now;
+    clock_gettime(CLOCK_REALTIME, &now);
+    uint64_t us = 0x00dcddb30f2f8000ULL + (uint64_t)now.tv_sec * 1000000 + (uint64_t)now.tv_nsec / 1000;
+    _be32(record + 16, (uint32_t)(us >> 32));
+    _be32(record + 20, (uint32_t)us);
+    fwrite(record, 1, sizeof(record), _log);
+    fwrite(h4, 1, len, _log);
+    fflush(_log);
+}
+
+// The name an advertisement carries: its complete or shortened local name, else "".
+static void _name(const uint8_t *data, size_t len, char *name, size_t cap) {
+    name[0] = '\0';
+    for (size_t i = 0; i + 1 < len && data[i] != 0 && i + data[i] < len; i += data[i] + 1) {
+        if (data[i + 1] == 0x09 || data[i + 1] == 0x08) {
+            size_t n = (size_t)data[i] - 1;
+            n = n < cap - 1 ? n : cap - 1;
+            memcpy(name, data + i + 2, n);
+            name[n] = '\0';
+            if (data[i + 1] == 0x09) {
+                return;
+            }
+        }
+    }
+}
+
+static void _hex(char *out, size_t cap, const uint8_t *data, size_t len) {
+    size_t n = 0;
+    out[0] = '\0';
+    for (size_t i = 0; i < len && n + 4 < cap; i++) {
+        n += (size_t)snprintf(out + n, cap - n, i ? " %02x" : "%02x", data[i]);
+    }
+}
+
+static const char *_att_name(uint8_t op) {
+    switch (op) {
+        case 0x01: return "ERROR_RSP";
+        case 0x02: return "MTU_REQ";
+        case 0x03: return "MTU_RSP";
+        case 0x04: return "FIND_INFO_REQ";
+        case 0x05: return "FIND_INFO_RSP";
+        case 0x06: return "FIND_TYPE_REQ";
+        case 0x07: return "FIND_TYPE_RSP";
+        case 0x08: return "READ_TYPE_REQ";
+        case 0x09: return "READ_TYPE_RSP";
+        case 0x0a: return "READ_REQ";
+        case 0x0b: return "READ_RSP";
+        case 0x0c: return "READ_BLOB_REQ";
+        case 0x0d: return "READ_BLOB_RSP";
+        case 0x10: return "READ_GROUP_REQ";
+        case 0x11: return "READ_GROUP_RSP";
+        case 0x12: return "WRITE_REQ";
+        case 0x13: return "WRITE_RSP";
+        case 0x1b: return "NOTIFY";
+        case 0x1d: return "INDICATE";
+        case 0x1e: return "CONFIRM";
+        case 0x52: return "WRITE_CMD";
+        default: return NULL;
+    }
+}
+
+// An ATT PDU as a trace line: its name, the handle where it has one, the rest in hex and, when
+// it is text, as text too.
+static void _trace_att(bool to_phone, const uint8_t *pdu, size_t len) {
+    if (len == 0 || !bus_trace_on()) {
+        return;
+    }
+    const char *name = _att_name(pdu[0]);
+    char what[24];
+    if (name == NULL) {
+        snprintf(what, sizeof(what), "0x%02x", pdu[0]);
+        name = what;
+    }
+    bool handled = pdu[0] == 0x0a || pdu[0] == 0x0c || pdu[0] == 0x12 || pdu[0] == 0x1b || pdu[0] == 0x1d
+        || pdu[0] == 0x52;
+    size_t skip = handled && len >= 3 ? 3 : 1;
+    char hex[3 * 64 + 8];
+    _hex(hex, sizeof(hex), pdu + skip, len - skip > 64 ? 64 : len - skip);
+    char text[72] = "";
+    bool printable = len > skip;
+    for (size_t i = skip; i < len && i - skip < 64; i++) {
+        printable = printable && pdu[i] >= 0x20 && pdu[i] < 0x7f && pdu[i] != '"';
+    }
+    if (printable) {
+        size_t n = len - skip < 64 ? len - skip : 64;
+        text[0] = ' ';
+        text[1] = '"';
+        memcpy(text + 2, pdu + skip, n);
+        text[2 + n] = '"';
+        text[3 + n] = '\0';
+    }
+    if (handled && len >= 3) {
+        bus_trace_text("BLE ATT %s %s 0x%04x %s%s", to_phone ? "->" : "<-", name, pdu[1] | pdu[2] << 8, hex, text);
+    } else {
+        bus_trace_text("BLE ATT %s %s %s%s", to_phone ? "->" : "<-", name, hex, text);
+    }
+}
+
+static void _command(const uint8_t *h4, size_t len) {
+    uint16_t opcode = (uint16_t)(h4[1] | h4[2] << 8);
+    const uint8_t *p = h4 + 4;
+    size_t n = len - 4;
+    switch (opcode) {
+        case 0x0c03:            // Reset
+            _state.advertising = _state.connected = false;
+            break;
+        case 0x2005:            // LE Set Random Address
+            if (n >= 6) {
+                memcpy(_random_address, p, 6);
+            }
+            break;
+        case 0x2006:            // LE Set Advertising Parameters
+            if (n >= 6) {
+                _adv_type = p[4];
+                _own_address_type = p[5];
+            }
+            break;
+        case 0x2008:            // LE Set Advertising Data
+        case 0x2009:            // LE Set Scan Response Data
+            if (n >= 1 && p[0] <= 31 && p[0] < n) {
+                memcpy(opcode == 0x2008 ? _state.data : _state.scan_response, p + 1, p[0]);
+                *(opcode == 0x2008 ? &_state.data_len : &_state.scan_response_len) = p[0];
+            }
+            break;
+        case 0x200a: {          // LE Set Advertising Enable
+            _state.advertising = n >= 1 && p[0] != 0;
+            _state.connectable = _adv_type == 0x00 || _adv_type == 0x01;
+            _state.public = _own_address_type == 0x00;
+            memcpy(_state.address, _state.public ? _public_address : _random_address, 6);
+            _name(_state.data, _state.data_len, _state.name, sizeof(_state.name));
+            if (_state.name[0] == '\0') {
+                _name(_state.scan_response, _state.scan_response_len, _state.name, sizeof(_state.name));
+            }
+            char hex[31 * 3 + 1];
+            _hex(hex, sizeof(hex), _state.data, _state.data_len);
+            if (_state.advertising) {
+                bus_trace_text("BLE ADV \"%s\" %s %s", _state.name,
+                    _state.connectable ? "connectable" : _adv_type == 0x02 ? "scannable" : "nonconnectable", hex);
+            } else {
+                bus_trace_text("BLE ADV off");
+            }
+            break;
+        }
+    }
+}
+
+static void _event(const uint8_t *h4, size_t len) {
+    const uint8_t *p = h4 + 3;
+    size_t n = len - 3;
+    if (h4[1] == 0x0e && n >= 10 && (p[1] | p[2] << 8) == 0x1009 && p[3] == 0) {
+        // Command Complete of Read BD_ADDR: the public address.
+        memcpy(_public_address, p + 4, 6);
+    } else if (h4[1] == 0x3e && n >= 12 && p[0] == 0x01 && p[1] == 0) {
+        // LE Connection Complete: the advertising stops, the peer is connected.
+        _state.connected = true;
+        _state.advertising = false;
+        memcpy(_state.peer, p + 6, 6);
+        bus_trace_text("BLE CONNECT %02x:%02x:%02x:%02x:%02x:%02x", p[11], p[10], p[9], p[8], p[7], p[6]);
+    } else if (h4[1] == 0x05 && n >= 4 && p[0] == 0) {
+        _state.connected = false;
+        bus_trace_text("BLE DISCONNECT 0x%02x", p[3]);
+    }
+}
+
+void ble_host_packet(bool to_controller, const uint8_t *h4, size_t len) {
+    pthread_mutex_lock(&_lock);
+    if (_log != NULL) {
+        _log_packet(to_controller, h4, len);
+    }
+    if (h4[0] == 0x01 && len >= 4) {
+        _command(h4, len);
+    } else if (h4[0] == 0x04 && len >= 3) {
+        _event(h4, len);
+    } else if (h4[0] == 0x02 && len >= 9 && (h4[2] >> 4 & 0x3) != 0x1 && (h4[7] | h4[8] << 8) == 0x0004) {
+        // ACL, the first fragment of an L2CAP frame on the ATT channel.
+        _trace_att(to_controller, h4 + 9, len - 9);
+    }
+    pthread_mutex_unlock(&_lock);
+}
+
+void ble_host_state(ble_host_state_t *state) {
+    pthread_mutex_lock(&_lock);
+    *state = _state;
+    pthread_mutex_unlock(&_lock);
+}

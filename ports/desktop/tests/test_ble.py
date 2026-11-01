@@ -105,4 +105,47 @@ check(
     (out[-200:], state),
 )
 
+# What the port sees of the HCI both ways: the panel's row, the trace, a btsnoop file
+import os, struct
+from harness import T
+
+log = os.path.join(T, "ble.btsnoop")
+if os.path.exists(log):
+    os.remove(log)
+with launch(PERIPHERAL, args=["--ble-log", log]) as b:
+    seen(b, "advertising")
+    row = b.state().get("ble")
+    b.request("POST", "/api/ble/connect")
+    seen(b, "connected 1")
+    att(b, "02f700")
+    b.request("POST", "/api/ble/disconnect")
+    seen(b, "disconnected 0")
+    trace = b.trace(since=0)["data"]
+check("the panel row", row is not None and row["state"] == "advertising" and row["name"] == "CP-lab", row)
+for line in (
+    'BLE ADV "CP-lab" connectable 02 01 06 07 09 43 50 2d 6c 61 62',
+    "BLE CONNECT 7c:10:c9:1c:37:89",
+    "BLE ATT <- MTU_REQ f7 00",
+    "BLE ATT -> MTU_RSP 17 00",
+    "BLE DISCONNECT 0x13",
+):
+    check("the trace: " + line, line in trace, trace[-800:])
+
+data = open(log, "rb").read() if os.path.exists(log) else b""
+records, pos = [], 16
+while pos + 24 <= len(data):
+    orig, incl, flags, drops, stamp = struct.unpack(">IIIIq", data[pos : pos + 24])
+    records.append((flags, data[pos + 24 : pos + 24 + incl]))
+    pos += 24 + incl
+check(
+    "--ble-log is btsnoop",
+    data[:8] == b"btsnoop\0"
+    and struct.unpack(">II", data[8:16]) == (1, 1002)
+    and pos == len(data)
+    and len(records) >= 10
+    # The phone's MTU request, received by the host: an ACL packet on the ATT channel.
+    and any(f & 1 and p[:1] == b"\x02" and p[9:10] == b"\x02" for f, p in records),
+    (data[:16], pos, len(data), len(records)),
+)
+
 print("DONE")

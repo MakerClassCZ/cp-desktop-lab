@@ -115,6 +115,9 @@ bool ble_host_init(void) {
         serial_host_flush_input(&_serial);
         _real = true;
     }
+    if (desktop_options.ble_log != NULL && !ble_host_open_log(desktop_options.ble_log)) {
+        return false;
+    }
     _uart.base.type = &busio_uart_type;
     _uart.open = true;
     _uart.ble = &_transport;
@@ -138,10 +141,4 @@ void ble_host_attach_adapter(void) {
 
 const char *ble_host_controller(void) {
     return !_on ? "off" : _real ? "serial" : "virtual";
-}
-
-void ble_host_packet(bool to_controller, const uint8_t *h4, size_t len) {
-    (void)to_controller;
-    (void)h4;
-    (void)len;
 }
