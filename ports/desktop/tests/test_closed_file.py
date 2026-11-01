@@ -65,6 +65,10 @@ g2.append(displayio.TileGrid(red, pixel_shader=p))
 d.root_group = g2
 print("second", d.refresh())
 print("drawn")
+# Stay on: when code.py ends the console takes the display, and the picture could catch that.
+import time
+while True:
+    time.sleep(1)
 """
 with launch(CODE, files={"w.bmp": BMP}) as b:
     seen(b, "drawn")
