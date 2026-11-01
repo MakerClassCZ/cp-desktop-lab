@@ -7,9 +7,11 @@ CircuitPython code on a desktop, Linux, Windows or macOS. This port is experimen
 
 ## Build
 
-Needs GCC 10 or newer and the SDL2 development files (`libsdl2-dev` on Debian and Ubuntu).
+Needs GCC 10 or newer, the SDL2 development files (`libsdl2-dev` on Debian and Ubuntu) and
+CircuitPython's Python packages.
 
 ```
+pip install -r ../../requirements-dev.txt
 make                        # build-linux/circuitpython
 make CC="gcc -m32" BUILD=build-linux-i386     # a 32-bit build on a 64-bit PC
 ```

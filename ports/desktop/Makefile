@@ -172,6 +172,8 @@ CFLAGS += -Wno-error=cast-align -Wno-cast-align -Wno-error=unused-parameter -Wno
 # GCC 11's flow analysis flags shared code (lvfontio) that newer compilers accept.
 ifneq ($(CLANG),1)
 CFLAGS += -Wno-error=maybe-uninitialized
+# glibc 2.43's strchr returns const char * for a const argument; this shared file keeps char *.
+$(BUILD)/shared-bindings/adafruit_pixelbuf/PixelBuf.o: CFLAGS += -Wno-error=discarded-qualifiers
 # The virtual I2C devices compute in doubles, the BME280's compensation as its library does.
 $(patsubst %.c,$(BUILD)/%.o,$(wildcard virtual/i2c/*.c)): CFLAGS := $(filter-out -fsingle-precision-constant,$(CFLAGS))
 endif
