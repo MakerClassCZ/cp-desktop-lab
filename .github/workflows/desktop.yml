@@ -29,6 +29,8 @@ jobs:
             runner: ubuntu-22.04
           - target: macos
             runner: macos-15
+          - target: linux-i386
+            runner: ubuntu-22.04
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
@@ -42,8 +44,18 @@ jobs:
         if: matrix.target != 'macos'
         run: |
           sudo apt-get update -q
-          sudo apt-get install -yq libsdl2-dev p7zip-full
+          # The 32-bit build takes SDL's i386 package instead (Packages (32-bit)).
+          sudo apt-get install -yq p7zip-full ${{ matrix.target != 'linux-i386' && 'libsdl2-dev' || '' }}
           pip install -q -r requirements-dev.txt
+      - name: Packages (32-bit)
+        # python3 held so the i386 packages don't replace it (actions/runner-images#13803).
+        if: matrix.target == 'linux-i386'
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update -q
+          sudo apt-mark hold python3
+          sudo apt-get install -yq gcc-multilib libsdl2-dev:i386
+          echo "PKG_CONFIG_LIBDIR=/usr/lib/i386-linux-gnu/pkgconfig:/usr/share/pkgconfig" >> $GITHUB_ENV
       - name: Packages (macOS)
         if: matrix.target == 'macos'
         run: |
@@ -78,10 +90,10 @@ jobs:
             dist/*.vsix
           if-no-files-found: error
       - name: Tests (Linux)
-        if: matrix.target == 'linux'
+        if: startsWith(matrix.target, 'linux')
         run: |
           sudo apt-get install -yq socat
-          sh ports/desktop/tools/ci-test.sh ports/desktop/build-linux/circuitpython
+          sh ports/desktop/tools/ci-test.sh ports/desktop/build-${{ matrix.target }}/circuitpython
       - name: Tests (macOS)
         if: matrix.target == 'macos'
         run: sh ports/desktop/tools/ci-test.sh ports/desktop/build-macos/circuitpython
@@ -123,4 +135,4 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --prerelease \
             --title "CircuitPython desktop $GITHUB_REF_NAME" \
-            --notes "Experimental, unofficial build of ports/desktop. Linux: libsdl2-2.0-0 must be installed. macOS: see README.txt in the package (xattr)."
+            --notes "Experimental, unofficial build of ports/desktop. Linux: libsdl2-2.0-0 must be installed (libsdl2-2.0-0:i386 for the i386 package). The -debug packages have the same programs with their symbols, for a crash's backtrace. macOS: see README.txt in the package (xattr)."

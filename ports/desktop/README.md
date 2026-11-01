@@ -25,7 +25,8 @@ make BUILD=build-windows CROSS_COMPILE=x86_64-w64-mingw32- SDL_DIR=/path/to/SDL2
 
 `build-windows/circuitpython.exe` runs on Windows 10 and 11 with `SDL2.dll` from the same SDL2
 package beside it; the C runtime and winpthreads are built in. A crash prints an address that
-`x86_64-w64-mingw32-addr2line -f -e build-windows/circuitpython.exe 0x...` resolves.
+`x86_64-w64-mingw32-addr2line -f -e build-windows/circuitpython.exe 0x...` resolves (with the
+program from the build directory, or a release's `-debug` package: the others are stripped).
 
 On macOS (Apple silicon) the build is native, with Xcode's command line tools and SDL2 from
 Homebrew (`brew install sdl2`), or SDL's own `SDL2.framework` from the SDL2 `.dmg` in a directory
@@ -515,6 +516,23 @@ Releases page). Any other DAP client attaches the same way.
 A program under the debugger runs about three times slower. Python files compiled from source
 show their locals; a `.mpy` keeps no variable names. After a reload (a file saved on the drive)
 the program waits for the editor again.
+
+## Bugs in the core: the debug and 32-bit packages
+
+Besides the usual packages, stripped, a release has:
+
+| package | what it is for |
+|---|---|
+| `circuitpython-linux-x86_64-debug`, `-aarch64-debug`, `-i386-debug`, `-macos-arm64-debug`, `-windows-x64-debug` | the same programs with their symbols |
+| `circuitpython-linux-i386` | 32-bit, as the MCUs are: `size_t`, pointers and `mp_int_t` the width the shared code was written for |
+
+A crash in the core prints `hard fault` and a backtrace, then the program goes on in safe mode,
+as a board does. The debug package's program turns the backtrace into functions, files and
+lines, also one a stripped program of the same release printed, since the code is the same: on
+Linux `addr2line -f -e circuitpython 0x1a2b3` for each line's `(+0x1a2b3)`, on Windows
+`llvm-addr2line -f -e circuitpython.exe 0x...` (or `x86_64-w64-mingw32-addr2line`) for each
+address. On macOS the debug program's backtrace names the functions, and `lldb` finds the lines in
+`circuitpython.dSYM` beside it.
 
 ## Controlling the program: --api
 
