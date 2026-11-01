@@ -406,6 +406,15 @@ CIRCUITPY_ESPCAMERA = 0
 # P4 has MIPI-DSI
 CIRCUITPY_MIPIDSI = 1
 
+# P4 has MIPI-CSI
+CIRCUITPY_MIPICSI = 1
+
+# P4 can play MIPI-CSI video into MIPI-DSI framebuffers
+CIRCUITPY_VIDEOCORE = 1
+
+# Hardware JPEG decoder
+CIRCUITPY_JPEGIO_HW ?= $(CIRCUITPY_JPEGIO)
+
 #### esp32s31 #########################################################
 else ifeq ($(IDF_TARGET),esp32s31)
 
@@ -439,6 +448,9 @@ CIRCUITPY_ESPULP = 0
 
 # The S31 has five eFuse key blocks, not six.
 CIRCUITPY_HARDWAREKEY = 0
+
+# Hardware JPEG decoder
+CIRCUITPY_JPEGIO_HW ?= $(CIRCUITPY_JPEGIO)
 
 # No I80 support from the IDF
 CIRCUITPY_PARALLELDISPLAYBUS = 0
@@ -483,6 +495,9 @@ CIRCUITPY_ESP_USB_SERIAL_JTAG ?= 0
 
 # No DAC
 CIRCUITPY_AUDIOIO = 0
+
+# LEDC + GPTimer PWM audio, the only analog audio output without I2S hardware.
+CIRCUITPY_AUDIOPWMIO ?= 1
 
 endif
 #### end chip-specific choices ########################################
@@ -552,8 +567,8 @@ USB_NUM_IN_ENDPOINTS = 5
 # only thing a user needs, with no custom build.
 ifeq ($(IDF_TARGET),esp32s3)
 # It needs the TinyUSB device stack and audiocore, so leave it off for boards
-# that turn either off. The S3 has no AUDIOIO and no AUDIOPWMIO, so audiocore
-# follows CIRCUITPY_AUDIOBUSIO here.
+# that turn either off. CIRCUITPY_AUDIOCORE is not set yet at this point, so
+# boards that drop audio are recognized by CIRCUITPY_AUDIOBUSIO = 0 instead.
 ifeq ($(filter 0,$(CIRCUITPY_USB_DEVICE) $(CIRCUITPY_AUDIOCORE) $(CIRCUITPY_AUDIOBUSIO)),)
 CIRCUITPY_USB_AUDIO ?= 1
 endif
