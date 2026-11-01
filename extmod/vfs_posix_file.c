@@ -64,6 +64,20 @@ static void check_fd_is_open(const mp_obj_vfs_posix_file_t *o) {
 #define check_fd_is_open(o)
 #endif
 
+// CIRCUITPY-CHANGE: a closed file fails like one on a board's FAT drive, with EINVAL and no raise:
+// a read during a display refresh must return its error, or the display stops refreshing.
+#if defined(CIRCUITPY_FILESYSTEM_POSIX) && CIRCUITPY_FILESYSTEM_POSIX
+#define check_stream_fd_is_open(o, errcode) \
+    do { \
+        if ((o)->fd < 0) { \
+            *(errcode) = MP_EINVAL; \
+            return MP_STREAM_ERROR; \
+        } \
+    } while (0)
+#else
+#define check_stream_fd_is_open(o, errcode) check_fd_is_open(o)
+#endif
+
 static void vfs_posix_file_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
     (void)kind;
     mp_obj_vfs_posix_file_t *self = MP_OBJ_TO_PTR(self_in);
@@ -125,7 +139,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(vfs_posix_file_fileno_obj, vfs_posix_file_filen
 
 static mp_uint_t vfs_posix_file_read(mp_obj_t o_in, void *buf, mp_uint_t size, int *errcode) {
     mp_obj_vfs_posix_file_t *o = MP_OBJ_TO_PTR(o_in);
-    check_fd_is_open(o);
+    check_stream_fd_is_open(o, errcode);
     ssize_t r;
     MP_HAL_RETRY_SYSCALL(r, read(o->fd, buf, size), {
         *errcode = err;
@@ -136,7 +150,7 @@ static mp_uint_t vfs_posix_file_read(mp_obj_t o_in, void *buf, mp_uint_t size, i
 
 static mp_uint_t vfs_posix_file_write(mp_obj_t o_in, const void *buf, mp_uint_t size, int *errcode) {
     mp_obj_vfs_posix_file_t *o = MP_OBJ_TO_PTR(o_in);
-    check_fd_is_open(o);
+    check_stream_fd_is_open(o, errcode);
     #if MICROPY_PY_OS_DUPTERM
     if (o->fd <= STDERR_FILENO) {
         mp_hal_stdout_tx_strn(buf, size);
@@ -156,7 +170,7 @@ static mp_uint_t vfs_posix_file_ioctl(mp_obj_t o_in, mp_uint_t request, uintptr_
 
     switch (request) {
         case MP_STREAM_FLUSH: {
-            check_fd_is_open(o);
+            check_stream_fd_is_open(o, errcode);
             int ret;
             // fsync(stdin/stdout/stderr) may fail with EINVAL (or ENOTSUP on macos or EBADF
             // on windows), because the OS doesn't buffer these except for instance when they
@@ -195,7 +209,7 @@ static mp_uint_t vfs_posix_file_ioctl(mp_obj_t o_in, mp_uint_t request, uintptr_
             return 0;
         }
         case MP_STREAM_SEEK: {
-            check_fd_is_open(o);
+            check_stream_fd_is_open(o, errcode);
             struct mp_stream_seek_t *s = (struct mp_stream_seek_t *)arg;
             MP_THREAD_GIL_EXIT();
             off_t off = lseek(o->fd, s->offset, s->whence);
