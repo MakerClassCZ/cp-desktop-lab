@@ -81,7 +81,9 @@ with Board.launch("ports/desktop/build-linux/circuitpython", "/tmp/repro/CIRCUIT
 - 64-bit sizes: use the i386 program when `size_t`, pointers or `mp_int_t` may matter.
 - The nRF port's own `_bleio`: BLE here is the HCI host stack the AirLift boards use
   (`devices/ble_hci`), as a peripheral only (no scanning or connecting from `code.py`, no
-  pairing), at an MTU of 23. A bug of a CLUE's SoftDevice code needs the board.
+  pairing), at an MTU of 23. A bug of a CLUE's SoftDevice code needs the board. The lab's
+  adapter comes on at its first use, so a program that sets `adapter.enabled = False` and then
+  uses it finds it on again, where a CLUE raises.
 
 ## Tests
 

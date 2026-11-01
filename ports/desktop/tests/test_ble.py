@@ -224,13 +224,64 @@ with launch(SERVICES) as b:
     )
     p.disconnect()
 
-# BLERadio and the Bluefruit Connect packets, with the libraries when there are some
+# BLERadio() code from a CLUE, with adafruit_ble (and adafruit_bluefruit_connect) from CIRCUITPY_LIB
 LIB = os.environ.get("CIRCUITPY_LIB")
-if (
-    not LIB
-    or not os.path.isdir(os.path.join(LIB, "adafruit_ble"))
-    or not os.path.isdir(os.path.join(LIB, "adafruit_bluefruit_connect"))
-):
+
+
+def lib_files(*names):
+    """The libraries' files for a drive's lib/, or None when CIRCUITPY_LIB lacks one."""
+    if not LIB or not all(os.path.isdir(os.path.join(LIB, n)) for n in names):
+        return None
+    files = {}
+    for name in names:
+        for root, _, found in os.walk(os.path.join(LIB, name)):
+            for n in found:
+                path = os.path.join(root, n)
+                files["lib/" + os.path.relpath(path, LIB).replace(os.sep, "/")] = open(
+                    path, "rb"
+                ).read()
+    return files
+
+
+ECHO_RADIO = """
+from adafruit_ble import BLERadio
+from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
+from adafruit_ble.services.nordic import UARTService
+ble = BLERadio()
+uart = UARTService()
+ble.start_advertising(ProvideServicesAdvertisement(uart))
+print("ready")
+while True:
+    if ble.connected and uart.in_waiting:
+        uart.write(uart.read(uart.in_waiting).upper())
+"""
+libs = lib_files("adafruit_ble")
+if libs is None:
+    print("SKIP BLERadio: set CIRCUITPY_LIB to a lib with adafruit_ble")
+else:
+    with launch(ECHO_RADIO, files=libs) as b:
+        seen(b, "ready", 15)
+        ad = b.ble.scan()
+        p = b.ble.connect()
+        p.uart_write("clue")
+        check(
+            "BLERadio and UARTService run unchanged",
+            ad is not None and NUS in ad.services and p.uart_read(timeout=3) == "CLUE",
+            (ad, b.console(since=0)["data"][-400:]),
+        )
+    out, _ = run(
+        'from adafruit_ble import BLERadio\ntry:\n    BLERadio()\nexcept RuntimeError as e:\n    print("refused", e)\n',
+        "",
+        "refused",
+        files=libs,
+        board='[board]\nble = "off"\n',
+    )
+    check(
+        "BLERadio on a board without Bluetooth raises RuntimeError", "refused" in out, out[-300:]
+    )
+
+libs = lib_files("adafruit_ble", "adafruit_bluefruit_connect")
+if libs is None:
     print(
         "SKIP Bluefruit color packet: set CIRCUITPY_LIB to a lib with adafruit_ble and adafruit_bluefruit_connect"
     )
@@ -251,14 +302,6 @@ while True:
         if isinstance(packet, ColorPacket):
             print("color", packet.color)
 """
-    libs = {}
-    for name in ("adafruit_ble", "adafruit_bluefruit_connect"):
-        for root, _, names in os.walk(os.path.join(LIB, name)):
-            for n in names:
-                path = os.path.join(root, n)
-                libs[os.path.relpath(path, LIB).replace(os.sep, "/").join(("lib/", ""))] = open(
-                    path, "rb"
-                ).read()
     with launch(BLUEFRUIT, files=libs) as b:
         seen(b, "ready", 15)
         p = b.ble.connect()
@@ -267,6 +310,64 @@ while True:
             "Bluefruit color packet",
             seen(b, "color (255, 0, 0)"),
             b.console(since=0)["data"][-400:],
+        )
+
+# adapter.connections holds a Connection while connected (the HCI stack had a null object there)
+with launch(PERIPHERAL.replace("len(a.connections))", "a.connections)")) as b:
+    seen(b, "advertising")
+    b.ble.connect()
+    check(
+        "adapter.connections holds a Connection",
+        seen(b, "(<Connection>,)"),
+        b.console(since=0)["data"][-300:],
+    )
+
+# Five runs of a program that makes a service: the adapter stays, the heap does not shrink
+MEMORY = """
+import _bleio, gc
+a = _bleio.adapter
+s = _bleio.Service(_bleio.UUID(0x1234))
+_bleio.Characteristic.add_to_service(s, _bleio.UUID(0x1235), properties=_bleio.Characteristic.READ,
+    read_perm=_bleio.Attribute.OPEN, write_perm=_bleio.Attribute.NO_ACCESS, max_length=200, initial_value=bytes(200))
+a.start_advertising(bytes([2, 1, 6]), connectable=True)
+gc.collect()
+print("free", gc.mem_free())
+"""
+with launch(MEMORY) as b:
+    free = []
+    for run_number in range(5):
+        if run_number:
+            b.reload()
+        b.wait("free", timeout=10)
+        b.wait("\n", timeout=5)
+        free.append(int(b.console(since=0)["data"].rsplit("free ", 1)[1].split()[0]))
+check("five runs of a BLE program keep the heap", max(free) - min(free) < 1024, free)
+
+# The phone writes while the program sleeps: background HCI keeps going (and with --fast-time)
+SLEEPER = """
+import _bleio, time
+a = _bleio.adapter
+C = _bleio.Characteristic
+s = _bleio.Service(_bleio.UUID(0x1234))
+c = C.add_to_service(s, _bleio.UUID(0x1235), properties=C.WRITE, read_perm=_bleio.Attribute.OPEN,
+    write_perm=_bleio.Attribute.OPEN, max_length=20)
+a.start_advertising(bytes([2, 1, 6]), connectable=True)
+print("ready")
+while True:
+    time.sleep(1)
+    if c.value:
+        print("got", bytes(c.value))
+        break
+"""
+for fast in (False, True):
+    with launch(SLEEPER, fast_time=fast) as b:
+        seen(b, "ready")
+        p = b.ble.connect()
+        p.write(0x1235, b"zzz")
+        check(
+            "a write while the program sleeps%s" % (" (fast time)" if fast else ""),
+            seen(b, "got b'zzz'", 10),
+            b.console(since=0)["data"][-300:],
         )
 
 print("DONE")

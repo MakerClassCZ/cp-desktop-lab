@@ -161,10 +161,9 @@ CFLAGS := $(filter-out -fsingle-precision-constant --param max-inline-insns-sing
 CFLAGS += -Wno-unknown-warning-option -Wno-expansion-to-defined -Wno-unreachable-code -Wno-double-promotion -Wno-literal-conversion \
 	-Wno-c23-extensions -Wno-unused-variable -Wno-unused-but-set-variable
 endif
-ifneq ($(MACOS),1)
-# devices/ble_hci's headers use __packed, which newlib and macOS define and glibc and MinGW do not.
-CFLAGS += '-D__packed=__attribute__((packed))'
-endif
+# devices/ble_hci's headers use __packed, which newlib and macOS define and glibc and MinGW do not;
+# spelled as macOS's sys/cdefs.h spells it, so that its definition is the same one again.
+CFLAGS += '-D__packed=__attribute__((__packed__))'
 ifeq ($(WINDOWS),1)
 CFLAGS += -D_WIN32_WINNT=0x0A00
 else
