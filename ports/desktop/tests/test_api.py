@@ -5,7 +5,7 @@ through the API: no sleeps to wait for the program.
 """
 
 import http.client, os, socket, subprocess, threading, time
-from harness import BIN, HEADLESS, T, check, cpapi, drive, launch, picture
+from harness import BIN, HEADLESS, T, board_file, check, cpapi, drive, launch, picture
 
 
 def raw(board, method, path, headers):
@@ -17,6 +17,21 @@ def raw(board, method, path, headers):
     c.close()
     return r.status
 
+
+# Paths relative to the caller's directory, which is not the one the program runs in
+here = os.getcwd()
+d = drive('print("relative")\n')
+f = board_file('[i2c]\nOLED = "ssd1306 128x64"\n')
+os.chdir(os.path.dirname(f))
+try:
+    with cpapi.Board.launch(
+        os.path.relpath(BIN), os.path.relpath(d), board_file=os.path.basename(f)
+    ) as b:
+        check("program, drive and board file as relative paths", "relative" in b.wait("relative"))
+except Exception as e:
+    check("program, drive and board file as relative paths", False, e)
+finally:
+    os.chdir(here)
 
 # Start, info, authentication, quit
 started = time.monotonic()
@@ -256,8 +271,34 @@ with launch(RED, '[i2c]\nOLED = "ssd1306 128x64"\n') as b:
         (w, h, px(160, 120)) == (320, 240, (255, 0, 0)),
         (w, h, px(160, 120)),
     )
+    p = b.pixels()
+    check(
+        "pixels(): 320x240 RGB, red at the centre",
+        (p.width, p.height, len(p.rgb), p[160, 120]) == (320, 240, 320 * 240 * 3, 0xFF0000),
+        (p.width, p.height, len(p.rgb)),
+    )
+    check(
+        "count_colors(): every pixel red",
+        p.count_colors() == {0xFF0000: 320 * 240},
+        p.count_colors(),
+    )
+    check("diff() with what is there: nothing", p.diff(lambda x, y: 0xFF0000) == [])
+    black = p.diff(lambda x, y: 0x000000 if y == 7 else None)
+    check(
+        "diff(): one row expected black, each pixel of it with both colours",
+        len(black) == 320 and black[0] == (0, 7, 0xFF0000, 0x000000),
+        black[:2],
+    )
+    check(
+        "diff() with an equal Picture: nothing", p.diff(cpapi.Picture.from_png(b.display())) == []
+    )
     w, h, px = picture(b, "OLED")
     check("a board file's display by name", (w, h) == (128, 64), (w, h))
+    try:
+        p.diff(b.pixels("OLED"))
+        check("diff() of another size: ValueError", False)
+    except ValueError:
+        check("diff() of another size: ValueError", True)
     try:
         b.display("NOPE")
         check("an unknown display: 404", False)

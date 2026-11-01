@@ -10,12 +10,74 @@ import json
 import os
 import re
 import secrets
+import struct
 import subprocess
 import sys
 import time
+import zlib
 from urllib.parse import urlencode
 
 ANNOUNCE = re.compile(rb"circuitpython: api (http://[^/\s]+/) token ([0-9a-fA-F]+)")
+
+
+class Picture:
+    """A display's pixels: width, height and rgb, three bytes a pixel, rows from the top.
+    p[x, y] is a pixel's colour as 0xRRGGBB."""
+
+    def __init__(self, width, height, rgb):
+        self.width, self.height, self.rgb = width, height, bytes(rgb)
+
+    @classmethod
+    def from_png(cls, data):
+        """The program's PNG (/api/display): 8-bit RGB, each row after a filter byte of 0."""
+        pos, idat, w, h = 8, b"", 0, 0
+        while pos < len(data):
+            n, kind = struct.unpack(">I4s", data[pos : pos + 8])
+            body = data[pos + 8 : pos + 8 + n]
+            if kind == b"IHDR":
+                w, h = struct.unpack(">II", body[:8])
+            elif kind == b"IDAT":
+                idat += body
+            pos += 12 + n
+        raw = zlib.decompress(idat)
+        row = 1 + 3 * w
+        return cls(w, h, b"".join(raw[y * row + 1 : (y + 1) * row] for y in range(h)))
+
+    def __getitem__(self, xy):
+        i = 3 * (xy[1] * self.width + xy[0])
+        return self.rgb[i] << 16 | self.rgb[i + 1] << 8 | self.rgb[i + 2]
+
+    def count_colors(self):
+        """{0xRRGGBB: how many pixels have it}."""
+        counts = {}
+        for i in range(0, len(self.rgb), 3):
+            c = self.rgb[i] << 16 | self.rgb[i + 1] << 8 | self.rgb[i + 2]
+            counts[c] = counts.get(c, 0) + 1
+        return counts
+
+    def diff(self, expected):
+        """[(x, y, colour here, colour expected)] for each pixel that differs, row by row.
+        expected is a Picture of the same size, or a function of (x, y) giving 0xRRGGBB, or None
+        where any colour will do."""
+        if isinstance(expected, Picture):
+            if (expected.width, expected.height) != (self.width, self.height):
+                raise ValueError(
+                    "%dx%d against %dx%d"
+                    % (self.width, self.height, expected.width, expected.height)
+                )
+            other = expected
+
+            def expected(x, y):
+                return other[x, y]
+
+        out = []
+        for y in range(self.height):
+            for x in range(self.width):
+                want = expected(x, y)
+                have = self[x, y]
+                if want is not None and want != have:
+                    out.append((x, y, have, want))
+        return out
 
 
 def upto_next(r):
@@ -163,9 +225,13 @@ class Board:
         if headless:
             e.setdefault("SDL_VIDEODRIVER", "dummy")
             e.setdefault("SDL_AUDIODRIVER", "dummy")
+        # Paths from here: the program runs in the drive's parent directory. A bare name is PATH's.
+        if os.path.dirname(program):
+            program = os.path.abspath(program)
+        drive = os.path.abspath(drive)
         command = [program, "--drive", drive, "--api", "0"]
         if board_file:
-            command += ["--board-file", board_file]
+            command += ["--board-file", os.path.abspath(board_file)]
         if board:
             command += ["--board", board]
         if fast_time:
@@ -365,6 +431,10 @@ class Board:
         return self.request(
             "GET", "/api/display" + ("?" + urlencode({"name": name}) if name else ""), raw=True
         )
+
+    def pixels(self, name=None):
+        """A display's picture as a Picture: its pixels, with count_colors() and diff()."""
+        return Picture.from_png(self.display(name))
 
     def part(self, name):
         for p in self.state()["parts"]:

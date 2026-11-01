@@ -584,7 +584,17 @@ with Board.launch("./circuitpython", "CIRCUITPY", board_file="feather.toml") as 
     b.set("ENV.temp", 29.5)
     print(b.eval("6 * 7", interrupt=True))   # '42'
     open("screen.png", "wb").write(b.display())
+    p = b.pixels()                      # the same picture as pixels
+    print(p.width, p.height, hex(p[10, 20]))     # 320 240 0xff0000
+    print(p.count_colors())             # {0xff0000: 76700, 0xffffff: 100}
+    print(p.diff(lambda x, y: 0xFF0000 if y < 10 else None))  # [(x, y, here, expected), ...]
 ```
+
+`pixels(name)` is a `Picture`: `width`, `height`, `rgb` (three bytes a pixel, rows from the
+top) and `p[x, y]` as `0xRRGGBB`. `count_colors()` counts the pixels of each colour; `diff()`
+lists the pixels that differ from another `Picture` of the same size, or from a function of
+`(x, y)` that gives the colour expected there, or `None` where any colour will do.
+`Picture.from_png()` reads a saved `display()`.
 
 `tests/test_api.py` and the button and encoder cases of `tests/test_panel.py` use it.
 

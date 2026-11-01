@@ -237,22 +237,13 @@ def ppm(path):
 
 
 def png(data):
-    """(width, height, pixel(x, y) -> (r, g, b)) of the port's PNG: 8-bit RGB rows each after a
-    filter byte of 0."""
-    import struct, zlib
-
-    pos, idat, w, h = 8, b"", 0, 0
-    while pos < len(data):
-        n, kind = struct.unpack(">I4s", data[pos : pos + 8])
-        body = data[pos + 8 : pos + 8 + n]
-        if kind == b"IHDR":
-            w, h = struct.unpack(">II", body[:8])
-        elif kind == b"IDAT":
-            idat += body
-        pos += 12 + n
-    raw = zlib.decompress(idat)
-    row = 1 + 3 * w
-    return w, h, lambda x, y: tuple(raw[y * row + 1 + 3 * x : y * row + 4 + 3 * x])
+    """(width, height, pixel(x, y) -> (r, g, b)) of the port's PNG."""
+    p = cpapi.Picture.from_png(data)
+    return (
+        p.width,
+        p.height,
+        lambda x, y: tuple(p.rgb[3 * (y * p.width + x) : 3 * (y * p.width + x) + 3]),
+    )
 
 
 def picture(b, name=None):
