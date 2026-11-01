@@ -23,10 +23,18 @@ here = os.getcwd()
 d = drive('print("relative")\n')
 f = board_file('[i2c]\nOLED = "ssd1306 128x64"\n')
 os.chdir(os.path.dirname(f))
+
+
+def relative(path):
+    """path from here; as it is on another Windows drive, which no relative path reaches."""
+    try:
+        return os.path.relpath(path)
+    except ValueError:
+        return path
+
+
 try:
-    with cpapi.Board.launch(
-        os.path.relpath(BIN), os.path.relpath(d), board_file=os.path.basename(f)
-    ) as b:
+    with cpapi.Board.launch(relative(BIN), relative(d), board_file=os.path.basename(f)) as b:
         check("program, drive and board file as relative paths", "relative" in b.wait("relative"))
 except Exception as e:
     check("program, drive and board file as relative paths", False, e)
