@@ -20,6 +20,7 @@ Each script takes the program and works in its own directory, so run them from a
   settings.toml, the web workflow, reset).
 - `test_image.py`: the FAT image drive (`DEMO_IMAGE=path.img` also boots an existing image).
 - `test_erase.py`: `storage.erase_filesystem()` leaves a directory alone.
+- `test_closed_file.py`: a closed file on a directory drive fails as on FAT, and a refresh survives it.
 - `test_dap.py`: the debugger over the Debug Adapter Protocol, like an editor: breakpoints,
   stack, scopes, locals, evaluate, step into a library file, step out, step over, Stop, the
   reconnect after a saved file, and the report of an exception that ended `code.py`.
