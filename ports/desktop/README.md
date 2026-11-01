@@ -235,6 +235,8 @@ first use and stays across reloads. Its controller:
 | `--ble PORT` (`COM48`, `/dev/ttyACM0`) | a real controller on that serial port (H4 over USB CDC) |
 | `--ble off` | `None`, as on a board without Bluetooth |
 
+A Pico 2 W (the release's `hci-bridge-pico2w.uf2`) or an nRF52840 board with Zephyr's `hci_uart`
+makes a controller for `--ble PORT`: see [tools/hci-bridge](tools/hci-bridge/README.md).
 A board file of a board without Bluetooth says `[board] ble = "off"`; `--ble` wins over it.
 AirLift code that builds its own `_bleio.Adapter(uart=...)` over `--uart` runs with `--ble off`
 (there is one adapter). `--fast-time` refuses `--ble PORT`: a real controller keeps real time.

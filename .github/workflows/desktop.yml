@@ -91,6 +91,13 @@ jobs:
             dist/*.zip
             dist/*.vsix
           if-no-files-found: error
+      - name: The BLE library for the tests
+        # adafruit_ble from its frozen submodule: test_ble runs BLERadio() code from a CLUE with it.
+        if: matrix.target != 'windows'
+        run: |
+          git submodule update --init --depth 1 frozen/Adafruit_CircuitPython_BLE
+          mkdir -p cplib && cp -r frozen/Adafruit_CircuitPython_BLE/adafruit_ble cplib/
+          echo "CIRCUITPY_LIB=$PWD/cplib" >> $GITHUB_ENV
       - name: Tests (Linux)
         if: startsWith(matrix.target, 'linux')
         run: |
@@ -114,15 +121,49 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: windows-X64
+      - name: The BLE library for the tests
+        shell: bash
+        run: |
+          git submodule update --init --depth 1 frozen/Adafruit_CircuitPython_BLE
+          mkdir -p cplib && cp -r frozen/Adafruit_CircuitPython_BLE/adafruit_ble cplib/
+          echo "CIRCUITPY_LIB=$(cygpath -w "$PWD/cplib")" >> $GITHUB_ENV
       - name: Tests
         shell: bash
         run: |
           7z x -y circuitpython-windows-x64.zip > /dev/null
           PYTHON=python sh ports/desktop/tools/ci-test.sh circuitpython-windows-x64/circuitpython.exe
 
+  hci-bridge:
+    # The Pico 2 W Bluetooth controller for --ble PORT (ports/desktop/tools/hci-bridge), on the
+    # Pico SDK and the drivers this repository has as submodules.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          show-progress: false
+          fetch-depth: 1
+      - name: Packages
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq gcc-arm-none-eabi cmake
+      - name: Build
+        run: |
+          git submodule update --init --depth 1 ports/raspberrypi/sdk ports/raspberrypi/lib/cyw43-driver \
+              ports/raspberrypi/lib/lwip lib/tinyusb
+          export PICO_SDK_PATH=$PWD/ports/raspberrypi/sdk PICO_TINYUSB_PATH=$PWD/lib/tinyusb
+          export PICO_CYW43_DRIVER_PATH=$PWD/ports/raspberrypi/lib/cyw43-driver PICO_LWIP_PATH=$PWD/ports/raspberrypi/lib/lwip
+          cmake -S ports/desktop/tools/hci-bridge/pico -B build-hci-bridge
+          make -C build-hci-bridge -j4
+          mkdir -p dist && cp build-hci-bridge/hci_bridge.uf2 dist/hci-bridge-pico2w.uf2
+      - uses: actions/upload-artifact@v7
+        with:
+          name: hci-bridge
+          path: dist/*.uf2
+          if-no-files-found: error
+
   release:
     if: startsWith(github.ref, 'refs/tags/desktop-v')
-    needs: [build, test-windows]
+    needs: [build, test-windows, hci-bridge]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -137,4 +178,4 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --prerelease \
             --title "CircuitPython desktop $GITHUB_REF_NAME" \
-            --notes "Experimental, unofficial build of ports/desktop. Linux: libsdl2-2.0-0 must be installed (libsdl2-2.0-0:i386 for the i386 package). The -debug packages have the same programs with their symbols, for a crash's backtrace. macOS: see README.txt in the package (xattr)."
+            --notes "Experimental, unofficial build of ports/desktop. Linux: libsdl2-2.0-0 must be installed (libsdl2-2.0-0:i386 for the i386 package). The -debug packages have the same programs with their symbols, for a crash's backtrace. hci-bridge-pico2w.uf2 makes a Pico 2 W a Bluetooth controller for --ble PORT (ports/desktop/tools/hci-bridge). macOS: see README.txt in the package (xattr)."
