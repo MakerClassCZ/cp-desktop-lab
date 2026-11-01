@@ -3,6 +3,8 @@
 with Board.launch("circuitpython", "CIRCUITPY") as b:
     b.wait("Hello")
     print(b.state())
+
+From the command line, one run of a script: python3 cpapi.py run PROGRAM CODE (run --help).
 """
 
 import http.client
@@ -482,3 +484,96 @@ class Board:
 
     def __exit__(self, *exc):
         self.close()
+
+
+# The terminal's escapes (the window title, line erases), left out of what run prints.
+_ESCAPES = re.compile(r"\x1b\][^\x1b\x07]*(?:\x1b\\|\x07)|\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def _until(b, texts, timeout):
+    """(the console read on from where b was, the first of texts in it or None) within timeout.
+    Read as it comes, so the text before a hard fault's reset is kept."""
+    out, end = "", time.time() + timeout
+    while True:
+        r = b.console(timeout=0.1)
+        b.offset = r["next"]
+        out += r["data"]
+        seen = next((t for t in texts if t in out), None)
+        if seen or time.time() > end or (b.process is not None and b.process.poll() is not None):
+            return out, seen
+
+
+def run(argv):
+    """cpapi.py run PROGRAM CODE: CODE (a .py file as code.py, or a directory as the drive) run
+    headless until code.py ends or --wait's text comes; its console printed, and the display if
+    asked. Exit status 0, 1 when it did not end in time, 2 after a hard fault."""
+    import argparse
+    import shutil
+    import tempfile
+
+    ap = argparse.ArgumentParser(prog="cpapi.py run", description=run.__doc__)
+    ap.add_argument("program")
+    ap.add_argument("code")
+    ap.add_argument("--board-file")
+    ap.add_argument("--board")
+    ap.add_argument("--wait", help="stop at this console text, not when code.py ends")
+    ap.add_argument("--timeout", type=float, default=30, help="seconds for each run (default 30)")
+    ap.add_argument("--runs", type=int, default=1, help="run code.py this many times (Ctrl-D)")
+    ap.add_argument("--display", help="the display to read: DISPLAY (default) or a board file's")
+    ap.add_argument("--png", help="save the display as this PNG after the last run")
+    ap.add_argument("--colors", action="store_true", help="print the display's pixels per colour")
+    ap.add_argument("--fast-time", action="store_true")
+    a = ap.parse_args(argv)
+
+    drive = os.path.join(tempfile.mkdtemp(), "CIRCUITPY")
+    if os.path.isdir(a.code):
+        shutil.copytree(a.code, drive)
+    else:
+        os.makedirs(drive)
+        shutil.copy(a.code, os.path.join(drive, "code.py"))
+    texts = [a.wait] if a.wait else ["Code done running."]
+    texts.append("You are in safe mode")
+    status = 0
+    with Board.launch(
+        a.program, drive, board_file=a.board_file, board=a.board, fast_time=a.fast_time
+    ) as b:
+        for i in range(a.runs):
+            if i:
+                b.reload()
+            out, seen = _until(b, texts, a.timeout)
+            print("--- run %d" % (i + 1))
+            print(_ESCAPES.sub("", out).replace("\r\n", "\n").rstrip())
+            if seen == "You are in safe mode":
+                status = 2
+                break
+            if seen is None:
+                print("--- not ended in %g s" % a.timeout)
+                status = 1
+                break
+        if status != 2 and (a.png or a.colors):
+            data = b.display(a.display)
+            if a.png:
+                open(a.png, "wb").write(data)
+                print("--- display saved:", a.png)
+            if a.colors:
+                p = Picture.from_png(data)
+                print("--- %dx%d, pixels per colour" % (p.width, p.height))
+                for c, n in sorted(p.count_colors().items(), key=lambda x: -x[1]):
+                    print("0x%06x %d" % (c, n))
+        # The backtrace comes on stderr, read on a thread, just before the safe mode's console text.
+        end = time.time() + (2 if status == 2 else 0)
+        while time.time() < end and not any("hard fault" in x for x in b.stderr):
+            time.sleep(0.05)
+        fault = [x for x in b.stderr if x.strip() and not ANNOUNCE.search(x.encode())]
+        fault = fault[next((i for i, x in enumerate(fault) if "hard fault" in x), len(fault)) :]
+        if fault:
+            print("--- " + "".join(fault).strip())
+            status = 2
+    return status
+
+
+if __name__ == "__main__":
+    if sys.argv[1:2] != ["run"]:
+        print("usage: python cpapi.py run PROGRAM CODE [options]  (run --help)", file=sys.stderr)
+        sys.exit(2)
+    sys.exit(run(sys.argv[2:]))

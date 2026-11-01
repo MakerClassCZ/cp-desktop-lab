@@ -16,9 +16,21 @@ the details of everything below.
 - The port follows adafruit/circuitpython `main` with a delay. A fix meant for a PR goes on a
   branch from upstream `main`; check it there on hardware too.
 
+## One run from the command line
+
+```
+python3 ports/desktop/tools/cpapi.py run PROGRAM repro.py --wait drawn --colors --png shot.png
+```
+
+`repro.py` (or a directory, as the whole drive) runs once, headless, until `code.py` ends or
+`--wait`'s text comes; the console is printed without the terminal's escapes, then the display's
+pixels per colour and the PNG if asked. `--runs N` runs it N times in one process (Ctrl-D), for
+bugs of a second run; `--board-file`, `--display NAME`, `--fast-time`, `--timeout S`. Exit status
+0, 1 when it did not end in time, 2 after a hard fault, whose backtrace is printed last.
+
 ## Driving it: tools/cpapi.py
 
-Standard library only. Headless by default, no sleeps needed:
+To drive the program while it runs (buttons, sensors, the REPL), in Python. Standard library only. Headless by default, no sleeps needed:
 
 ```python
 import sys; sys.path.insert(0, "ports/desktop/tools")
@@ -47,9 +59,10 @@ with Board.launch("ports/desktop/build-linux/circuitpython", "/tmp/repro/CIRCUIT
 
 - Before and after, the same script: the console, the pixels that differ (`diff()`), the number
   of runs that fail (`reload()` in a loop for bugs of a second run).
-- A crash prints `hard fault` and a backtrace. Resolve it with the unstripped program:
-  `addr2line -f -e circuitpython 0x...` for each `(+0x...)` on Linux,
-  `llvm-addr2line -f -e circuitpython.exe 0x...` on Windows.
+- A crash prints `hard fault`, the command for its backtrace (`addr2line -f -e circuitpython`,
+  `atos -o circuitpython` on macOS) and the program's addresses; give them to that command with
+  the unstripped program (a `-debug` package or the build's) for functions and lines. Lines
+  marked `outside the program` are libc's or a DLL's.
 - Say where each result came from ("desktop lab", the board) and what was not tested.
 
 ## What it does not show

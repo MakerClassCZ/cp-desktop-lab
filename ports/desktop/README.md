@@ -526,13 +526,22 @@ Besides the usual packages, stripped, a release has:
 | `circuitpython-linux-x86_64-debug`, `-aarch64-debug`, `-i386-debug`, `-macos-arm64-debug`, `-windows-x64-debug` | the same programs with their symbols |
 | `circuitpython-linux-i386` | 32-bit, as the MCUs are: `size_t`, pointers and `mp_int_t` the width the shared code was written for |
 
-A crash in the core prints `hard fault` and a backtrace, then the program goes on in safe mode,
-as a board does. The debug package's program turns the backtrace into functions, files and
-lines, also one a stripped program of the same release printed, since the code is the same: on
-Linux `addr2line -f -e circuitpython 0x1a2b3` for each line's `(+0x1a2b3)`, on Windows
-`llvm-addr2line -f -e circuitpython.exe 0x...` (or `x86_64-w64-mingw32-addr2line`) for each
-address. On macOS the debug program's backtrace names the functions, and `lldb` finds the lines in
-`circuitpython.dSYM` beside it.
+A crash in the core prints `hard fault`, the command that reads its backtrace and the program's
+addresses (others, in libc or a DLL, marked `outside the program`), then the program goes on in
+safe mode, as a board does:
+
+```
+circuitpython: hard fault, signal 11; backtrace for addr2line -f -e circuitpython:
+  0x7f3c1a242520 (outside the program)
+  0x1129e5
+  0x12ef7e
+```
+
+The debug package's program turns the addresses into functions, files and lines, also those a
+stripped program of the same release printed, since the code is the same:
+`addr2line -f -e circuitpython 0x1129e5 0x12ef7e` on Linux, `llvm-addr2line` (or
+`x86_64-w64-mingw32-addr2line`) on Windows, `atos -o circuitpython` on macOS, where the lines are
+in `circuitpython.dSYM` beside it.
 
 ## Controlling the program: --api
 
@@ -595,6 +604,14 @@ top) and `p[x, y]` as `0xRRGGBB`. `count_colors()` counts the pixels of each col
 lists the pixels that differ from another `Picture` of the same size, or from a function of
 `(x, y)` that gives the colour expected there, or `None` where any colour will do.
 `Picture.from_png()` reads a saved `display()`.
+
+`python3 tools/cpapi.py run PROGRAM CODE` runs a script once from the command line, with no
+Python of one's own: CODE (a `.py` file as `code.py`, or a directory as the drive) headless until
+`code.py` ends or `--wait TEXT` comes, its console printed without the terminal's escapes.
+`--colors` adds the display's pixels per colour, `--png PATH` saves it, `--runs N` runs `code.py`
+N times in one process (Ctrl-D between), and `--board-file`, `--board`, `--display`,
+`--fast-time` and `--timeout` are as above. The exit status is 0, 1 when it did not end in time,
+or 2 after a hard fault, whose backtrace comes last.
 
 `tests/test_api.py` and the button and encoder cases of `tests/test_panel.py` use it.
 

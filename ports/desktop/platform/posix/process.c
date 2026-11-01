@@ -8,6 +8,7 @@
 // termination signals on a thread of their own, the stack limit. /proc/self/exe is Linux's,
 // _NSGetExecutablePath macOS's.
 
+#include <dlfcn.h>
 #include <execinfo.h>
 #include <limits.h>
 #include <pthread.h>
@@ -19,6 +20,8 @@
 #include <unistd.h>
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
+#else
+#include <link.h>
 #endif
 
 #include "desktop_port.h"
@@ -35,11 +38,57 @@ void platform_set_env(const char *name, const char *value) {
 
 static void (*_restart)(void);
 
+#ifdef __APPLE__
+#define SYMBOLIZER "atos -o circuitpython"
+#else
+#define SYMBOLIZER "addr2line -f -e circuitpython"
+#endif
+
+// An address in the program as the symbolizer takes it; 0 for one outside it (libc).
+static uintptr_t _linked(void *address) {
+    Dl_info here, there;
+    if (dladdr((void *)platform_catch_faults, &here) == 0 || dladdr(address, &there) == 0
+        || there.dli_fbase != here.dli_fbase) {
+        return 0;
+    }
+    #ifdef __APPLE__
+    return (uintptr_t)address - (uintptr_t)_dyld_get_image_vmaddr_slide(0);
+    #else
+    // A position-independent program's addresses are offsets from where it was loaded.
+    const ElfW(Ehdr) * elf = here.dli_fbase;
+    return elf->e_type == ET_DYN ? (uintptr_t)address - (uintptr_t)here.dli_fbase : (uintptr_t)address;
+    #endif
+}
+
+// Written without printf, which here is MicroPython's and knows no 64-bit formats.
+static void _put(const char *s) {
+    write(STDERR_FILENO, s, strlen(s));
+}
+
+static void _put_number(uintptr_t v, unsigned base) {
+    char digits[24];
+    char *p = digits + sizeof(digits);
+    *--p = '\0';
+    do {
+        *--p = "0123456789abcdef"[v % base];
+        v /= base;
+    } while (v != 0);
+    _put(p);
+}
+
 static void _on_fault(int sig) {
-    static const char msg[] = "\r\ncircuitpython: hard fault, backtrace:\r\n";
-    write(STDERR_FILENO, msg, sizeof(msg) - 1);
+    _put("\r\ncircuitpython: hard fault, signal ");
+    _put_number((uintptr_t)sig, 10);
+    _put("; backtrace for " SYMBOLIZER ":\r\n");
     void *frames[32];
-    backtrace_symbols_fd(frames, backtrace(frames, 32), STDERR_FILENO);
+    int count = backtrace(frames, 32);
+    // Frame 0 is this handler.
+    for (int i = 1; i < count; i++) {
+        uintptr_t linked = _linked(frames[i]);
+        _put("  0x");
+        _put_number(linked != 0 ? linked : (uintptr_t)frames[i], 16);
+        _put(linked != 0 ? "\r\n" : " (outside the program)\r\n");
+    }
     _restart();
 }
 

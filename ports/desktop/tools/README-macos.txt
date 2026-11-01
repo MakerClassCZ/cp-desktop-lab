@@ -57,4 +57,5 @@ is needed.
 
 SDL2.framework must stay beside the program: it draws the window and plays the sound.
 
-A crash prints "hard fault, backtrace:": send those lines back with what you ran.
+A crash prints "hard fault, signal ...; backtrace for atos -o circuitpython:": send those lines
+back with what you ran.
