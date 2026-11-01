@@ -44,3 +44,6 @@ LED = "green"
 [analog]
 A0 = ""
 A1 = ""
+
+[board]
+ble = "off"  # no Bluetooth on this board

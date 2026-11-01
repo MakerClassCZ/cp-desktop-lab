@@ -23,6 +23,7 @@
 
 #include "py/runtime.h"
 
+#include "ble_host.h"
 #include "bus_trace.h"
 #include "control_api.h"
 #include "desktop_pins.h"
@@ -63,6 +64,8 @@ static void usage(const char *prog) {
         "  --neopixel N=L    the NeoPixels on pin N laid out as L: 10, 8x8, \"16x16 serpentine GRBW\"\n"
         "  --trace-bus PATH  write every I2C, SPI and UART transfer to PATH (- = stderr)\n"
         "  --uart PORT       busio.UART on board.TX/board.RX uses this serial port (COM5, /dev/ttyUSB0)\n"
+        "  --ble PORT        _bleio's Bluetooth controller on this serial port (a Pico 2 W bridge,\n"
+        "                    Zephyr's hci_uart); off for none; default the virtual one\n"
         "  --gpiochip PATH   --board gpiochip: the GPIO chip (default /dev/gpiochip0)\n"
         "  --i2c-bus N       --board gpiochip: /dev/i2c-N (default 1)\n"
         "  --spi PATH        --board gpiochip: the spidev device (default /dev/spidev0.0)\n"
@@ -90,7 +93,9 @@ static int optional_port(int argc, char **argv, int *i, int fallback) {
 
 // Real hardware (another board, a serial port, the computer's microphone) needs real time.
 static bool fast_time_allowed(void) {
-    if (desktop_pin_backend != &desktop_virtual_backend || desktop_options.uart_path != NULL) {
+    if (desktop_pin_backend != &desktop_virtual_backend || desktop_options.uart_path != NULL
+        || (desktop_options.ble != NULL && strcmp(desktop_options.ble, "off") != 0
+            && strcmp(desktop_options.ble, "virtual") != 0)) {
         return false;
     }
     for (int i = 0; i < parts_count(); i++) {
@@ -136,6 +141,8 @@ int main(int argc, char **argv) {
             desktop_options.trace_bus = argv[++i];
         } else if (strcmp(argv[i], "--uart") == 0 && i + 1 < argc) {
             desktop_options.uart_path = argv[++i];
+        } else if (strcmp(argv[i], "--ble") == 0 && i + 1 < argc) {
+            desktop_options.ble = argv[++i];
         } else if (strcmp(argv[i], "--board-file") == 0 && i + 1 < argc) {
             if (desktop_options.board_file_count == 8) {
                 fprintf(stderr, "circuitpython: more than 8 board files\n");
@@ -178,7 +185,7 @@ int main(int argc, char **argv) {
         return 2;
     }
     if (desktop_options.fast_time && !fast_time_allowed()) {
-        fprintf(stderr, "circuitpython: --fast-time runs only on the virtual board without --uart or a microphone: real hardware needs real time\n");
+        fprintf(stderr, "circuitpython: --fast-time runs only on the virtual board without --uart, --ble PORT or a microphone: real hardware needs real time\n");
         return 2;
     }
 
@@ -198,6 +205,10 @@ int main(int argc, char **argv) {
 
     // Opened before the drive's directory becomes the working directory.
     if (desktop_options.trace_bus != NULL && !bus_trace_open(desktop_options.trace_bus)) {
+        return 2;
+    }
+
+    if (!ble_host_init()) {
         return 2;
     }
 

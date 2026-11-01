@@ -7,6 +7,7 @@
 #include "supervisor/board.h"
 #include "common-hal/sdl/Framebuffer.h"
 
+#include "ble_host.h"
 #include "desktop_pins.h"
 #include "desktop_port.h"
 
@@ -16,4 +17,5 @@ void board_init(void) {
     }
     // A 320x240 picture, or the board file's, in a window twice its size.
     sdl_framebuffer_autoconstruct(desktop_display_width, desktop_display_height, 2, false);
+    ble_host_attach_adapter();
 }

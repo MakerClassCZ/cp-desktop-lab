@@ -48,5 +48,6 @@ A1 = ""
 ACCEL = "lis3dh 0x19"
 
 [board]
+ble = "off"  # no Bluetooth on this board
 display = "296x128"
 machine = "Adafruit MagTag with ESP32S2"    # adafruit_pybadger and the MagTag library pick by it

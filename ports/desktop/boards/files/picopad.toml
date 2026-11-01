@@ -13,3 +13,6 @@
 [gamepad]
 # A = "Space, Z"
 # UP = "W, Up"
+
+[board]
+ble = "off"  # no Bluetooth on this board

@@ -223,6 +223,22 @@ without `--uart`, and not on an MCP2221, the class raises `RuntimeError`.
 The virtual board's `TX`, `RX`, `SCL`, `SDA`, `SCK`, `MOSI` and `MISO` are plain pins too
 (`digitalio`, `touchio` and the like take them), as on a microcontroller, while no bus holds them.
 
+## Bluetooth LE
+
+`_bleio` is the HCI host stack the AirLift boards use (`devices/ble_hci`), and `_bleio.adapter` is
+there when `code.py` starts, as on a CLUE, so `BLERadio()` code runs unchanged; it is enabled on
+first use and stays across reloads. Its controller:
+
+| option | `_bleio.adapter` is |
+|---|---|
+| (none) | the virtual controller inside the lab |
+| `--ble PORT` (`COM48`, `/dev/ttyACM0`) | a real controller on that serial port (H4 over USB CDC) |
+| `--ble off` | `None`, as on a board without Bluetooth |
+
+A board file of a board without Bluetooth says `[board] ble = "off"`; `--ble` wins over it.
+AirLift code that builds its own `_bleio.Adapter(uart=...)` over `--uart` runs with `--ble off`
+(there is one adapter). `--fast-time` refuses `--ble PORT`: a real controller keeps real time.
+
 ## The board panel: NeoPixels, buttons, sliders and other boards' pin names
 
 On the virtual board the program's parts appear in a window, "CircuitPython board": NeoPixels

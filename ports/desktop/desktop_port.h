@@ -21,6 +21,7 @@ typedef struct {
     const char *board_name;     // --board: "virtual" (default), "ft232h", "mcp2221" or "gpiochip"
     const char *trace_bus;      // --trace-bus: the file busio transfers are written to, or NULL
     const char *uart_path;      // --uart: the host serial port behind board.TX and board.RX, or NULL
+    const char *ble;            // --ble: a serial port with a Bluetooth controller, "off", or NULL (virtual)
     const char *gpiochip;       // --gpiochip: the GPIO chip of --board gpiochip
     int i2c_bus;                // --i2c-bus: its /dev/i2c-N
     const char *spidev;         // --spi: its spidev device

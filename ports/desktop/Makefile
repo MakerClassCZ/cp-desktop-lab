@@ -60,6 +60,7 @@ SRC_C += \
 	hardware/usb_host.c \
 	host/api_json.c \
 	host/api_ring.c \
+	host/ble_host.c \
 	host/bus_trace.c \
 	host/control_api.c \
 	host/debug_hook.c \
@@ -67,6 +68,7 @@ SRC_C += \
 	host/host_net.c \
 	host/panel.c \
 	host/png_write.c \
+	virtual/ble_controller.c \
 	virtual/board_parts.c \
 	virtual/display_auto.c \
 	virtual/i2c_virtual.c \
@@ -157,6 +159,10 @@ CFLAGS := $(filter-out -fsingle-precision-constant --param max-inline-insns-sing
 # Older clang (Xcode 15 and older) does not know every one of these, so unknown ones are let pass.
 CFLAGS += -Wno-unknown-warning-option -Wno-expansion-to-defined -Wno-unreachable-code -Wno-double-promotion -Wno-literal-conversion \
 	-Wno-c23-extensions -Wno-unused-variable -Wno-unused-but-set-variable
+endif
+ifneq ($(MACOS),1)
+# devices/ble_hci's headers use __packed, which newlib and macOS define and glibc and MinGW do not.
+CFLAGS += '-D__packed=__attribute__((packed))'
 endif
 ifeq ($(WINDOWS),1)
 CFLAGS += -D_WIN32_WINNT=0x0A00

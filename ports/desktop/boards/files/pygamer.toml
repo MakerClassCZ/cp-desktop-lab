@@ -40,5 +40,6 @@ BUTTON_OUT = "clock=BUTTON_CLOCK latch=BUTTON_LATCH keys=B,A,START,SELECT"
 ACCEL = "lis3dh 0x19"
 
 [board]
+ble = "off"  # no Bluetooth on this board
 display = "160x128"
 machine = "Adafruit PyGamer with samd51j19"    # adafruit_pybadger picks the PyGamer by it

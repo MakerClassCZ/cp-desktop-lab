@@ -80,5 +80,6 @@ ACCEL = "lis3dh 0x19"
 CRICKIT = "crickit"      # 0x49: a Crickit under the Circuit Playground (adafruit_crickit)
 
 [board]
+ble = "off"  # no Bluetooth on this board
 platform = "Atmel SAMD21"   # adafruit_circuitplayground picks the Express by it
 machine = "Adafruit CircuitPlayground Express with samd21g18"

@@ -41,4 +41,5 @@ LED = "red"
 ACCEL = "lis3dh 0x19"
 
 [board]
+ble = "off"  # no Bluetooth on this board
 machine = "Adafruit Matrix Portal M4 with samd51j19"    # adafruit_matrixportal builds the matrix by it

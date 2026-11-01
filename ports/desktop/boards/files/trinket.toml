@@ -31,3 +31,6 @@ LED = "red"
 A0 = ""
 A1 = ""
 A2 = ""
+
+[board]
+ble = "off"  # no Bluetooth on this board

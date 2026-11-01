@@ -21,11 +21,14 @@ CIRCUITPY_USB_DEVICE = 0
 # The ADC and DAC of the MCP2221 (common-hal/analogio); the other boards refuse to construct.
 CIRCUITPY_ANALOGIO = 1
 
+# _bleio over the shared HCI host stack (devices/ble_hci): the virtual controller, or a real one
+# on a serial port (--ble PORT).
+CIRCUITPY_BLEIO_HCI = 1
+
 # A desktop has no reset button to hold for safe mode.
 CIRCUITPY_SKIP_SAFE_MODE_WAIT = 1
 
 # No hardware behind these on a desktop or a handheld.
-CIRCUITPY_BLEIO_HCI = 0
 CIRCUITPY_COUNTIO = 0
 CIRCUITPY_FREQUENCYIO = 0
 CIRCUITPY_I2CTARGET = 0
