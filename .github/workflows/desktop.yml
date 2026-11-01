@@ -6,6 +6,8 @@ on:
   push:
     branches: [desktop]
     tags: ['desktop-v*']
+  pull_request:
+    branches: [desktop]
   workflow_dispatch:
 
 permissions:
