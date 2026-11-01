@@ -322,12 +322,15 @@ static bool _load(const char *path) {
         } else if (section == BOARD) {
             // platform: sys.platform as the real board names it.
             // machine: os.uname().machine as the real board names it.
+            // display: the size of the real board's display.
             if (strcmp(key, "platform") == 0) {
                 ok = desktop_set_platform(value);
             } else if (strcmp(key, "machine") == 0) {
                 ok = desktop_set_machine(value);
+            } else if (strcmp(key, "display") == 0) {
+                ok = desktop_set_display(value);
             } else {
-                fprintf(stderr, "circuitpython: %s: unknown [board] setting %s (platform or machine)\n", where, key);
+                fprintf(stderr, "circuitpython: %s: unknown [board] setting %s (platform, machine or display)\n", where, key);
                 ok = false;
             }
         } else if (section == SPI) {

@@ -70,5 +70,6 @@ HUMID = "sht31d"        # 0x44
 PRESS = "bmp280"        # 0x77
 
 [board]
+display = "240x240"
 machine = "Adafruit CLUE nRF52840 Express with nRF52840"
 platform = "nRF52840"

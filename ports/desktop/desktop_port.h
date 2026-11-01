@@ -42,6 +42,11 @@ bool desktop_board_select(const char *name);
 bool desktop_set_platform(const char *name);
 // os.uname().machine as a real board names it (a board file's [board] machine).
 bool desktop_set_machine(const char *name);
+// The display's size as the real board has it (a board file's [board] display, "240x240");
+// settings.toml's CIRCUITPY_DISPLAY_WIDTH and _HEIGHT still win.
+bool desktop_set_display(const char *size);
+extern int desktop_display_width;
+extern int desktop_display_height;
 const char *desktop_board_names(void);
 // --board-file and --neopixel on the chosen board (board_file.c); false: the cause is printed.
 bool board_file_apply(void);

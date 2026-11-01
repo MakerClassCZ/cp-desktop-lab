@@ -5,6 +5,7 @@ the command line. What the program writes is checked in the bus trace, which nee
 """
 
 import os
+import re
 from harness import T, board_file, check, launch, refused, run
 
 FEATHER = """# a few names of a Feather
@@ -110,6 +111,15 @@ check(
     out,
 )
 
+# [board] display: the picture the real board's display has
+out, trace = run(
+    'import board\nprint("size", board.DISPLAY.width, board.DISPLAY.height)\n',
+    "",
+    "size",
+    '[board]\ndisplay = "240x240"\n',
+)
+check("[board] display sets the display's size", "size 240 240" in out, out)
+
 # A bad board file stops the start, whatever its section
 for bad, why in (
     ('[pins]\nX = "NOPE"\n', "no pin NOPE"),
@@ -117,6 +127,7 @@ for bad, why in (
     ("[colors]\n", "unknown section"),
     ('[neopixel]\nSW_A = "0x3"\n', "bad NeoPixel layout"),
     ('[board]\ncolour = "red"\n', "unknown [board] setting colour"),
+    ('[board]\ndisplay = "240"\n', "[board] display 240: expected WIDTHxHEIGHT"),
     ('[button]\nD99 = ""\n', "no pin D99"),
     ('[led]\nSW_A = "plaid"\n', "bad colour"),
     ('[ir]\nSW_A = "1,2,3"\n', "bad IR code"),
@@ -159,8 +170,18 @@ else:
             if names
             else 'print("loaded", True, True)\n'
         )
+        # A file with a display size has the display that size.
+        size = re.search(r'^display = "(\d+)x(\d+)"', open(os.path.join(files, name)).read(), re.M)
+        if size:
+            src = 'import board\nprint("size", board.DISPLAY.width, board.DISPLAY.height)\n' + src
         out, trace = run(src, "", "loaded", args=["--board-file", os.path.join(files, name)])
         check("board file " + name, "loaded True True" in out, out)
+        if size:
+            check(
+                "board file %s: a %sx%s display" % (name, size[1], size[2]),
+                "size %s %s" % (size[1], size[2]) in out,
+                out,
+            )
 # Several board files, read in order: a later one uses an earlier one's names, and its part wins
 first = '[pins]\nMYBTN = "GPIO5"\n[led]\nGPIO6 = "red"\n'
 second = board_file('[led]\nGPIO6 = "green"\n[pins]\nALIAS = "MYBTN"\n', name="second.toml")

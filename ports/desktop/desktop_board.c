@@ -76,6 +76,22 @@ bool desktop_set_machine(const char *name) {
     return _set(&desktop_os_machine, name);
 }
 
+int desktop_display_width = 320;
+int desktop_display_height = 240;
+
+bool desktop_set_display(const char *size) {
+    int width, height;
+    char end;
+    if (sscanf(size, "%dx%d%c", &width, &height, &end) != 2
+        || width < 16 || height < 16 || width > 4096 || height > 4096) {
+        fprintf(stderr, "circuitpython: [board] display %s: expected WIDTHxHEIGHT, 16 to 4096 each\n", size);
+        return false;
+    }
+    desktop_display_width = width;
+    desktop_display_height = height;
+    return true;
+}
+
 static const char *_board_id = "virtual";
 
 // The banner and the web workflow name the board --board chose.

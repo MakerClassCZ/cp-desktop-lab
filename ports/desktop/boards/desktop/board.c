@@ -14,6 +14,6 @@ void board_init(void) {
     if (desktop_pin_backend->accepts_drive) {
         desktop_buttons_release_all();
     }
-    // A 320x240 picture in a window twice its size.
-    sdl_framebuffer_autoconstruct(320, 240, 2, false);
+    // A 320x240 picture, or the board file's, in a window twice its size.
+    sdl_framebuffer_autoconstruct(desktop_display_width, desktop_display_height, 2, false);
 }

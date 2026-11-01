@@ -279,7 +279,9 @@ I2C bus), a PyBadge and a PyGamer (their buttons the gamepad's, through a shift 
 MatrixPortal (its HUB75 matrix on the panel) and the PicoPad's gamepad. A board file's `[board]` section names the real board where libraries
 ask: `platform = "Atmel SAMD21"` is `sys.platform` (adafruit_circuitplayground picks by it),
 `machine = "Adafruit Pybadge with samd51j19"` is `os.uname().machine` (adafruit_pybadger,
-the MagTag and PyPortal libraries pick by it).
+the MagTag and PyPortal libraries pick by it), and `display = "240x240"` is the size of the
+board's display, so `board.DISPLAY` has the CLUE's 240x240, the PyBadge's 160x128 or the
+MagTag's 296x128 (`CIRCUITPY_DISPLAY_WIDTH` and `_HEIGHT` in `settings.toml` still win).
 
 Every change goes to `--trace-bus`, the user's and the program's: `NEOPIXEL GPIO14 3: ff0000
 00ff00 0000ff`, `BUTTON D9 pressed`, `GAMEPAD A pressed`, `PANEL A0 = 40000 (2.014 V)`, `PWM D5 duty 32768 (50.0%)
