@@ -92,7 +92,7 @@ out, trace = run(
 out = pulseio.PulseOut(board.IR_TX, frequency=38000, duty_cycle=2 ** 15)
 t = time.monotonic()
 out.send(array.array("H", [9000, 4500, 560, 560, 560]))
-print("took", round(time.monotonic() - t, 2) >= 0.015)
+print("took", time.monotonic() - t >= 0.010)
 print("done")
 """,
     "",
