@@ -361,18 +361,13 @@ class Server:
         return tail(out) if out else "(no output)"
 
     def _stream(self, which, wait, timeout):
-        b = self._need()
-        attr = "offset" if which == "console" else "trace_offset"
-        read = b.console if which == "console" else b.trace
-        r = self._api(read, wait=wait or None, timeout=clamp_wait(timeout, 10 if wait else 0))
-        data = r["data"]
-        if wait and r["matched"]:
-            data = cpapi.upto_next(r)
-        setattr(b, attr, r["next"])
-        text = plain(data)
-        if r.get("lost"):
+        got, matched, lost = self._api(
+            self._need().follow, which, wait or None, clamp_wait(timeout, 10 if wait else 0)
+        )
+        text = plain(got)
+        if lost:
             text = "[earlier output is gone: only the last 64 KiB are kept]\n" + text
-        if wait and not r["matched"]:
+        if wait and not matched:
             text += "\n[%r did not appear]" % wait
         return tail(text) or "(nothing)"
 
@@ -496,7 +491,7 @@ class Server:
 
     def _skip_console(self):
         try:
-            self.board.offset = self.board.console(timeout=0)["end"]
+            self.board.skip()
         except (cpapi.ApiError, ConnectionError, OSError, http.client.HTTPException):
             pass
 

@@ -42,6 +42,7 @@ typedef int sock_t;
 #include "ble_host.h"
 #include "bus_trace.h"
 #include "desktop_port.h"
+#include "platform.h"
 #include "png_write.h"
 #if CIRCUITPY_SDL
 #include "panel.h"
@@ -147,19 +148,6 @@ static bool _running(void) {
 
 // Where a reset leaves the port for the process it starts (supervisor/port.c, reset_cpu()).
 #define RESTART_PORT_ENV "CIRCUITPY_API_RESTART_PORT"
-
-static void _set_env(const char *name, const char *value) {
-    #ifdef _WIN32
-    SetEnvironmentVariableA(name, value);
-    _putenv_s(name, value != NULL ? value : "");
-    #else
-    if (value != NULL) {
-        setenv(name, value, 1);
-    } else {
-        unsetenv(name);
-    }
-    #endif
-}
 
 static void _hex(char *out, const uint8_t *buf, size_t n) {
     for (size_t i = 0; i < n; i++) {
@@ -1288,7 +1276,7 @@ bool control_api_start(void) {
     // A process started by a reset takes the port the one before it had, also for --api 0.
     const char *again = getenv(RESTART_PORT_ENV);
     int port = again != NULL && again[0] != '\0' ? atoi(again) : desktop_options.api_port;
-    _set_env(RESTART_PORT_ENV, NULL);
+    platform_set_env(RESTART_PORT_ENV, NULL);
     struct sockaddr_in addr = { .sin_family = AF_INET, .sin_port = htons((uint16_t)port) };
     if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) {
         fprintf(stderr, "circuitpython: --api-host %s: not an IPv4 address\n", host);
@@ -1331,7 +1319,7 @@ void control_api_stop(void) {
         _listener = BAD_SOCKET;
         char port[16];
         snprintf(port, sizeof(port), "%d", _port);
-        _set_env(RESTART_PORT_ENV, port);
-        _set_env("CIRCUITPY_API_TOKEN", _token);
+        platform_set_env(RESTART_PORT_ENV, port);
+        platform_set_env("CIRCUITPY_API_TOKEN", _token);
     }
 }

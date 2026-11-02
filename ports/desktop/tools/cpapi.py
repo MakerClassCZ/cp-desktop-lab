@@ -372,22 +372,32 @@ class Board:
         self.boot = r["boot"]
         return r
 
+    def follow(self, stream="console", wait=None, timeout=0):
+        """The console's (or the trace's) text since the last read, moving past it: (text,
+        matched, lost). With wait, up to that text, waiting up to timeout for it; without, up to
+        timeout for anything. lost: some of it was gone from the program's buffer."""
+        attr = "offset" if stream == "console" else "trace_offset"
+        r = self._stream("/api/" + stream, attr, None, wait, timeout)
+        setattr(self, attr, r["next"])
+        return (upto_next(r) if r["matched"] else r["data"]), r["matched"], r["lost"]
+
+    def skip(self):
+        """What the console holds now is not to be read: the next read starts after it."""
+        self.offset = self.console(timeout=0)["end"]
+
     def wait(self, text, timeout=10):
         """Waits for text on the console after the last read; returns the output up to the match
         and moves past it. TimeoutError, with what came, when it does not appear."""
-        r = self.console(wait=text, timeout=timeout)
-        if not r["matched"]:
+        got, matched, _ = self.follow(wait=text, timeout=timeout)
+        if not matched:
             raise TimeoutError(
-                "%r not seen in %s s; the console: %r" % (text, timeout, r["data"][-800:])
+                "%r not seen in %s s; the console: %r" % (text, timeout, got[-800:])
             )
-        self.offset = r["next"]
-        return upto_next(r)
+        return got
 
     def read(self, timeout=0):
         """What came since the last read (waiting up to timeout for something), moving past it."""
-        r = self.console(timeout=timeout)
-        self.offset = r["next"]
-        return r["data"]
+        return self.follow(timeout=timeout)[0]
 
     # ---- the bus trace ----
 
@@ -397,13 +407,10 @@ class Board:
 
     def trace_wait(self, text, timeout=10):
         """Waits for text in the trace after the last read; returns the lines up to it."""
-        r = self.trace(wait=text, timeout=timeout)
-        if not r["matched"]:
-            raise TimeoutError(
-                "%r not in the trace in %s s: %r" % (text, timeout, r["data"][-800:])
-            )
-        self.trace_offset = r["next"]
-        return upto_next(r)
+        got, matched, _ = self.follow("trace", wait=text, timeout=timeout)
+        if not matched:
+            raise TimeoutError("%r not in the trace in %s s: %r" % (text, timeout, got[-800:]))
+        return got
 
     def write(self, data):
         """Console input, as typed."""

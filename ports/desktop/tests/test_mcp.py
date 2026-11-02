@@ -452,34 +452,13 @@ p.stdin.close()
 p.wait(timeout=15)
 shutil.rmtree(package, ignore_errors=True)
 
-# The output up to a match, cut by byte offsets when the ring held a byte that is not UTF-8
-sys.path.insert(0, os.path.dirname(os.path.abspath(SERVER)))
-import cp_mcp
+# The output up to a match, cut by byte offsets when the ring held a byte that is not UTF-8:
+# the ring holds b"\xffab\nHello rest", "Hello" matched, its end at byte 9.
+import cpapi
 
-
-class Ring:
-    """Stands for the program's answer: the ring holds b"\\xffab\\nHello rest", "Hello" matched."""
-
-    process = None
-    offset = trace_offset = 0
-
-    def console(self, wait=None, timeout=0):
-        return {
-            "start": 0,
-            "end": 14,
-            "next": 9,
-            "matched": True,
-            "lost": False,
-            "boot": 1,
-            "data": "�ab\nHello rest",
-        }
-
-
-s = cp_mcp.Server("none")
-s.board = Ring()
-out = s.t_console(wait="Hello")
+ring = {"end": 14, "next": 9, "matched": True, "data": "\ufffdab\nHello rest"}
 check(
     "the text up to a match is whole after an invalid byte",
-    out.endswith("Hello") and s.board.offset == 9,
-    repr(out),
+    cpapi.upto_next(ring) == "\ufffdab\nHello",
+    repr(cpapi.upto_next(ring)),
 )
