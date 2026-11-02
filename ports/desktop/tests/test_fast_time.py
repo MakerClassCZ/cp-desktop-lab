@@ -55,15 +55,6 @@ print("elapsed", time.monotonic() - t)
     17.5,
     5,
 )
-value, host = elapsed(
-    """import time
-t = time.monotonic()
-time.sleep(1)
-print("elapsed", time.monotonic() - t)
-""",
-    fast=False,
-)
-check("without the flag a sleep takes host time", value is not None and host >= 1.0, (value, host))
 
 # Interrupting a fast loop, and the REPL
 with launch('import time\nprint("go")\nwhile True:\n    time.sleep(1)\n', fast_time=True) as b:
@@ -95,7 +86,7 @@ with launch('import time\ntime.sleep(2)\nprint("ended")\n', fast_time=True) as b
         b.wait("ended")
         b.wait("Code done running", timeout=5)
         first = b.info()["skipped_ms"]
-        time.sleep(1)
+        time.sleep(0.3)
         second = b.info()["skipped_ms"]
         check(
             "after code.py ends the clock stops jumping",

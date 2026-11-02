@@ -221,7 +221,7 @@ try:
     # Stop in the editor: the program reloads and waits for the editor again.
     check(
         "after the end the program is not waiting (code.py finished)",
-        not p.wait_for("waiting for the editor", 3, 2),
+        not p.wait_for("waiting for the editor", 1, 2),
     )
     check("program output result 15", p.wait_for("result 15", 10), text()[-200:])
     check(

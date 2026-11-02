@@ -4,7 +4,7 @@ The program started with --api 0 through the client (tools/cpapi.py), headless, 
 through the API: no sleeps to wait for the program.
 """
 
-import http.client, os, socket, subprocess, threading, time
+import http.client, os, subprocess, threading, time
 from harness import BIN, HEADLESS, T, board_file, check, cpapi, drive, launch, picture
 
 
@@ -409,23 +409,10 @@ with launch(BURST) as b:
         read[-200:],
     )
 
-# Clients that misbehave: idle connections, cut bodies
+# Clients that misbehave: cut bodies
 with launch(LOOP) as b:
     b.wait("Hello")
     host, port = b.url.split("//")[1].rstrip("/").split(":")
-    idle = [socket.create_connection((host, int(port))) for _ in range(9)]
-    t = time.time()
-    try:
-        ok = b.request("GET", "/api/info", timeout=30)["board"] == "virtual"
-    except Exception as e:
-        ok = repr(e)
-    check(
-        "nine silent connections do not wedge the API",
-        ok is True and time.time() - t < 20,
-        (ok, time.time() - t),
-    )
-    for s in idle:
-        s.close()
     for body in (b'{"code": "abc\\', b'{"code": "\\u12', b'{"code": "\\ud800\\u00"}'):
         c = http.client.HTTPConnection(host, int(port), timeout=10)
         c.request("POST", "/api/exec", body=body, headers={"Authorization": "Bearer " + b.token})

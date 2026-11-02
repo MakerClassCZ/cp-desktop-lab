@@ -21,8 +21,8 @@ Each script takes the program and works in its own directory, so run them from a
 - `test_image.py`: the FAT image drive (`DEMO_IMAGE=path.img` also boots an existing image).
 - `test_erase.py`: `storage.erase_filesystem()` leaves a directory alone.
 - `test_ble.py`: Bluetooth LE: `_bleio`'s adapter, `--ble`, the virtual controller and the phone
-  of the control API and cpapi; `CIRCUITPY_BLE_VIRTUAL_FAULT` (`no-completed`, `silent`,
-  `no-public-address`) makes the virtual controller misbehave as real ones do; `CIRCUITPY_LIB`
+  of the control API and cpapi; `CIRCUITPY_BLE_VIRTUAL_FAULT=no-public-address` gives the virtual
+  controller no public address, as Zephyr's on an nRF; `CIRCUITPY_LIB`
   (or `frozen/Adafruit_CircuitPython_BLE` fetched) gives it `adafruit_ble`.
 - `test_closed_file.py`: a closed file on a directory drive fails as on FAT, and a refresh survives it.
 - `test_dap.py`: the debugger over the Debug Adapter Protocol, like an editor: breakpoints,

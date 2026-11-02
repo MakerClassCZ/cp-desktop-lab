@@ -97,8 +97,8 @@ check(
     "b0 4a 64" in out and "MIDI IN b0 4a 64" in trace,
     (out, trace),
 )
-out, _ = run(READER % 9, "wait ready\nset CUTOFF 64\nsleep 1000", "midi ", CCS, timeout=2)
-check("the same value sends nothing new", "midi " not in out, out)
+out, _ = run(READER % 9, "wait ready\nset CUTOFF 64\nset CUTOFF 65", "midi ", CCS)
+check("the same value sends nothing new", "midi b0 4a 40 b0 47 00 b0 4a 41" in out, out)
 out, _ = run(READER % 3, "wait ready", "midi ", '[midi]\nMOD = "cc 1 127 channel=3"\n')
 check("a starting value and a channel", "midi b2 01 7f" in out, out)
 with launch(READER % 100, CCS) as b:

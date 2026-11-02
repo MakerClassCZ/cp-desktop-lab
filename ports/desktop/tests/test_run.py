@@ -58,7 +58,7 @@ check(
     (p.returncode, p.stderr[-200:]),
 )
 
-rc, out = run('print("never")\nwhile True:\n    pass\n', "--wait", "nope", "--timeout", "2")
+rc, out = run('print("never")\nwhile True:\n    pass\n', "--wait", "nope", "--timeout", "1")
 check("--wait for text that never comes: status 1", rc == 1 and "never" in out, (rc, out[-300:]))
 
 rc, out = run('print("each run")\n', "--runs", "3")

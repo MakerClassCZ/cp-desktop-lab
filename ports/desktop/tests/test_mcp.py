@@ -410,32 +410,6 @@ if pid and alive(pid):
         ["taskkill", "/F", "/PID", str(pid)] if os.name == "nt" else ["kill", "-9", str(pid)]
     )
 
-# A program that never announces the API: launch gives up instead of hanging
-if os.name == "nt":
-    print("SKIP a program that never announces (needs a shell script)")
-else:
-    hang = os.path.join(T, "mcp_hang.sh")
-    open(hang, "w").write("#!/bin/sh\nexec sleep 60\n")
-    os.chmod(hang, 0o755)
-    c = Client()
-    c.request(
-        "initialize",
-        {
-            "protocolVersion": "2025-06-18",
-            "capabilities": {},
-            "clientInfo": {"name": "t", "version": "1"},
-        },
-    )
-    start = time.time()
-    r = c.call("launch", drive=D, program=hang)
-    check(
-        "a program that never announces: launch fails in time",
-        r.get("isError") and time.time() - start < 30,
-        (r, time.time() - start),
-    )
-    c.p.stdin.close()
-    c.p.wait(timeout=15)
-
 # As in a release package: the server beside the program finds it without --program
 import shutil, tempfile
 

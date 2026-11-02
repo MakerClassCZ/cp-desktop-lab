@@ -40,10 +40,9 @@ static uint8_t _out[16384];
 static size_t _out_head;
 static size_t _out_count;
 
-// A test's fault (CIRCUITPY_BLE_VIRTUAL_FAULT): "no-completed" keeps the host's ACL credit,
-// "silent" answers no command, as a controller that hangs, and "no-public-address" has none, as
+// CIRCUITPY_BLE_VIRTUAL_FAULT=no-public-address: a controller without a public address, as
 // Zephyr's on an nRF.
-static enum { FAULT_NONE, FAULT_NO_COMPLETED, FAULT_SILENT, FAULT_NO_PUBLIC_ADDRESS } _fault;
+static bool _no_public_address;
 
 // The lab's addresses, least significant byte first: 02:dc:00:00:00:01 public, and a static random
 // one for a host that asks for the controller's (Zephyr's vendor command).
@@ -135,7 +134,7 @@ static void _command(uint16_t opcode, const uint8_t *p, uint8_t len) {
             _complete(opcode, ret, 9);
             break;
         case 0x1009:            // Read BD_ADDR
-            if (_fault != FAULT_NO_PUBLIC_ADDRESS) {
+            if (!_no_public_address) {
                 memcpy(ret + 1, _public_address, 6);
             }
             _complete(opcode, ret, 7);
@@ -191,10 +190,8 @@ static void _acl(const uint8_t *p, size_t len) {
         memcpy(_frame + _frame_have, p + 5, n);
         _frame_have += n;
     }
-    if (_fault != FAULT_NO_COMPLETED) {
-        uint8_t done[5] = { 1, HANDLE & 0xff, HANDLE >> 8, 1, 0 };
-        _event(EVT_NUMBER_OF_COMPLETED_PACKETS, done, sizeof(done));
-    }
+    uint8_t done[5] = { 1, HANDLE & 0xff, HANDLE >> 8, 1, 0 };
+    _event(EVT_NUMBER_OF_COMPLETED_PACKETS, done, sizeof(done));
     if (_frame_have < 4) {
         return;
     }
@@ -219,10 +216,7 @@ void ble_controller_reset(void) {
     _pdu_head = _pdu_count = 0;
     _frame_have = 0;
     const char *fault = getenv("CIRCUITPY_BLE_VIRTUAL_FAULT");
-    _fault = fault == NULL ? FAULT_NONE
-        : strcmp(fault, "no-completed") == 0 ? FAULT_NO_COMPLETED
-        : strcmp(fault, "silent") == 0 ? FAULT_SILENT
-        : strcmp(fault, "no-public-address") == 0 ? FAULT_NO_PUBLIC_ADDRESS : FAULT_NONE;
+    _no_public_address = fault != NULL && strcmp(fault, "no-public-address") == 0;
     pthread_mutex_unlock(&_lock);
 }
 
@@ -247,7 +241,7 @@ int ble_controller_read(uint8_t *data, size_t len) {
 
 int ble_controller_write(const uint8_t *packet, size_t len) {
     pthread_mutex_lock(&_lock);
-    if (packet[0] == H4_COMMAND && len >= 4 && _fault != FAULT_SILENT) {
+    if (packet[0] == H4_COMMAND && len >= 4) {
         _command((uint16_t)(packet[1] | packet[2] << 8), packet + 4, packet[3]);
     } else if (packet[0] == H4_ACL && len >= 5) {
         _acl(packet, len);

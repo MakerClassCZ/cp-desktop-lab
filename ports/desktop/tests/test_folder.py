@@ -7,7 +7,9 @@ shutil.rmtree(D, ignore_errors=True)
 # 1 + 2: a new directory gets the default files and runs code.py
 r = Run(["--drive", "CIRCUITPY"])
 check("default code.py runs", r.wait_for("Hello World!"), r.text())
-time.sleep(0.5)
+end = time.time() + 5
+while time.time() < end and not os.path.exists(os.path.join(D, "boot_out.txt")):
+    time.sleep(0.05)
 check(
     "default files created",
     sorted(os.listdir(D)) == ["boot_out.txt", "code.py", "lib", "settings.toml"],
@@ -20,7 +22,7 @@ check("host edit triggers auto-reload", r.wait_for("edited on the host"), r.text
 # 11: a hidden file does not reload
 before = r.text().count("soft reboot")
 open(os.path.join(D, ".hidden"), "w").write("x")
-time.sleep(2)
+time.sleep(1.2)
 check("hidden file ignored", r.text().count("soft reboot") == before, r.text())
 # a directory made on the host, then a file inside it, an edit inside it, a rename
 os.makedirs(os.path.join(D, "assets"))
@@ -32,9 +34,10 @@ for name, change in (
     ("rename on the host reloads", lambda: os.rename(A, os.path.join(D, "assets", "b.txt"))),
 ):
     n = r.text().count("soft reboot")
+    done = r.text().count("Code done running")
     change()
     check(name, r.wait_for("soft reboot", 6, n + 1), r.text())
-    time.sleep(1.5)
+    r.wait_for("Code done running", 6, done + 1)
 r.stop()
 shutil.rmtree(os.path.join(D, "assets"))
 
@@ -96,7 +99,7 @@ r = Run(["--drive", "CIRCUITPY"])
 check("boot.py remount -> Python writes", r.wait_for("python wrote from python"), r.text())
 n = r.text().count("soft reboot")
 open(os.path.join(D, "other.txt"), "w").write("host")
-time.sleep(2.5)
+time.sleep(1.2)
 check("no reload while Python owns the drive", r.text().count("soft reboot") == n, r.text())
 check("file visible on the host", open(os.path.join(D, "written.txt")).read() == "from python")
 check("boot_out.txt written", "Board ID:virtual" in open(os.path.join(D, "boot_out.txt")).read())

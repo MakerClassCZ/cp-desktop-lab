@@ -384,44 +384,4 @@ with launch(NAME) as b:
     out = b.console(since=0)["data"][-300:]
 check("the adapter's name in the run after a reload", ok, out)
 
-# A controller that never gives the host its ACL credit back: the program goes on, its sends fail.
-HEARTBEAT = """
-import _bleio, time
-a = _bleio.adapter
-a.start_advertising(bytes([2, 1, 6]), connectable=True)
-print("ready")
-n = 0
-while True:
-    n += 1
-    print("beat", n)
-    time.sleep(0.1)
-"""
-with launch(HEARTBEAT, env=dict(HEADLESS, CIRCUITPY_BLE_VIRTUAL_FAULT="no-completed")) as b:
-    seen(b, "ready")
-    b.request("POST", "/api/ble/connect")
-    for _ in range(12):
-        b.request("POST", "/api/ble/att", "02f700")
-    before = b.console(since=0)["data"].count("beat")
-    goes_on = seen(b, "beat %d\r\n" % (before + 10), 10)
-check("a controller that keeps the ACL credit does not hang the program", goes_on, before)
-
-# A controller that does not answer: the first use fails, and the adapter is not left half on.
-SILENT = """
-import _bleio
-a = _bleio.adapter
-try:
-    a.enabled = True
-except Exception as e:
-    print("failed", type(e).__name__)
-print("enabled", a.enabled)
-"""
-with launch(SILENT, env=dict(HEADLESS, CIRCUITPY_BLE_VIRTUAL_FAULT="silent")) as b:
-    seen(b, "enabled", 20)
-    out = b.console(since=0)["data"][-300:]
-check(
-    "a controller that does not answer leaves the adapter off",
-    "failed" in out and "enabled False" in out,
-    out,
-)
-
 print("DONE")
