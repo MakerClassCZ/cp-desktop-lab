@@ -330,8 +330,9 @@ Every change goes to `--trace-bus`, the user's and the program's: `NEOPIXEL GPIO
 `pulseio.PulseOut`'s pulses in microseconds; `send()` takes as long as they last). Reads are not traced. The key script
 (`CIRCUITPY_SDL_KEYS`) takes `set NAME VALUE`, `press NAME` and `release NAME` (a part, or a
 gamepad button: `press START`) `turn NAME DETENTS` (an encoder, negative counter-clockwise), `send NAME [CODE]` (an IR receiver: its
-code, or `255,2,127,128`), `tap KEYS C4` (a MIDI keyboard's note) and `close` (the panel window, as its close button does), so a test moves
-the panel without a window. `pwmio`, `touchio` and `pulseio` exist on the virtual board only, `audiobusio` on every board (a record of
+code, or `255,2,127,128`), `tap KEYS C4` (a MIDI keyboard's note), `down KEY`/`up KEY` (a computer key, by its
+position on a US keyboard), `dump NAME PATH` and `close` (the panel window, as its close button does), so a test moves
+the panel without a window. These panel lines are the same in `POST /api/panel`. `pwmio`, `touchio` and `pulseio` exist on the virtual board only, `audiobusio` on every board (a record of
 the generator takes as long as its samples last, as on a board); `analogio`
 uses the MCP2221's ADC and DAC on `--board mcp2221`.
 
@@ -421,7 +422,7 @@ The TFT model takes the display commands every one of these controllers shares (
 memory write, display on and off) and learns where the module's glass sits in the controller's
 memory from the first refresh, so a driver's `rowstart`/`colstart` come out right; the SSD1306
 takes horizontal, vertical and page addressing. `adafruit_st7789`, `adafruit_ili9341`,
-`adafruit_displayio_ssd1306` and the like run unchanged. The key script's `dump NAME PATH` saves
+`adafruit_displayio_ssd1306` and the like run unchanged. The panel line `dump NAME PATH` saves
 what a display shows as a PPM. The virtual board keeps its window (`supervisor.runtime.display`) beside them; a program
 that calls `displayio.release_displays()` first releases it too, as on a board.
 `supervisor.runtime.display.brightness` dims the window.
@@ -711,9 +712,8 @@ boards, with `--uart` and with the computer's microphone (`[mic]` `"mic"`).
 ## Without a screen
 
 `SDL_VIDEODRIVER=dummy` runs without a display and `SDL_AUDIODRIVER=disk` writes the sound to a
-file. `CIRCUITPY_SDL_KEYS` names a file or FIFO of lines `down KEY`, `up KEY` and `sleep MS`
-(SDL key names such as `Z` or `Right`) that are played as key presses, so a test can drive a
-program headless.
+file. `CIRCUITPY_SDL_KEYS` names a file or FIFO of panel lines (above; `down Z`, `up Right`) and
+`sleep MS` between them, played from the program's start, so a test can drive a program headless.
 
 ## Not yet
 

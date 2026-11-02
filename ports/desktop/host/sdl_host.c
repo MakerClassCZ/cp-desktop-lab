@@ -92,8 +92,8 @@ static void _save_screenshot(void) {
     SDL_FreeSurface(surface);
 }
 
-// CIRCUITPY_SDL_KEYS names a file or FIFO of lines "down KEY", "up KEY" (SDL key names such as
-// Z or Right) and "sleep MS"; they arrive as key events, so a test can play a program headless.
+// CIRCUITPY_SDL_KEYS names a file or FIFO of the panel's lines (panel.h: "down Z", "set A0 100"
+// ...) and "sleep MS", so a test can play a program headless.
 static void *_key_script(void *arg) {
     FILE *f = fopen((const char *)arg, "r");
     if (f == NULL) {
@@ -102,23 +102,12 @@ static void *_key_script(void *arg) {
     }
     char line[600];             // a dump names a file, its path long on Windows
     while (fgets(line, sizeof(line), f) != NULL) {
-        char verb[8], name[32];
-        if (sscanf(line, "%7s %31[^\r\n]", verb, name) != 2 || panel_command(line)) {
-            continue;
-        }
-        if (strcmp(verb, "sleep") == 0) {
-            int ms = atoi(name);
+        int ms;
+        if (sscanf(line, "sleep %d", &ms) == 1) {
             struct timespec t = { ms / 1000, (ms % 1000) * 1000000L };
             nanosleep(&t, NULL);
-            continue;
-        }
-        SDL_Event event = {0};
-        event.type = strcmp(verb, "down") == 0 ? SDL_KEYDOWN : SDL_KEYUP;
-        event.key.state = event.type == SDL_KEYDOWN ? SDL_PRESSED : SDL_RELEASED;
-        event.key.keysym.sym = SDL_GetKeyFromName(name);
-        if (event.key.keysym.sym != SDLK_UNKNOWN) {
-            SDL_PushEvent(&event);
-            desktop_wake_vm();
+        } else if (line[strspn(line, " \t\r\n")] != '\0' && !panel_command(line)) {
+            fprintf(stderr, "circuitpython: key script: not a panel command: %s", line);
         }
     }
     fclose(f);

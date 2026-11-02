@@ -68,6 +68,7 @@ SRC_C += \
 	host/gamepad.c \
 	host/host_net.c \
 	host/panel.c \
+	host/panel_control.c \
 	host/png_write.c \
 	virtual/ble_controller.c \
 	virtual/board_parts.c \

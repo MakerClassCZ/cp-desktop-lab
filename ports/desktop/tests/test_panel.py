@@ -7,7 +7,7 @@ key script (CIRCUITPY_SDL_KEYS).
 """
 
 import os, re
-from harness import HEADLESS, check, launch, run, seen
+from harness import HEADLESS, check, launch, ppm, run, seen
 
 BOARD_FILE = """[pins]
 D9 = "GPIO18"
@@ -107,7 +107,33 @@ with launch(
     ANALOG, BOARD_FILE + '[analog]\nA0 = ""\n', env=dict(HEADLESS, CIRCUITPY_SDL_KEYS=KEYS)
 ) as b:
     check("the key script sets a slider", seen(b, "then 40000", timeout=10))
+
+# The key script's computer keys by position, as the control API plays them: Z is C3.
+open(KEYS, "w").write("sleep 500\ndown z\nup z\n")
+MIDI = """import usb_midi, time
+got = b""
+while len(got) < 6:
+    got += usb_midi.ports[0].read() or b""
+    time.sleep(0.01)
+print("midi", got.hex(" "))
+"""
+with launch(MIDI, '[midi]\nKEYS = "keyboard"\n', env=dict(HEADLESS, CIRCUITPY_SDL_KEYS=KEYS)) as b:
+    check("the key script plays a key by its position", seen(b, "midi 90 30 64 80 30 00", timeout=10))
 os.remove(KEYS)
+
+# One set of lines for the key script and the control API: a dump through the API
+PPM = os.path.join(os.path.dirname(os.path.abspath(__file__)), "panel_dump.ppm")
+if os.path.exists(PPM):
+    os.remove(PPM)
+with launch('print("ready")\nwhile True:\n    pass\n', '[i2c]\nOLED = "ssd1306 128x64"\n') as b:
+    seen(b, "ready")
+    try:
+        b.panel("dump OLED " + PPM)
+        answer = None
+    except Exception as e:
+        answer = e
+check("the API takes a dump", answer is None, answer)
+check("the dump is the display as a PPM", (ppm(PPM) or (0, 0))[:2] == (128, 64), ppm(PPM) and ppm(PPM)[:2])
 
 # pwmio: a lamp, a servo; touchio: a pad held on the panel
 out, trace = run(

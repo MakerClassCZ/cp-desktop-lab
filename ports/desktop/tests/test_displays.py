@@ -2,12 +2,11 @@
 
 A board file's [spi] puts a colour TFT on the virtual SPI bus (fourwire, as adafruit_st7789
 drives it), its [i2c] an SSD1306 (i2cdisplaybus, as adafruit_displayio_ssd1306 drives it). The
-test reads what each display shows, upright, through the control API; the key script's
-"dump NAME PATH" saves it as a PPM.
+test reads what each display shows, upright, through the control API.
 """
 
-import os, time
-from harness import HEADLESS, T, check, launch, ppm, shown
+import time
+from harness import check, launch, shown
 
 
 # A 240x240 ST7789 on SPI, as adafruit_st7789's 240x240 example sets it up
@@ -48,25 +47,6 @@ if img:
         px(120, 120)[2] > 200 and px(235, 235)[2] > 200,
         (px(120, 120), px(235, 235)),
     )
-
-# The key script's dump: the same picture as a PPM
-TFT_PPM = os.path.join(T, "disp_tft.ppm")
-KEYS = os.path.join(T, "disp_keys.txt")
-for path in (TFT_PPM, KEYS):
-    if os.path.exists(path):
-        os.remove(path)
-open(KEYS, "w").write("sleep 2000\ndump TFT %s\n" % TFT_PPM)
-with launch(TFT, TFT_BOARD, env=dict(HEADLESS, CIRCUITPY_SDL_KEYS=KEYS)) as b:
-    end = time.time() + 10
-    while time.time() < end and not any("dumped TFT" in line for line in b.stderr):
-        time.sleep(0.2)
-dump = ppm(TFT_PPM)
-check(
-    "the key script dumps a display as a PPM",
-    dump is not None and dump[:2] == (240, 240),
-    dump and dump[:2],
-)
-os.remove(KEYS)
 
 # A 128x64 SSD1306 on I2C, as adafruit_displayio_ssd1306 sets it up
 out, (img,) = shown(

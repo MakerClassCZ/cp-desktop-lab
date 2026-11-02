@@ -19,11 +19,15 @@ void panel_changed(void);           // something to draw again
 void panel_part_added(void);        // a part put on the board: a closed panel shows again
 void panel_task(void);              // from the SDL task: open, draw
 bool panel_open(void);
+void panel_close(void);             // hidden, as its close button does, until a part is added
 bool panel_event(const SDL_Event *event);   // true when the event was the panel's
-// A key script line for the panel: "set NAME VALUE", "press NAME", "release NAME", "turn NAME
-// DETENTS". From any thread.
+// The panel's lines (host/panel_control.c), the same from the control API and the key script:
+// "set NAME VALUE", "press NAME", "release NAME", "tap KEYS NOTE", "turn NAME DETENTS",
+// "send NAME [CODE]", "down KEY", "up KEY", "dump DISPLAY PATH", "close".
+bool panel_accepts(const char *line);
+// A line queued for the VM thread, from any thread; false when it is not a panel line.
 bool panel_command(const char *line);
-// The same line applied now, on the VM thread, with "down KEY" and "up KEY" too; false: why in err.
+// A line applied now, on the VM thread; false: why in err.
 bool panel_apply(const char *line, char *err, size_t errlen);
 
 // What the panel shows, as JSON: the parts, the NeoPixels, the displays, the gamepad's buttons.
