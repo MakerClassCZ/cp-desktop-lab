@@ -88,8 +88,9 @@ static mp_obj_t vfs_posix_fun1_helper(mp_obj_t self_in, mp_obj_t path_in, int (*
 
 static mp_import_stat_t mp_vfs_posix_import_stat(void *self_in, const char *path) {
     mp_obj_vfs_posix_t *self = self_in;
-    if (self->root_len != 0) {
-        self->root.len = self->root_len;
+    // CIRCUITPY-CHANGE: a relative path is the working directory's, as in vfs_posix_get_path_str.
+    if (self->root_len != 0 && path[0] == '/') {
+        self->root.len = self->root_len - 1;
         vstr_add_str(&self->root, path);
         path = vstr_null_terminated_str(&self->root);
     }
