@@ -89,6 +89,26 @@ static void _on_fault(int sig) {
         _put_number(linked != 0 ? linked : (uintptr_t)frames[i], 16);
         _put(linked != 0 ? "\r\n" : " (outside the program)\r\n");
     }
+    #ifndef __APPLE__
+    // The same as one command to paste, the program named by its full path.
+    char exe[PATH_MAX];
+    ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    if (len > 0) {
+        exe[len] = '\0';
+        bool quote = strchr(exe, ' ') != NULL;
+        _put(quote ? "  addr2line -f -e '" : "  addr2line -f -e ");
+        _put(exe);
+        _put(quote ? "'" : "");
+        for (int i = 1; i < count; i++) {
+            uintptr_t linked = _linked(frames[i]);
+            if (linked != 0) {
+                _put(" 0x");
+                _put_number(linked, 16);
+            }
+        }
+        _put("\r\n");
+    }
+    #endif
     _restart();
 }
 

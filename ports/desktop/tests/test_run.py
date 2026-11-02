@@ -82,3 +82,10 @@ check(
     rc == 2 and "hard fault" in out and "backtrace for " in out and "\n  0x" in out,
     (rc, out[-800:]),
 )
+if sys.platform.startswith("linux"):
+    command = [line for line in out.splitlines() if line.startswith("  addr2line -f -e /")]
+    check(
+        "a hard fault on Linux: the symbolizer's command line, the program's path and addresses",
+        command and os.path.realpath(BIN) in command[0] and " 0x" in command[0],
+        (command, out[-800:]),
+    )
