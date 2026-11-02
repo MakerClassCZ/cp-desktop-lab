@@ -94,3 +94,12 @@ test('codePath: a file of the drive as --code takes it, or null outside the driv
     assert.strictEqual(b.codePath('C:\\proj', 'c:\\PROJ\\x.py', win32), 'x.py');
     assert.strictEqual(b.codePath('C:\\proj', 'D:\\proj\\x.py', win32), null);
 });
+
+test('launchChanged: what the running program was started with, against the new launch', () => {
+    const running = { program: '/p/cp', drive: '/w', board: 'virtual', boardFile: 'a.toml', port: 5678, name: 'x' };
+    assert.deepStrictEqual(b.launchChanged(running, Object.assign({}, running, { name: 'y' })), []);
+    assert.deepStrictEqual(b.launchChanged(running, Object.assign({}, running, { board: 'ask' })), []);
+    assert.deepStrictEqual(b.launchChanged(running, Object.assign({}, running, { boardFile: 'b.toml' })), ['boardFile']);
+    assert.deepStrictEqual(b.launchChanged(running, Object.assign({}, running, { board: 'ft232h', code: 'a.py' })), ['board', 'code']);
+    assert.deepStrictEqual(b.launchChanged(running, Object.assign({}, running, { args: ['--uart', 'COM3'] })), ['args']);
+});

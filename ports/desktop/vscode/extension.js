@@ -170,9 +170,23 @@ class Provider {
         if (config.program) {
             lastProgram = config.program;
         }
-        // A program already running keeps the board it was started with.
+        // A program already running is connected to when the launch is the one it was started
+        // with; with other settings it is restarted, or connected to as it is, as the user says.
         if (isRunning()) {
-            return config;
+            const changed = runningConfig ? boards.launchChanged(runningConfig, config) : [];
+            if (changed.length === 0) {
+                return config;
+            }
+            const answer = await vscode.window.showWarningMessage(
+                'CircuitPython: the running program was started with another ' + changed.join(', ') + '.',
+                'Restart it', 'Connect to it as it is');
+            if (answer === undefined) {
+                return undefined;
+            }
+            if (answer !== 'Restart it') {
+                return Object.assign({}, config, { board: runningConfig.board });
+            }
+            await stopRunning();
         }
         let board;
         try {
@@ -284,13 +298,17 @@ function showUncaught(body) {
     problems.set(vscode.Uri.file(body.path), [diagnostic]);
 }
 
-// The drive of the running program, else of the workspace: where traceback paths are.
+// The drive of the running program, else of the workspace's launch (its own drive, else the
+// folder): where traceback paths are and where libraries go.
 function currentDrive() {
     if (runningConfig && runningConfig.drive) {
         return runningConfig.drive;
     }
     const folders = vscode.workspace.workspaceFolders;
-    return folders && folders.length > 0 ? folders[0].uri.fsPath : null;
+    if (!folders || folders.length === 0) {
+        return null;
+    }
+    return launchConfig(folders[0]).drive.replace('${workspaceFolder}', folders[0].uri.fsPath);
 }
 
 // The workspace's own CircuitPython launch, else one made from the settings: the base for Run
@@ -300,6 +318,25 @@ function launchConfig(folder) {
     const own = configs.find((c) => c.type === 'circuitpython' && c.request === 'launch');
     return Object.assign({ program: programPath() || 'circuitpython', drive: folder.uri.fsPath, board: 'ask', port: 5678 },
         own, { type: 'circuitpython', request: 'launch' });
+}
+
+// The running program stopped, as the Stop button does: no reconnect to it. A session that has
+// ended already is refused (Canceled), and there is nothing to stop then.
+async function stopRunning() {
+    await vscode.debug.stopDebugging().catch(() => {});
+    const old = running;
+    const oldPort = (runningConfig && runningConfig.port) || 5678;
+    const closed = new Promise((resolve) => {
+        const watch = vscode.window.onDidCloseTerminal((t) => {
+            if (t === old) {
+                watch.dispose();
+                resolve();
+            }
+        });
+    });
+    old.dispose();
+    await closed;
+    await waitForPortClosed(oldPort, 10000);
 }
 
 // The editor's file (or the one clicked in the explorer) run in place of code.py (--code). A program
@@ -319,22 +356,7 @@ async function runFile(uri) {
         return;
     }
     if (isRunning()) {
-        // As the Stop button: no reconnect to the old program. A session that has ended already is
-        // refused (Canceled), and there is nothing to stop then.
-        await vscode.debug.stopDebugging().catch(() => {});
-        const old = running;
-        const oldPort = (runningConfig && runningConfig.port) || 5678;
-        const closed = new Promise((resolve) => {
-            const watch = vscode.window.onDidCloseTerminal((t) => {
-                if (t === old) {
-                    watch.dispose();
-                    resolve();
-                }
-            });
-        });
-        old.dispose();
-        await closed;
-        await waitForPortClosed(oldPort, 10000);
+        await stopRunning();
     }
     await vscode.workspace.saveAll(false);
     await vscode.debug.startDebugging(folder, Object.assign(config, { name: 'CircuitPython: ' + code, code }));
@@ -355,7 +377,7 @@ async function installInto(names, typed) {
     let result;
     try {
         result = await vscode.window.withProgress(
-            { location: vscode.ProgressLocation.Notification, title: 'CircuitPython: installing' },
+            { location: vscode.ProgressLocation.Notification, title: 'CircuitPython: installing into ' + path.join(drive, 'lib') },
             (progress) => libinstall.install(drive, names, (name) => progress.report({ message: name }), { trustNames: typed }));
     } catch (e) {
         vscode.window.showErrorMessage('CircuitPython: ' + e.message);

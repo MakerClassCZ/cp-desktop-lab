@@ -74,6 +74,18 @@ function codePath(drive, file, paths = require('path')) {
     return rel.split(paths.sep).join('/');
 }
 
+// The launch settings the running program was started with that a new launch gives otherwise:
+// [] when F5 may connect to it. A board still to be asked for or picked is no change.
+const LAUNCH_KEYS = ['program', 'drive', 'board', 'boardFile', 'code', 'args', 'port'];
+function launchChanged(running, wanted) {
+    return LAUNCH_KEYS.filter((key) => {
+        if (key === 'board' && (wanted.board === undefined || wanted.board === 'ask' || wanted.board === 'auto')) {
+            return false;
+        }
+        return JSON.stringify(running[key]) !== JSON.stringify(wanted[key]);
+    });
+}
+
 // The bus trace panel: as the configuration says, else on for a board with real pins.
 function traceWanted(config, board) {
     return typeof config.traceBus === 'boolean' ? config.traceBus : board !== undefined && board !== 'virtual';
@@ -102,4 +114,4 @@ class SessionWatch {
     }
 }
 
-module.exports = { BOARDS, DESCRIPTIONS, parseListBoards, chooseAuto, configuredBoard, buildArgs, codePath, traceWanted, SessionWatch };
+module.exports = { BOARDS, DESCRIPTIONS, parseListBoards, chooseAuto, configuredBoard, buildArgs, codePath, traceWanted, launchChanged, SessionWatch };
