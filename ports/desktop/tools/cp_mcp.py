@@ -332,13 +332,6 @@ class Server:
         return json.dumps(self._api(self._need().info), indent=1)
 
     def t_exec(self, code, interrupt=False, timeout=None):
-        head, last = split_last_expression(code)
-        if head is None:
-            return self._exec(code, interrupt, timeout)
-        out = self._exec(head, interrupt, timeout, bare=True)
-        return (out or "") + (self._exec(last, False, timeout, bare=True) or "") or "(no output)"
-
-    def _exec(self, code, interrupt=False, timeout=None, bare=False):
         b = self._need()
         try:
             r = self._api(b.run, code, bool(interrupt), clamp_wait(timeout, 10) or 1)
@@ -365,7 +358,7 @@ class Server:
             )
         if r.get("value") is not None:
             out += r["value"]
-        return tail(out) if out or bare else "(no output)"
+        return tail(out) if out else "(no output)"
 
     def _stream(self, which, wait, timeout):
         b = self._need()
@@ -653,24 +646,6 @@ def _result(mid, result):
 
 def _error(mid, code, message):
     return {"jsonrpc": "2.0", "id": mid, "error": {"code": code, "message": message}}
-
-
-def split_last_expression(code):
-    """Statements ending in an expression as (the statements, the expression), so its value comes
-    back as in a notebook; (None, None) otherwise, or when this Python cannot parse the code."""
-    import ast
-
-    try:
-        body = ast.parse(code).body
-    except (SyntaxError, ValueError):
-        return None, None
-    if len(body) < 2 or not isinstance(body[-1], ast.Expr):
-        return None, None
-    lines = code.splitlines(True)
-    start = body[-1].lineno - 1
-    if body[-1].col_offset != 0 or body[-2].end_lineno > start:
-        return None, None  # on a line shared with the statement before it
-    return "".join(lines[:start]), "".join(lines[start:])
 
 
 def repack(png, scale=None):

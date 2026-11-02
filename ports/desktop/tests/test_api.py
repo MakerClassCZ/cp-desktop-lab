@@ -144,6 +144,17 @@ with launch(LOOP) as b:
     check("the REPL keeps its variables between execs", b.eval("x") == "5")
     out = b.exec("print('a'); print('b')")
     check("statements: what they printed", out.replace("\r\n", "\n") == "a\nb\n", repr(out))
+    check(
+        "statements, then the last line's value",
+        b.eval("z = 2\nz * 21") == "42",
+        b.eval("z = 2\nz * 21"),
+    )
+    check(
+        "a call over two lines at the end runs, no value",
+        b.eval("w = []\nw.append(1\n)") is None and b.eval("w") == "[1]",
+        b.eval("w"),
+    )
+    check("an indented last line is the block's", b.eval("for i in range(2):\n    i") is None)
     check("a call returning None: no value", b.eval("print('hi')") is None)
     check("a string's repr", b.eval("'é' + 'x'") == "'éx'", b.eval("'é' + 'x'"))
     try:

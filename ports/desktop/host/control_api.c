@@ -498,17 +498,25 @@ static void _literal(api_buf_t *b, const char *s, size_t n) {
 #define MARK_DONE "\x1e" "D"
 
 // The code runs in the friendly REPL as one typed line, so it shares the REPL's variables (the
-// raw REPL would start a new VM for each run). The value of an expression is printed after a
-// mark, an exception after another.
+// raw REPL would start a new VM for each run). The value of an expression, or of statements'
+// last line when it is one (unindented), is printed after a mark, an exception after another.
 static const char _runner[] =
     "def __api(c):\n"
     "    print('\\x1eS')\n"
     "    try:\n"
+    "        h, n, t = c.rstrip().rpartition('\\n')\n"
     "        try:\n"
-    "            v = compile(c, '<api>', 'eval')\n"
+    "            h, v = None, compile(c, '<api>', 'eval')\n"
     "        except SyntaxError:\n"
-    "            exec(compile(c, '<api>', 'exec'), globals())\n"
-    "        else:\n"
+    "            try:\n"
+    "                if not n or t[:1] in ' \\t':\n"
+    "                    raise SyntaxError\n"
+    "                h, v = compile(h, '<api>', 'exec'), compile(t, '<api>', 'eval')\n"
+    "            except SyntaxError:\n"
+    "                h, v = compile(c, '<api>', 'exec'), None\n"
+    "        if h is not None:\n"
+    "            exec(h, globals())\n"
+    "        if v is not None:\n"
     "            v = eval(v, globals())\n"
     "            if v is not None:\n"
     "                print('\\x1eV' + repr(v))\n"

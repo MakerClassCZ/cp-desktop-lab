@@ -429,7 +429,8 @@ class Board:
         return r["output"]
 
     def eval(self, expr, interrupt=False, timeout=10):
-        """The repr of an expression's value, as the REPL would print it (None: no value)."""
+        """The repr of an expression's value, or of the last line's after statements, as the REPL would
+        print it (None: no value)."""
         r = self.run(expr, interrupt, timeout)
         if not r["ok"]:
             raise CircuitPythonError(r["error"], r["output"])

@@ -612,7 +612,7 @@ naming another `Host`, or a browser's preflight, is refused, so a web page canno
 | `GET /api/console?since=N&wait=TEXT&timeout=MS` | the console's output from offset N; with `wait`, when TEXT has come (`matched`); `next` is where to read on |
 | `POST /api/console` | the body, as typed (Ctrl-C included) |
 | `POST /api/interrupt`, `POST /api/reload`, `POST /api/quit` | Ctrl-C; Ctrl-D (stopping code.py first); end the program |
-| `POST /api/exec` | `{"code": ..., "timeout_ms": 10000, "interrupt": false}` → `{ok, output, value, error}` |
+| `POST /api/exec` | `{"code": ..., "timeout_ms": 10000, "interrupt": false}` → `{ok, output, value, error}`; `value` is the repr of an expression, or of the code's last line when that is one |
 | `GET /api/state` | the panel's parts, NeoPixels, displays and gamepad buttons, as JSON |
 | `POST /api/panel` | key script lines (`set ENV.temp 24.5`, `press A`, `turn ENC 2`, `send IR_RX`, `down Z`), applied before the answer |
 | `GET /api/display?name=NAME` | the window (`DISPLAY`), or a board file's display, as PNG |
