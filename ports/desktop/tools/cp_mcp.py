@@ -82,6 +82,11 @@ TOOLS = [
                 "program": dict(
                     STRING, description="the circuitpython program, if not the server's"
                 ),
+                "code_file": dict(
+                    STRING,
+                    description="a file on the drive run in place of code.py, every run "
+                    "(games/snake.py)",
+                ),
             }
         ),
     ),
@@ -286,6 +291,7 @@ class Server:
         args=(),
         program=None,
         fast_time=False,
+        code_file=None,
     ):
         if self.board is not None:
             if not self._ended():
@@ -301,6 +307,7 @@ class Server:
                 headless=not window,
                 args=[str(a) for a in args],
                 fast_time=bool(fast_time),
+                code_file=code_file,
             )
         except (OSError, RuntimeError) as e:
             raise ToolError("the program did not start: %s" % e)

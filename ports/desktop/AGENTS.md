@@ -25,7 +25,8 @@ python3 ports/desktop/tools/cpapi.py run PROGRAM repro.py --wait drawn --colors 
 `repro.py` (or a directory, as the whole drive) runs once, headless, until `code.py` ends or
 `--wait`'s text comes; the console is printed without the terminal's escapes, then the display's
 pixels per colour and the PNG if asked. `--runs N` runs it N times in one process (Ctrl-D), for
-bugs of a second run; `--board-file`, `--display NAME`, `--fast-time`, `--timeout S`. Exit status
+bugs of a second run; `--code FILE` (a file of a drive directory in place of `code.py`),
+`--board-file`, `--display NAME`, `--fast-time`, `--timeout S`. Exit status
 0; 1 when it did not end in time or the program ended; 2 after a hard fault, whose backtrace is
 printed last; 3 when `code.py` ended in an exception; 64 for wrong arguments.
 
@@ -54,6 +55,7 @@ with Board.launch("ports/desktop/build-linux/circuitpython", "/tmp/repro/CIRCUIT
 - `b.trace()`/`b.trace_wait(text)`: every I2C, SPI and UART transfer.
 - `b.state()`, `b.panel("set ENV.temp 24.5", "press A")`: parts, buttons, sensors.
 - `fast_time=True`: sleeps return at once and move the clock on, for code that waits long.
+- `code_file="games/snake.py"`: a file of the drive run in place of `code.py`, every run.
 - `b.ble`: the phone of a Bluetooth LE program (`BLERadio()`, `_bleio`). `scan()` is what it
   advertises (`name`, `services`); `p = b.ble.connect()`, then `p.services()`, `p.read(uuid)`,
   `p.write(uuid, data, response=True)`, `p.subscribe(uuid)` and `p.notifications(uuid)`,

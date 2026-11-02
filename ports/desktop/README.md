@@ -62,6 +62,12 @@ the directory straight into memory.
 On Windows the drive is `.\CIRCUITPY` by default and any path works, `C:\Users\me\game` as well
 as a relative one.
 
+`--code FILE` runs a file of the drive in place of `code.py`, `--code games/snake.py`, from its
+own directory (its imports and `open()` find what lies beside it), every run of the process: after
+a reload, after it ends and after Ctrl-D, as `supervisor.set_next_code_file()` with every sticky
+option. A file that is not on the drive stops the start; a program that calls
+`supervisor.set_next_code_file()` itself has the last word.
+
 `--drive` can also name a FAT image file. A missing path ending in `.img` becomes a new image of
 `--drive-size` MB, formatted like a blank board. The host reads and writes an image with mtools or
 a loop mount, but only while CircuitPython is not running:
@@ -659,8 +665,9 @@ lists the pixels that differ from another `Picture` of the same size, or from a 
 Python of one's own: CODE (a `.py` file as `code.py`, or a directory as the drive) headless until
 `code.py` ends or `--wait TEXT` comes, its console printed without the terminal's escapes.
 `--colors` adds the display's pixels per colour, `--png PATH` saves it, `--runs N` runs `code.py`
-N times in one process (Ctrl-D between), and `--board-file`, `--board`, `--display`,
-`--fast-time` and `--timeout` are as above. The exit status is 0; 1 when it did not end in time
+N times in one process (Ctrl-D between), `--code FILE` runs a file of a drive directory in
+place of `code.py`, and `--board-file`, `--board`, `--display`, `--fast-time` and `--timeout` are
+as above. The exit status is 0; 1 when it did not end in time
 or the program ended; 2 after a hard fault, whose backtrace comes last; 3 when `code.py` ended in
 an exception; 64 for wrong arguments.
 
@@ -687,6 +694,8 @@ at most its last 20000 characters, and a call waits at most 60 s. `tests/test_mc
 as a host would.
 
 ### Fast time
+
+`--code` is `code_file` in `cpapi`'s `Board.launch` and the MCP `launch`.
 
 `--fast-time` (`fast_time=True` in `cpapi`, `fast_time` in the MCP `launch`) is for tests of
 programs that wait: a game whose enemy takes eight seconds to cross the screen, an animation

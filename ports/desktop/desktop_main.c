@@ -67,6 +67,7 @@ static void usage(const char *prog) {
         "  --ble PORT        _bleio's Bluetooth controller on this serial port (a Pico 2 W bridge,\n"
         "                    Zephyr's hci_uart); off for none; default the virtual one\n"
         "  --ble-log PATH    write every Bluetooth HCI packet to PATH as btsnoop (Wireshark)\n"
+        "  --code FILE       run FILE on the drive (games/snake.py) in place of code.py, every run\n"
         "  --gpiochip PATH   --board gpiochip: the GPIO chip (default /dev/gpiochip0)\n"
         "  --i2c-bus N       --board gpiochip: /dev/i2c-N (default 1)\n"
         "  --spi PATH        --board gpiochip: the spidev device (default /dev/spidev0.0)\n"
@@ -145,6 +146,8 @@ int main(int argc, char **argv) {
             desktop_options.ble = argv[++i];
         } else if (strcmp(argv[i], "--ble-log") == 0 && i + 1 < argc) {
             desktop_options.ble_log = argv[++i];
+        } else if (strcmp(argv[i], "--code") == 0 && i + 1 < argc) {
+            desktop_options.code = argv[++i];
         } else if (strcmp(argv[i], "--board-file") == 0 && i + 1 < argc) {
             if (desktop_options.board_file_count == 8) {
                 fprintf(stderr, "circuitpython: more than 8 board files\n");

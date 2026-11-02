@@ -24,6 +24,8 @@ Each script takes the program and works in its own directory, so run them from a
   of the control API and cpapi; `CIRCUITPY_BLE_VIRTUAL_FAULT=no-public-address` gives the virtual
   controller no public address, as Zephyr's on an nRF; `CIRCUITPY_LIB`
   (or `frozen/Adafruit_CircuitPython_BLE` fetched) gives it `adafruit_ble`.
+- `test_code.py`: `--code FILE` runs a file of the drive in place of `code.py`, from its own
+  directory, every run; `cpapi run --code`.
 - `test_closed_file.py`: a closed file on a directory drive fails as on FAT, and a refresh survives it.
 - `test_dap.py`: the debugger over the Debug Adapter Protocol, like an editor: breakpoints,
   stack, scopes, locals, evaluate, step into a library file, step out, step over, Stop, the

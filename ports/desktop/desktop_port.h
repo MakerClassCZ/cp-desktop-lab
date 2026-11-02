@@ -23,6 +23,7 @@ typedef struct {
     const char *uart_path;      // --uart: the host serial port behind board.TX and board.RX, or NULL
     const char *ble;            // --ble: a serial port with a Bluetooth controller, "off", or NULL (virtual)
     const char *ble_log;        // --ble-log: the btsnoop file of the HCI, or NULL
+    const char *code;           // --code: the file on the drive run in place of code.py, or NULL
     const char *gpiochip;       // --gpiochip: the GPIO chip of --board gpiochip
     int i2c_bus;                // --i2c-bus: its /dev/i2c-N
     const char *spidev;         // --spi: its spidev device

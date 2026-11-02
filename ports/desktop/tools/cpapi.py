@@ -237,9 +237,11 @@ class Board:
         timeout=15,
         env=None,
         fast_time=False,
+        code_file=None,
     ):
         """Start program on drive with --api 0 and a token of its own; stderr is read for the port.
-        fast_time: its sleeps return at once and move its clock on (--fast-time)."""
+        fast_time: its sleeps return at once and move its clock on (--fast-time). code_file: a
+        file on the drive run in place of code.py (--code)."""
         token = secrets.token_hex(16)
         e = dict(os.environ if env is None else env, CIRCUITPY_API_TOKEN=token)
         if headless:
@@ -256,6 +258,8 @@ class Board:
             command += ["--board", board]
         if fast_time:
             command += ["--fast-time"]
+        if code_file:
+            command += ["--code", code_file]
         command += list(args)
         p = subprocess.Popen(
             command,
@@ -861,6 +865,7 @@ def run(argv):
     ap.add_argument("--png", help="save the display as this PNG after the last run")
     ap.add_argument("--colors", action="store_true", help="print the display's pixels per colour")
     ap.add_argument("--fast-time", action="store_true")
+    ap.add_argument("--code", dest="code_file", help="a file on the drive run in place of code.py")
     try:
         a = ap.parse_args(argv)
     except SystemExit as e:
@@ -879,7 +884,12 @@ def run(argv):
     texts.append("You are in safe mode")
     status = 0
     with Board.launch(
-        a.program, drive, board_file=a.board_file, board=a.board, fast_time=a.fast_time
+        a.program,
+        drive,
+        board_file=a.board_file,
+        board=a.board,
+        fast_time=a.fast_time,
+        code_file=a.code_file,
     ) as b:
         for i in range(a.runs):
             if i:

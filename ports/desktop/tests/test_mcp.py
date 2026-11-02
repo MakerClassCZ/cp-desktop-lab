@@ -273,9 +273,17 @@ time.sleep(1)
 r = c.call("exec", code="1")
 check("a program that ended: an error that says so", r.get("isError") and "ended" in text(r), r)
 r = c.call("stop")
-r = c.call("launch", drive=drive('print("again")\n'))
-r2 = c.call("console", wait="again", timeout=15)
-check("launch after a program ended", not r.get("isError") and "again" in text(r2), (r, r2))
+r = c.call(
+    "launch",
+    drive=drive('print("again")\n', {"other.py": 'print("other")\n'}),
+    code_file="other.py",
+)
+r2 = c.call("console", wait="other", timeout=15)
+check(
+    "launch after a program ended, code_file in place of code.py",
+    not r.get("isError") and "other" in text(r2) and "again" not in text(r2),
+    (r, r2),
+)
 r = c.call("stop")
 
 # Bluetooth LE: the phone's tools on a program that advertises a characteristic it echoes
