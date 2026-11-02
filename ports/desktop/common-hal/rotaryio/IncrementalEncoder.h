@@ -9,13 +9,15 @@
 #include "common-hal/microcontroller/Pin.h"
 #include "py/obj.h"
 
-// An encoder on virtual pins: the board panel's part on pin_a counts the quadrature steps the user
-// turned; the position is those since the last set, over the divisor.
+// An encoder on virtual pins: the board panel's part on pin_a and pin_b counts the quadrature steps
+// the user turned; the position is those since the last set, over the divisor, negated when the
+// pins are the part's swapped.
 typedef struct {
     mp_obj_base_t base;
     const mcu_pin_obj_t *pin_a;
     const mcu_pin_obj_t *pin_b;
     void *part;
+    int sign;
     int32_t base_steps;     // the part's steps when the position was last set
     mp_int_t base_position;
     mp_int_t divisor;

@@ -16,6 +16,7 @@
 #include "py/objstr.h"
 #include "py/qstr.h"
 #include "shared-bindings/board/__init__.h"
+#include "shared-bindings/microcontroller/Pin.h"
 
 #include "common-hal/audioio/AudioOut.h"
 #include "common-hal/pulseio/PulseIn.h"
@@ -57,6 +58,25 @@ static bool _colour(const char *s, uint32_t *rgb) {
         }
     }
     return false;
+}
+
+// A GPIO by the board's name for it, or -1.
+static int _board_gpio(const char *name) {
+    const mp_map_t *map = &board_module_globals.map;
+    for (size_t i = 0; i < map->used; i++) {
+        mp_obj_t key = map->table[i].key, value = map->table[i].value;
+        if (key == MP_OBJ_NULL || !mp_obj_is_type(value, &mcu_pin_type)) {
+            continue;
+        }
+        size_t n;
+        const char *s = mp_obj_is_qstr(key) ? (const char *)qstr_data(MP_OBJ_QSTR_VALUE(key), &n)
+            : mp_obj_str_get_data(key, &n);
+        uint8_t number = ((const mcu_pin_obj_t *)MP_OBJ_TO_PTR(value))->number;
+        if (n == strlen(name) && memcmp(s, name, n) == 0 && desktop_pin_is_gpio(number) && number < DESKTOP_PIN_UART_TX) {
+            return number;
+        }
+    }
+    return -1;
 }
 
 static bool _options(part_t *p, const char *options, const char **why) {
@@ -125,6 +145,21 @@ static bool _options(part_t *p, const char *options, const char **why) {
                 return false;
             }
             return true;
+        case PART_ENCODER: {
+            static char message[48];
+            if (strncmp(options, "b=", 2) != 0) {
+                *why = "an encoder needs its second pin: b=PIN";
+                return false;
+            }
+            int b = _board_gpio(options + 2);
+            if (b < 0) {
+                snprintf(message, sizeof(message), "no pin %.30s", options + 2);
+                *why = message;
+                return false;
+            }
+            p->pin_b = (uint8_t)b;
+            return true;
+        }
         default:
             if (*options != '\0') {
                 *why = "this part takes no options";
@@ -138,6 +173,39 @@ static bool _options(part_t *p, const char *options, const char **why) {
 static void _drive(part_t *p) {
     bool level = p->kind == PART_BUTTON ? (p->on == p->active_high) : p->on;
     desktop_pin_drive(p->pin, level);
+}
+
+part_t *parts_encoder(uint8_t a, uint8_t b, int *sign, const char **why) {
+    static char message[80];
+    *sign = 1;
+    for (int i = 0; i < _count; i++) {
+        part_t *p = &_parts[i];
+        if (p->kind != PART_ENCODER || p->detached) {
+            continue;
+        }
+        if (p->pin == a && p->pin_b == b) {
+            return p;
+        }
+        if (p->pin == b && p->pin_b == a) {
+            *sign = -1;
+            return p;
+        }
+        if (p->pin == a || p->pin == b || p->pin_b == a || p->pin_b == b) {
+            char pa[24], pb[24];
+            parts_pin_name(p->pin, pa, sizeof(pa));
+            parts_pin_name(p->pin_b, pb, sizeof(pb));
+            snprintf(message, sizeof(message), "%s is on %s and %s", p->name, pa, pb);
+            *why = message;
+            return NULL;
+        }
+    }
+    part_t *p = parts_for_pin(a, PART_ENCODER);
+    if (p == NULL) {
+        *why = "too many parts";
+        return NULL;
+    }
+    p->pin_b = b;
+    return p;
 }
 
 part_t *parts_key_button(int32_t key) {
@@ -229,6 +297,11 @@ part_t *parts_add(part_kind_t kind, uint8_t pin, const char *name, const char *o
     if (!_options(&check, options, why)) {
         return NULL;
     }
+    bool encoder = kind == PART_ENCODER;
+    if (encoder && check.pin_b == pin) {
+        *why = "an encoder's two pins are one";
+        return NULL;
+    }
     part_t *p = parts_find(pin, kind);
     if (p == NULL && _count == PARTS_MAX) {
         *why = "too many parts";
@@ -236,8 +309,9 @@ part_t *parts_add(part_kind_t kind, uint8_t pin, const char *name, const char *o
     }
     for (int i = 0; i < _count; i++) {
         part_t *other = &_parts[i];
-        if (other != p && other->kind != PART_SENSOR
-            && (other->pin == pin || strcasecmp(other->name, name) == 0)) {
+        bool shares = other->pin == pin || (encoder && other->pin == check.pin_b)
+            || (other->kind == PART_ENCODER && (other->pin_b == pin || (encoder && other->pin_b == check.pin_b)));
+        if (other != p && other->kind != PART_SENSOR && (shares || strcasecmp(other->name, name) == 0)) {
             parts_detach(other);
         }
     }

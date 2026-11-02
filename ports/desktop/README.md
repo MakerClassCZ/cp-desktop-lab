@@ -295,7 +295,7 @@ Python with `board.attach` (see [Plugging parts in from Python](#plugging-parts-
 | `[touch]` | `touchio.TouchIn` | a pad, touched while held |
 | `[i2s]` | `audiobusio.I2SOut` | plays through the computer's sound output; a level meter, rate, bits and channels |
 | `[mic]` | `audiobusio.PDMIn` | `"tone 440"` (the default) or `"noise"` as loud as a slider, or `"mic"`: the computer's microphone |
-| `[encoder]` | `rotaryio.IncrementalEncoder` (on its first pin) | `-` and `+` turn it a detent, as does the wheel; the detents turned |
+| `[encoder]` | `rotaryio.IncrementalEncoder` on its two pins: `ENC_A = "b=ENC_B"` | `-` and `+` turn it a detent, as does the wheel; the detents turned. `rotaryio` with the pins swapped counts the other way, as on a real encoder |
 | `[ir]` | `pulseio.PulseIn` | a receiver: `send` hands it a remote's NEC code, the value (four bytes, `"255,2,247,8"` the Adafruit mini remote's 1, which an empty value means); a PulseIn on any virtual pin gets one |
 | `[shiftreg]` | `keypad.ShiftRegisterKeys` (on its data pin) | the gamepad's buttons, shifted out in the order `keys=` gives: `"clock=PIN latch=PIN keys=B,A,START,SELECT"` |
 
@@ -472,7 +472,8 @@ the board, wherever it came from.
 ['GPIO16']
 ```
 
-A kind takes its pin (a sensor its `address=`, by default the model's), `name=` (by default the
+A kind takes its pin (an encoder its two, `Encoder(pin_a, pin_b)`; a sensor its `address=`, by
+default the model's), `name=` (by default the
 board's name for the pin, or the model in capitals; up to 23 characters, 11 for a sensor) and at
 most one option, written as the board file writes it: `Button(pin, pressed="low")`,
 `LED(pin, color="red")`, `Lamp(pin, color="red")`, `Mic(pin, source="tone 440")`,

@@ -7,7 +7,7 @@ key script (CIRCUITPY_SDL_KEYS).
 """
 
 import os, re
-from harness import HEADLESS, check, launch, ppm, run, seen
+from harness import HEADLESS, check, launch, ppm, refused, run, seen
 
 BOARD_FILE = """[pins]
 D9 = "GPIO18"
@@ -248,6 +248,7 @@ check(
 )
 
 # rotaryio: an encoder turned through the API, a detent at a time; divisor and position as on a board
+ENCODER = '[pins]\nENC_A = "GPIO20"\nENC_B = "GPIO21"\n[encoder]\nENC_A = "b=ENC_B"\n'
 with api(
     """import board, rotaryio, time
 e = rotaryio.IncrementalEncoder(board.ENC_A, board.ENC_B)
@@ -262,7 +263,7 @@ while e.position == 10:
     time.sleep(0.01)
 print("back", e.position)
 """,
-    board='[pins]\nENC_A = "GPIO20"\nENC_B = "GPIO21"\n[encoder]\nENC_A = ""\n',
+    board=ENCODER,
 ) as b:
     started = seen(b, "start 0 4")
     b.turn("ENC_A", 3)
@@ -277,4 +278,42 @@ print("back", e.position)
         "ENCODER ENC_A 3" in trace and "ENCODER ENC_A 2" in trace,
         trace,
     )
+
+# The encoder's pins swapped turn it the other way, as on a real one; other pins are refused.
+with api(
+    """import board, rotaryio, time
+e = rotaryio.IncrementalEncoder(board.ENC_B, board.ENC_A)
+print("start", e.position)
+while e.position != -2:
+    time.sleep(0.01)
+print("turned", e.position)
+e.deinit()
+try:
+    rotaryio.IncrementalEncoder(board.ENC_A, board.GPIO22)
+except ValueError as err:
+    print("refused", err)
+""",
+    board=ENCODER,
+) as b:
+    seen(b, "start 0")
+    b.turn("ENC_A", 2)
+    check("swapped pins count the other way", seen(b, "turned -2"))
+    check(
+        "an encoder on other pins is refused, naming its pins",
+        seen(b, "refused ENC_A is on ENC_A and ENC_B"),
+        b.console(since=0)["data"],
+    )
+    names = [p["name"] for p in b.state()["parts"] if p["kind"] == "encoder"]
+    check("no second encoder appears for the swapped pins", names == ["ENC_A"], names)
+
+for text, why in (
+    (
+        '[pins]\nENC_A = "GPIO20"\n[encoder]\nENC_A = ""\n',
+        "an encoder needs its second pin: b=PIN",
+    ),
+    ('[pins]\nENC_A = "GPIO20"\n[encoder]\nENC_A = "b=NOWHERE"\n', "no pin NOWHERE"),
+    ('[pins]\nENC_A = "GPIO20"\n[encoder]\nENC_A = "b=ENC_A"\n', "an encoder's two pins are one"),
+):
+    status, said = refused(board=text)
+    check("refused: " + why, status not in (None, 0) and why in said, said)
 print("DONE")

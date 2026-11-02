@@ -6,7 +6,9 @@
 
 #include "board_parts.h"
 
+#include <SDL.h>
 #include <ctype.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
@@ -135,7 +137,7 @@ static void _kind_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind
             : "Keyboard(*, low=\"C3\", channel=1, name=\"KEYS\")");
         return;
     }
-    mp_printf(print, "%q(pin, *", kind->name);
+    mp_printf(print, kind->kind == PART_ENCODER ? "%q(pin_a, pin_b, *" : "%q(pin, *", kind->name);
     if (kind->keyword != MP_QSTRnull) {
         mp_printf(print, ", %q=\"%s\"", kind->keyword, kind->initial);
     }
@@ -194,6 +196,11 @@ static void _require(const board_part_obj_t *self, live_t *l) {
 static void _place(const board_part_obj_t *self, char *buf, size_t len) {
     if (self->kind->category == BOARD_PART_I2C) {
         snprintf(buf, len, "I2C at 0x%02x", (unsigned)self->address);
+    } else if (self->kind->kind == PART_ENCODER) {
+        char a[24], b[24];
+        parts_pin_name(self->pin, a, sizeof(a));
+        parts_pin_name(self->pin_b, b, sizeof(b));
+        snprintf(buf, len, "%s, %s", a, b);
     } else {
         parts_pin_name(self->pin, buf, len);
     }
@@ -271,7 +278,7 @@ static void _print_values(const mp_print_t *print, const board_part_obj_t *self,
 
 static void _part_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t print_kind) {
     const board_part_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    char place[24];
+    char place[52];
     live_t l;
     _place(self, place, sizeof(place));
     if (self->kind->category == BOARD_PART_MIDI) {
@@ -534,16 +541,27 @@ static mp_obj_t _kind_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const m
         return _midi_call(kind, n_args, n_kw, args);
     }
     const i2c_virtual_model_t *m = _model(kind);
+    bool encoder = kind->kind == PART_ENCODER;
     enum { ARG_place, ARG_name, ARG_option };
     mp_arg_t allowed[] = {
-        { m != NULL ? MP_QSTR_address : MP_QSTR_pin, m != NULL ? MP_ARG_KW_ONLY | MP_ARG_OBJ : MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        { m != NULL ? MP_QSTR_address : encoder ? MP_QSTR_pin_a : MP_QSTR_pin, m != NULL ? MP_ARG_KW_ONLY | MP_ARG_OBJ : MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_name, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
-        { kind->keyword, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        { encoder ? MP_QSTR_pin_b : kind->keyword, encoder ? MP_ARG_REQUIRED | MP_ARG_OBJ : MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
     };
     mp_arg_val_t vals[MP_ARRAY_SIZE(allowed)];
     mp_map_t kw_args;
     mp_map_init_fixed_table(&kw_args, n_kw, args + n_args);
-    mp_arg_parse_all(n_args, args, &kw_args, kind->keyword != MP_QSTRnull ? 3 : 2, allowed, vals);
+    if (encoder) {
+        // pin_a, pin_b positional, then name=: the table's order is not the call's.
+        mp_arg_t order[] = { allowed[0], allowed[2], allowed[1] };
+        mp_arg_val_t got[3];
+        mp_arg_parse_all(n_args, args, &kw_args, 3, order, got);
+        vals[ARG_place] = got[0];
+        vals[ARG_option] = got[1];
+        vals[ARG_name] = got[2];
+    } else {
+        mp_arg_parse_all(n_args, args, &kw_args, kind->keyword != MP_QSTRnull ? 3 : 2, allowed, vals);
+    }
 
     board_part_obj_t *self = mp_obj_malloc(board_part_obj_t, &board_part_type);
     self->kind = kind;
@@ -581,7 +599,14 @@ static mp_obj_t _kind_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const m
     // The options as the board file writes them: "servo", "#ffa000", "8x8 serpentine".
     const char *option = kind->fixed != NULL ? kind->fixed : kind->initial != NULL ? kind->initial : "";
     mp_obj_t value = kind->keyword != MP_QSTRnull ? vals[ARG_option].u_obj : mp_const_none;
-    if (mp_obj_is_int(value)) {
+    if (encoder) {
+        const mcu_pin_obj_t *b = MP_OBJ_TO_PTR(mp_arg_validate_type(vals[ARG_option].u_obj, &mcu_pin_type, MP_QSTR_pin_b));
+        if (!desktop_pin_is_gpio(b->number) || b->number >= DESKTOP_PIN_UART_TX) {
+            mp_raise_ValueError(MP_ERROR_TEXT("pin_b is a bus's pin, not a GPIO"));
+        }
+        self->pin_b = b->number;
+        snprintf(self->options, sizeof(self->options), "b=GPIO%u", (unsigned)b->number);
+    } else if (mp_obj_is_int(value)) {
         snprintf(self->options, sizeof(self->options), "%d", (int)mp_obj_get_int(value));
     } else {
         snprintf(self->options, sizeof(self->options), "%s", value != mp_const_none ? mp_obj_str_get_str(value) : option);
@@ -719,6 +744,9 @@ static void _add(mp_obj_t dict, const board_part_kind_t *kind, const char *name,
     part->pin = pin;
     part->address = address;
     part->attached = true;
+    if (kind->kind == PART_ENCODER && strncmp(options, "b=GPIO", 6) == 0) {
+        part->pin_b = (uint8_t)atoi(options + 6);
+    }
     snprintf(part->options, sizeof(part->options), "%s", options);
     snprintf(part->name, sizeof(part->name), "%s", name);
     mp_obj_dict_store(dict, mp_obj_new_str(name, strlen(name)), MP_OBJ_FROM_PTR(part));
@@ -728,7 +756,11 @@ static void _add(mp_obj_t dict, const board_part_kind_t *kind, const char *name,
 static void _options_of(const part_t *p, char *buf, size_t len) {
     switch (p->kind) {
         case PART_BUTTON:
-            snprintf(buf, len, "%s", p->active_high ? "high" : "low");
+            snprintf(buf, len, "%s%s%s", p->active_high ? "high" : "low", p->key != 0 ? " key=" : "",
+                p->key != 0 ? SDL_GetKeyName(p->key) : "");
+            break;
+        case PART_ENCODER:
+            snprintf(buf, len, "b=GPIO%u", (unsigned)p->pin_b);
             break;
         case PART_LED:
             snprintf(buf, len, "#%06lx", (unsigned long)p->colour);

@@ -85,6 +85,20 @@ with launch('print("up")\n', board=PINS) as b:
         'np = board.attach(board.parts.NeoPixel(board.D7, layout="2 GRBW"))\nprint(len(np.colors), np.colors[0])'
     )
     check("a NeoPixel strip's colours", out.strip() == "2 (0, 0, 0, 0)", out)
+    out = b.exec(
+        "import rotaryio\nenc = board.attach(board.parts.Encoder(board.GPIO20, board.GPIO21))\n"
+        "e = rotaryio.IncrementalEncoder(board.GPIO21, board.GPIO20)\nenc.turn(3)\n"
+        "print(repr(enc), e.position, sum('Encoder' in repr(v) for v in board.attached.values()))"
+    )
+    check(
+        "an encoder on two pins; rotaryio with them swapped counts the other way",
+        "on GPIO20, GPIO21: position=3>" in out and out.strip().endswith(" -3 1"),
+        out,
+    )
+    out = b.exec(
+        "try:\n    board.parts.Encoder(board.GPIO22)\nexcept TypeError as e:\n    print('err', e)"
+    )
+    check("an encoder needs both pins", "err" in out, out)
     out = b.exec("print(repr(board.parts.BME280))")
     check(
         "a kind's repr lists its keywords and channels",

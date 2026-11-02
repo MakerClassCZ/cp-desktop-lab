@@ -22,7 +22,7 @@ typedef enum {
     PART_TOUCH,         // touchio.TouchIn, touched while held
     PART_SPEAKER,       // audiobusio.I2SOut, playing through the computer
     PART_MIC,           // audiobusio.PDMIn, recording the panel's generator or the computer's microphone
-    PART_ENCODER,       // rotaryio.IncrementalEncoder on its first pin, turned a detent at a time
+    PART_ENCODER,       // rotaryio.IncrementalEncoder on its two pins, turned a detent at a time
     PART_SENSOR,        // a value of a virtual I2C device (i2c_virtual.c), on no pin
     PART_SHIFTREG,      // a shift register of buttons (keypad.ShiftRegisterKeys) on its data pin
     PART_IR,            // an IR receiver (pulseio.PulseIn): a remote's NEC code sent on a click
@@ -63,7 +63,9 @@ typedef struct {
     uint16_t peak;
     void *out;          // the speaker's audioio_audioout_obj_t while an I2SOut has it
     const char *label;  // the speaker's name in the trace: I2S unless set (PWMAUDIO)
-    // an encoder: the quadrature steps turned so far, four to a detent
+    // an encoder: its second pin (the first is pin), the quadrature steps turned so far, four to a
+    // detent
+    uint8_t pin_b;
     int32_t steps;
     // a sensor: its device's channel
     void *device;
@@ -103,6 +105,9 @@ int parts_count(void);
 // Pulled out: what it drives on its pin let go, left out of the panel, its slot kept.
 void parts_detach(part_t *part);
 
+// The encoder on pins a and b for rotaryio: *sign -1 when they are its pins swapped. NULL with
+// *why set when an attached encoder has one of them with another pin, or there is no slot.
+part_t *parts_encoder(uint8_t a, uint8_t b, int *sign, const char **why);
 // The attached button a key presses (an SDL keycode), or NULL.
 part_t *parts_key_button(int32_t key);
 // The user's side, from the panel or the key script: traced, and a button or switch drives its pin.

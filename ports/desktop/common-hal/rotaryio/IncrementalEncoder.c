@@ -17,15 +17,21 @@ void common_hal_rotaryio_incrementalencoder_construct(rotaryio_incrementalencode
     if (!desktop_pin_is_gpio(pin_a->number) || !desktop_virtual_pin(pin_a->number, &output, &level)) {
         mp_raise_ValueError(MP_ERROR_TEXT("rotaryio needs the virtual board's pins"));
     }
-    part_t *part = parts_for_pin(pin_a->number, PART_ENCODER);
+    if (!desktop_pin_is_gpio(pin_b->number) || pin_b->number == pin_a->number) {
+        mp_raise_ValueError(MP_ERROR_TEXT("rotaryio needs two of the virtual board's pins"));
+    }
+    int sign;
+    const char *why = NULL;
+    part_t *part = parts_encoder(pin_a->number, pin_b->number, &sign, &why);
     if (part == NULL) {
-        mp_raise_RuntimeError(MP_ERROR_TEXT("too many parts"));
+        mp_raise_ValueError_varg(MP_ERROR_TEXT("%s"), why);
     }
     common_hal_mcu_pin_claim(pin_a);
     common_hal_mcu_pin_claim(pin_b);
     self->pin_a = pin_a;
     self->pin_b = pin_b;
     self->part = part;
+    self->sign = sign;
     self->base_steps = part->steps;
     self->base_position = 0;
     self->divisor = 4;
@@ -50,7 +56,7 @@ void common_hal_rotaryio_incrementalencoder_deinit(rotaryio_incrementalencoder_o
 }
 
 mp_int_t common_hal_rotaryio_incrementalencoder_get_position(rotaryio_incrementalencoder_obj_t *self) {
-    int32_t steps = ((part_t *)self->part)->steps - self->base_steps;
+    int32_t steps = (((part_t *)self->part)->steps - self->base_steps) * self->sign;
     return self->base_position + steps / self->divisor;
 }
 

@@ -36,6 +36,7 @@ typedef struct {
     mp_obj_base_t base;
     const board_part_kind_t *kind;
     uint8_t pin;
+    uint8_t pin_b;          // an encoder's second pin
     uint8_t address;
     bool attached;
     char name[24];

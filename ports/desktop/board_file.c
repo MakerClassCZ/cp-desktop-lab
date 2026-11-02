@@ -173,6 +173,17 @@ static bool _add_part(const char *where, part_kind_t kind, const char *name, con
         fprintf(stderr, "circuitpython: %s: no pin %s\n", where, name);
         return false;
     }
+    // An encoder's b=NAME as its GPIO number: the file's names reach the board only after it is read.
+    char resolved[16];
+    if (kind == PART_ENCODER && strncmp(options, "b=", 2) == 0) {
+        const mcu_pin_obj_t *b = _pin(options + 2);
+        if (b == NULL) {
+            fprintf(stderr, "circuitpython: %s: %s: no pin %s\n", where, name, options + 2);
+            return false;
+        }
+        snprintf(resolved, sizeof(resolved), "b=GPIO%u", (unsigned)b->number);
+        options = resolved;
+    }
     if (parts_add(kind, pin->number, name, options, &why) == NULL) {
         fprintf(stderr, "circuitpython: %s: %s: %s\n", where, name, why);
         return false;
