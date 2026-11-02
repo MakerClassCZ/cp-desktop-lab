@@ -39,6 +39,7 @@ typedef struct {
     uint8_t pin_b;          // an encoder's second pin
     uint8_t address;
     bool attached;
+    bool numbered;          // named LED1, LED2 ... as no name= was given
     char name[24];
     char options[64];
 } board_part_obj_t;

@@ -535,6 +535,22 @@ static mp_obj_t _midi_call(const board_part_kind_t *kind, size_t n_args, size_t 
 }
 
 // A kind called: a part described, not yet on the board.
+// The kind's first free numbered name: LED1, LED2 ...
+static void _numbered(const board_part_kind_t *kind, char *name, size_t len) {
+    char upper[16];
+    size_t k = 0;
+    for (const char *s = qstr_str(kind->name); *s != '\0' && k < sizeof(upper) - 1; s++) {
+        upper[k++] = (char)toupper((unsigned char)*s);
+    }
+    upper[k] = '\0';
+    for (int n = 1;; n++) {
+        snprintf(name, len, "%.14s%d", upper, n % 1000);
+        if (parts_by_name(name) == NULL) {
+            return;
+        }
+    }
+}
+
 static mp_obj_t _kind_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const mp_obj_t *args) {
     const board_part_kind_t *kind = MP_OBJ_TO_PTR(self_in);
     if (kind->category == BOARD_PART_MIDI) {
@@ -566,6 +582,7 @@ static mp_obj_t _kind_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const m
     board_part_obj_t *self = mp_obj_malloc(board_part_obj_t, &board_part_type);
     self->kind = kind;
     self->attached = false;
+    self->numbered = false;
     size_t limit = sizeof(self->name) - 1;
     if (m != NULL) {
         mp_obj_t address = vals[ARG_place].u_obj;
@@ -585,6 +602,11 @@ static mp_obj_t _kind_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const m
             mp_raise_ValueError_varg(MP_ERROR_TEXT("%s is a bus's pin, not a GPIO"), self->name);
         }
         self->pin = pin->number;
+        // A strip is named after its pin; any other pin part by its kind.
+        if (kind->category == BOARD_PART_PIN && vals[ARG_name].u_obj == mp_const_none) {
+            _numbered(kind, self->name, sizeof(self->name));
+            self->numbered = true;
+        }
     }
     if (vals[ARG_name].u_obj != mp_const_none && kind->category == BOARD_PART_NEOPIXEL) {
         mp_raise_ValueError(MP_ERROR_TEXT("a NeoPixel strip is named after its pin"));
@@ -632,6 +654,11 @@ static mp_obj_t _attach(mp_obj_t part_in) {
     const board_part_kind_t *kind = self->kind;
     const char *why = NULL;
     if (kind->category == BOARD_PART_PIN) {
+        // A numbered name another part took since: the next free one.
+        part_t *named = self->numbered ? parts_by_name(self->name) : NULL;
+        if (named != NULL && !(named->pin == self->pin && named->kind == kind->kind)) {
+            _numbered(kind, self->name, sizeof(self->name));
+        }
         if (parts_add(kind->kind, self->pin, self->name, self->options, &why) == NULL) {
             mp_raise_ValueError_varg(MP_ERROR_TEXT("%s"), why);
         }

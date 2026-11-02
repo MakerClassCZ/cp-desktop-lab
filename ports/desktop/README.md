@@ -461,20 +461,20 @@ the board, wherever it came from.
 
 ```python
 >>> import board
->>> from microcontroller import pin
 >>> env = board.attach(board.parts.BME280(address=0x76, name="ENV"))
 >>> env.temp = 35            # the panel's slider moves; the library reads 35
->>> led = board.attach(board.parts.LED(pin.GPIO16, color="green"))
+>>> led = board.attach(board.parts.LED(board.GPIO16, color="green"))
 >>> led
-<LED GPIO16 on GPIO16: off>
+<LED LED1 on GPIO16: off>
 >>> board.detach("ENV")      # the library's next read raises, as with the wire pulled
 >>> sorted(board.attached)
-['GPIO16']
+['LED1']
 ```
 
 A kind takes its pin (an encoder its two, `Encoder(pin_a, pin_b)`; a sensor its `address=`, by
-default the model's), `name=` (by default the
-board's name for the pin, or the model in capitals; up to 23 characters, 11 for a sensor) and at
+default the model's), `name=` (by default its kind numbered,
+`LED1`, `LED2` ..., the first free one when it is attached; a sensor the model in capitals, a
+NeoPixel strip its pin's name; up to 23 characters, 11 for a sensor) and at
 most one option, written as the board file writes it: `Button(pin, pressed="low")`,
 `LED(pin, color="red")`, `Lamp(pin, color="red")`, `Mic(pin, source="tone 440")`,
 `IR(pin, code="255,2,247,8")`, `NeoPixel(pin, layout="10")`. A kind's `repr` lists them, and a

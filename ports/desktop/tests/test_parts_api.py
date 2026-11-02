@@ -23,7 +23,7 @@ with launch('print("up")\n', board=PINS) as b:
     lines = out.splitlines()
     check(
         "an LED: described, then attached",
-        len(lines) == 2 and "not attached" in lines[0] and lines[1] == "<LED D5 on D5: off>",
+        len(lines) == 2 and "not attached" in lines[0] and lines[1] == "<LED LED1 on D5: off>",
         out,
     )
     out = b.exec(
@@ -54,7 +54,9 @@ with launch('print("up")\n', board=PINS) as b:
     out = b.exec(
         'try:\n    board.parts.LED(board.D6).value\nexcept RuntimeError as e:\n    print("err", e)'
     )
-    check("a value of a part not attached raises", "D6 is not attached" in out, out)
+    check(
+        "a value of a part not attached raises", "err LED" in out and "is not attached" in out, out
+    )
     out = b.exec("env.temp = 1000\nprint(env.temp)")
     check("an out-of-range value is clamped as the slider is", "1000" not in out, out)
     out = b.exec(
@@ -99,6 +101,16 @@ with launch('print("up")\n', board=PINS) as b:
         "try:\n    board.parts.Encoder(board.GPIO22)\nexcept TypeError as e:\n    print('err', e)"
     )
     check("an encoder needs both pins", "err" in out, out)
+    out = b.exec(
+        "a = board.attach(board.parts.Lamp(board.GPIO22))\nc = board.parts.Lamp(board.GPIO23)\n"
+        "d = board.parts.Lamp(board.GPIO24)\nboard.attach(d)\nboard.attach(c)\nboard.attach(a)\n"
+        "print(sorted(n for n in board.attached if n.startswith('LAMP')))"
+    )
+    check(
+        "a part without name= is numbered by its kind, the next free number when it is attached",
+        "['LAMP1', 'LAMP2', 'LAMP3']" in out,
+        out,
+    )
     out = b.exec("print(repr(board.parts.BME280))")
     check(
         "a kind's repr lists its keywords and channels",
@@ -160,11 +172,11 @@ with launch('print("up")\n', board=PINS3) as b:
     b.exec("board.attach(board.parts.LED(board.D5))\nboard.attach(board.parts.Switch(board.D5))")
     kinds = [p["kind"] for p in b.state()["parts"] if p.get("pin") == "GPIO16"]
     check("last wins at a pin", kinds == ["switch"], b.state()["parts"])
-    b.exec('board.attach(board.parts.Touch(board.D6, name="D5"))')
+    b.exec('board.attach(board.parts.Touch(board.D6, name="SWITCH1"))')
     names = [
         (p["name"], p["kind"]) for p in b.state()["parts"] if p.get("pin") in ("GPIO16", "GPIO17")
     ]
-    check("last wins by name", names == [("D5", "touch")], names)
+    check("last wins by name", names == [("SWITCH1", "touch")], names)
     out = b.exec(
         "for i in range(100):\n    l = board.parts.LED(board.D7)\n    board.attach(l)\n    board.detach(l)\nprint('done')"
     )
@@ -174,14 +186,14 @@ with launch('print("up")\n', board=PINS3) as b:
         "    board.detach(s)\nprint('done')"
     )
     check("nor do I2C devices", "done" in out, out)
-    b.exec("board.attach(board.parts.Switch(board.D9))")
+    b.exec('board.attach(board.parts.Switch(board.D9, name="D9"))')
     b.reload()
     b.wait("up")
     parts = b.state()["parts"]
     check(
         "run-time parts survive a reload, over the board file's",
         [p["kind"] for p in parts if p["name"] == "D9"] == ["switch"]
-        and any(p["name"] == "D5" for p in parts),
+        and any(p["name"] == "SWITCH1" for p in parts),
         parts,
     )
     b.exec("import microcontroller", interrupt=True)
@@ -191,7 +203,7 @@ with launch('print("up")\n', board=PINS3) as b:
     check(
         "a reset starts from the board files",
         [p["kind"] for p in parts if p["name"] == "D9"] == ["led"]
-        and not any(p["name"] == "D5" for p in parts),
+        and not any(p["name"] == "SWITCH1" for p in parts),
         parts,
     )
 
@@ -226,7 +238,7 @@ with launch('print("up")\n', board=PINS + 'D9 = "GPIO20"\n[led]\nD9 = "red"\n') 
         any("virtual: Potentiometer D7 attached at D7 (automatic)" in l for l in b.stderr),
         b.stderr[-5:],
     )
-    b.exec("board.attach(board.parts.Button(board.D5))")
+    b.exec('board.attach(board.parts.Button(board.D5, name="D5"))')
     check(
         "a part attached from Python is not announced",
         not any("D5" in l for l in b.stderr),
@@ -281,7 +293,7 @@ with launch('print("up")\n', board=BOARD5) as b:
     check("and is detached by that name", out.strip() == "False", out)
 
     out = b.exec(
-        "servo = board.attach(board.parts.Servo(board.D5))\nagain = board.attached['D5']\n"
+        "servo = board.attach(board.parts.Servo(board.D5, name='D5'))\nagain = board.attached['D5']\n"
         "board.detach(again)\nboard.attach(again)\nprint(repr(board.attached['D5']))"
     )
     check("a servo from board.attached attached again stays a servo", "<Servo D5" in out, out)
