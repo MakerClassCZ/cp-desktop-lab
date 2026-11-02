@@ -4,7 +4,8 @@ board.parts is the catalogue, board.attach puts a part on the board, and an atta
 values are its attributes, the same state the panel shows.
 """
 
-from harness import check, launch
+import cpapi
+from harness import BIN, check, launch
 
 PINS = '[pins]\nD5 = "GPIO16"\nD6 = "GPIO17"\nD7 = "GPIO18"\n'
 
@@ -191,6 +192,11 @@ with launch('print("up")\n', board=PINS3) as b:
     b.exec("board.attach(board.parts.LED(board.D5))\nboard.attach(board.parts.Switch(board.D5))")
     kinds = [p["kind"] for p in b.state()["parts"] if p.get("pin") == "GPIO16"]
     check("last wins at a pin", kinds == ["switch"], b.state()["parts"])
+    check(
+        "the part pulled out is said",
+        any("detached: Switch SWITCH1 takes its pin" in l for l in b.stderr),
+        b.stderr[-5:],
+    )
     b.exec('board.attach(board.parts.Touch(board.D6, name="SWITCH1"))')
     names = [
         (p["name"], p["kind"]) for p in b.state()["parts"] if p.get("pin") in ("GPIO16", "GPIO17")
@@ -248,7 +254,11 @@ with launch('print("up")\n', board=PINS + 'D9 = "GPIO20"\n[led]\nD9 = "red"\n') 
     check("an automatic part is marked", "(automatic)" in out, out)
     check(
         "an automatic part is announced on stderr",
-        any("virtual: BME280 attached at I2C 0x77 (automatic)" in l for l in b.stderr),
+        any(
+            'virtual: BME280 attached at I2C 0x77 (automatic; for another chip: [i2c] X = "bmp280")'
+            in l
+            for l in b.stderr
+        ),
         b.stderr[-5:],
     )
     b.exec("import analogio\na = analogio.AnalogIn(board.D7)")
@@ -352,4 +362,14 @@ with launch('print("up")\n') as b:
         out,
     )
 
+try:
+    cpapi.Board.launch(BIN, "unused", board_file="no-such-board.toml")
+    missing = "launched"
+except FileNotFoundError as e:
+    missing = str(e)
+check(
+    "a board file that is nowhere is refused before the start",
+    "no board file no-such-board.toml" in missing,
+    missing,
+)
 print("DONE")

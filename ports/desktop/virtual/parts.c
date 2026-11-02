@@ -208,6 +208,15 @@ part_t *parts_encoder(uint8_t a, uint8_t b, int *sign, const char **why) {
     return p;
 }
 
+part_t *parts_key_taken(void) {
+    for (int i = 0; i < _count; i++) {
+        if (_parts[i].kind == PART_BUTTON && !_parts[i].detached && midi_keyboard_takes(_parts[i].key)) {
+            return &_parts[i];
+        }
+    }
+    return NULL;
+}
+
 part_t *parts_key_button(int32_t key) {
     for (int i = 0; key != 0 && i < _count; i++) {
         if (_parts[i].kind == PART_BUTTON && _parts[i].key == key && !_parts[i].detached) {
@@ -312,6 +321,11 @@ part_t *parts_add(part_kind_t kind, uint8_t pin, const char *name, const char *o
         bool shares = other->pin == pin || (encoder && other->pin == check.pin_b)
             || (other->kind == PART_ENCODER && (other->pin_b == pin || (encoder && other->pin_b == check.pin_b)));
         if (other != p && other->kind != PART_SENSOR && (shares || strcasecmp(other->name, name) == 0)) {
+            // Said, as the part pulled out may be one the user still counts on.
+            if (!other->detached) {
+                fprintf(stderr, "virtual: %s %s detached: %s %s takes its %s\r\n", _kind_name(other->kind), other->name,
+                    _kind_name(kind), name, shares ? "pin" : "name");
+            }
             parts_detach(other);
         }
     }

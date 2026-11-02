@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
+#include <sys/stat.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -230,6 +231,11 @@ int main(int argc, char **argv) {
         return 2;
     }
     desktop_options.drive_path = drive_path;
+    // A drive that is not there is made, empty but for code.py: said, as a typo in the path makes one too.
+    struct stat st;
+    if (stat(drive_path, &st) != 0) {
+        fprintf(stderr, "circuitpython: no drive at %s: a new one is made\n", drive_path);
+    }
 
     // The VM gets VM_STACK_SIZE of the main stack, less if the stack limit is lower.
     size_t stack_size = VM_STACK_SIZE;

@@ -210,6 +210,27 @@ class CircuitPythonError(Exception):
         self.output = output
 
 
+def _board_file(name, program):
+    """A board file's path: as given when it is there, else a bare name ("feather.toml") from the
+    boards/files beside the program or this module, in a release package and in the port alike."""
+    if os.path.exists(name) or os.path.dirname(name):
+        if not os.path.exists(name):
+            raise FileNotFoundError("no board file %s" % name)
+        return os.path.abspath(name)
+    here = os.path.dirname(os.path.abspath(__file__))
+    tried = []
+    for base in (os.path.dirname(os.path.abspath(program)), here):
+        for files in (
+            os.path.join(base, "boards", "files"),
+            os.path.join(base, "..", "boards", "files"),
+        ):
+            path = os.path.normpath(os.path.join(files, name))
+            if os.path.exists(path):
+                return path
+            tried.append(path)
+    raise FileNotFoundError("no board file %s (nor %s)" % (name, ", ".join(tried)))
+
+
 class Board:
     """A running program, reached through its API."""
 
@@ -253,7 +274,7 @@ class Board:
         drive = os.path.abspath(drive)
         command = [program, "--drive", drive, "--api", "0"]
         if board_file:
-            command += ["--board-file", os.path.abspath(board_file)]
+            command += ["--board-file", _board_file(board_file, program)]
         if board:
             command += ["--board", board]
         if fast_time:

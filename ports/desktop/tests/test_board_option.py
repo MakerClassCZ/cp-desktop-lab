@@ -1,5 +1,5 @@
 import os, subprocess, sys
-from harness import BIN, HEADLESS, Run, T, check, drive, launch, refused, run, seen
+from harness import BIN, HEADLESS, Run, T, board_file, check, drive, launch, refused, run, seen
 
 # an unknown board name lists the known ones and exits 2
 status, out = refused(["--board", "nope"])
@@ -123,4 +123,40 @@ print("buses done")
     )
 else:
     print("SKIP no /dev/gpiochip0 for --board gpiochip")
+
+# What the port did for the user, said on stderr: a drive made where none was, a display setting
+# it dropped, settings.toml's size over the board file's, a later board file moving a name.
+fresh = os.path.join(T, "made-%d" % os.getpid(), "CIRCUITPY")
+status, said = refused(args=["--drive", fresh], timeout=6)
+check(
+    "a drive that is not there is made, and said",
+    "no drive at " in said and "a new one is made" in said,
+    said,
+)
+with launch(
+    'print("up")\n',
+    '[board]\ndisplay = "240x240"\n',
+    files={"settings.toml": "CIRCUITPY_DISPLAY_ROTATION = 45\nCIRCUITPY_DISPLAY_WIDTH = 200\n"},
+) as b:
+    b.wait("up")
+    said = "".join(b.stderr)
+check(
+    "a bad rotation is said",
+    "CIRCUITPY_DISPLAY_ROTATION 45 is not 0, 90, 180 or 270" in said,
+    said,
+)
+check(
+    "settings.toml's size over the board file's is said",
+    "settings.toml's display 200x240 over the board file's 240x240" in said,
+    said,
+)
+later = board_file('[pins]\nKNOB = "GPIO21"\n', "later.toml")
+with launch('print("up")\n', '[pins]\nKNOB = "GPIO20"\n', args=["--board-file", later]) as b:
+    b.wait("up")
+    said = "".join(b.stderr)
+check(
+    "a later board file moving a name is said",
+    "KNOB is now GPIO21, over an earlier board file's GPIO20" in said,
+    said,
+)
 print("DONE")

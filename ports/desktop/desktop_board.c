@@ -78,6 +78,7 @@ bool desktop_set_machine(const char *name) {
 
 int desktop_display_width = 320;
 int desktop_display_height = 240;
+bool desktop_display_sized;
 
 bool desktop_set_display(const char *size) {
     int width, height;
@@ -89,6 +90,7 @@ bool desktop_set_display(const char *size) {
     }
     desktop_display_width = width;
     desktop_display_height = height;
+    desktop_display_sized = true;
     return true;
 }
 

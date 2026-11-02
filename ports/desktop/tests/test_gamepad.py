@@ -133,6 +133,14 @@ for text, why in (
     ('[gamepad]\nA = "pin=NOWHERE"\n', "no pin NOWHERE"),
     ('[gamepad]\nJUMP = "keys=Space"\n', "no gamepad button JUMP"),
     ('[pins]\nB = "GPIO4"\n[button]\nB = "key=NoSuchKey"\n', "unknown key"),
+    (
+        PINS + '[gamepad]\nA = "pin=SW_A keys=D"\n[midi]\nKEYS = "keyboard"\n',
+        "[gamepad] A: D plays the [midi] keyboard",
+    ),
+    (
+        '[midi]\nKEYS = "keyboard"\n[pins]\nB = "GPIO4"\n[button]\nB = "key=Z"\n',
+        "[button] B: Z plays the [midi] keyboard",
+    ),
 ):
     status, said = refused(board=text)
     check("refused: " + why, status not in (None, 0) and why in said, said)

@@ -14,6 +14,7 @@
 #include "bus_trace.h"
 #include "desktop_pins.h"
 #include "desktop_port.h"
+#include "midi_in.h"
 #include "panel.h"
 
 #define KEYS_MAX 4
@@ -32,6 +33,7 @@ static SDL_Keycode _keys[DESKTOP_BUTTON_COUNT][KEYS_MAX] = {
 static bool _shown;
 static bool _used[DESKTOP_BUTTON_COUNT];
 static bool _held[DESKTOP_BUTTON_COUNT];
+static bool _given[DESKTOP_BUTTON_COUNT];      // keys= in the board file
 // Each button's pin plus one; 0 for none.
 static uint8_t _pin[DESKTOP_BUTTON_COUNT];
 
@@ -73,10 +75,27 @@ int gamepad_key_button(SDL_Keycode key) {
 }
 
 const char *gamepad_key_name(int button) {
-    if (button < 0 || button >= DESKTOP_BUTTON_COUNT || _keys[button][0] == SDLK_UNKNOWN) {
-        return "";
+    for (int k = 0; button >= 0 && button < DESKTOP_BUTTON_COUNT && k < KEYS_MAX; k++) {
+        if (_keys[button][k] != SDLK_UNKNOWN && !midi_keyboard_takes(_keys[button][k])) {
+            return SDL_GetKeyName(_keys[button][k]);
+        }
     }
-    return SDL_GetKeyName(_keys[button][0]);
+    return "";
+}
+
+bool gamepad_check_keys(const char **why) {
+    static char message[96];
+    for (int i = 0; i < DESKTOP_BUTTON_COUNT; i++) {
+        for (int k = 0; _given[i] && k < KEYS_MAX; k++) {
+            if (midi_keyboard_takes(_keys[i][k])) {
+                snprintf(message, sizeof(message), "[gamepad] %s: %s plays the [midi] keyboard", _names[i],
+                    SDL_GetKeyName(_keys[i][k]));
+                *why = message;
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 bool gamepad_add(int button, int pin, const char *keys, const char **why) {
@@ -120,6 +139,7 @@ bool gamepad_add(int button, int pin, const char *keys, const char **why) {
         }
     }
     memcpy(_keys[button], found, sizeof(found));
+    _given[button] = true;
     return true;
 }
 

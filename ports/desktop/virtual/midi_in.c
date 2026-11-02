@@ -258,6 +258,48 @@ bool midi_keyboard_key(int scancode, bool down) {
     return false;
 }
 
+// A key's place on the keyboard. Board files are read before SDL starts, when it knows no layout:
+// a US keyboard's places then, as the keyboard is laid out by them.
+static int _scancode(int keycode) {
+    int scancode = SDL_GetScancodeFromKey(keycode);
+    if (scancode != SDL_SCANCODE_UNKNOWN) {
+        return scancode;
+    }
+    if (keycode >= 'a' && keycode <= 'z') {
+        return SDL_SCANCODE_A + (keycode - 'a');
+    }
+    if (keycode >= '1' && keycode <= '9') {
+        return SDL_SCANCODE_1 + (keycode - '1');
+    }
+    switch (keycode) {
+        case '0':
+            return SDL_SCANCODE_0;
+        case ',':
+            return SDL_SCANCODE_COMMA;
+        case '.':
+            return SDL_SCANCODE_PERIOD;
+        case '/':
+            return SDL_SCANCODE_SLASH;
+        case ';':
+            return SDL_SCANCODE_SEMICOLON;
+        default:
+            return SDL_SCANCODE_UNKNOWN;
+    }
+}
+
+bool midi_keyboard_takes(int keycode) {
+    int scancode = _scancode(keycode);
+    if (!_present || keycode == 0) {
+        return false;
+    }
+    for (size_t i = 0; i < sizeof(_keys) / sizeof(_keys[0]); i++) {
+        if ((int)_keys[i].key == scancode) {
+            return true;
+        }
+    }
+    return scancode == SDL_SCANCODE_PAGEUP || scancode == SDL_SCANCODE_PAGEDOWN;
+}
+
 int midi_keyboard_scancode(int offset) {
     // Where both rows play a key, the upper row's: the lower row ends where the upper begins.
     int key = 0;

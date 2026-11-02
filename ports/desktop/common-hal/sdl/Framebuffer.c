@@ -17,6 +17,7 @@
 #include "supervisor/shared/safe_mode.h"
 #include "supervisor/shared/settings.h"
 
+#include "desktop_port.h"
 #include "sdl_host.h"
 
 bool common_hal_sdl_framebuffer_construct(sdl_framebuffer_obj_t *self, mp_uint_t width, mp_uint_t height) {
@@ -64,10 +65,15 @@ mp_int_t common_hal_sdl_framebuffer_get_buffer(mp_obj_t self_in, mp_buffer_info_
 
 void sdl_framebuffer_autoconstruct(int width, int height, int scale, bool fullscreen) {
     mp_int_t setting = width;
-    (void)settings_get_int("CIRCUITPY_DISPLAY_WIDTH", &setting);
+    bool sized = settings_get_int("CIRCUITPY_DISPLAY_WIDTH", &setting) == SETTINGS_OK;
     width = setting;
     setting = height;
-    (void)settings_get_int("CIRCUITPY_DISPLAY_HEIGHT", &setting);
+    sized |= settings_get_int("CIRCUITPY_DISPLAY_HEIGHT", &setting) == SETTINGS_OK;
+    // settings.toml's size wins over a board file's [board] display: said, as it is easy to miss.
+    if (sized && desktop_display_sized && (width != desktop_display_width || setting != desktop_display_height)) {
+        fprintf(stderr, "circuitpython: settings.toml's display %dx%d over the board file's %dx%d\r\n", width, (int)setting,
+            desktop_display_width, desktop_display_height);
+    }
     height = setting;
     setting = scale;
     (void)settings_get_int("CIRCUITPY_DISPLAY_SCALE", &setting);
@@ -75,10 +81,14 @@ void sdl_framebuffer_autoconstruct(int width, int height, int scale, bool fullsc
     (void)settings_get_bool("CIRCUITPY_DISPLAY_FULLSCREEN", &fullscreen);
     mp_int_t rotation = 0;
     (void)settings_get_int("CIRCUITPY_DISPLAY_ROTATION", &rotation);
-    if (rotation != 90 && rotation != 180 && rotation != 270) {
+    if (rotation != 0 && rotation != 90 && rotation != 180 && rotation != 270) {
+        fprintf(stderr, "circuitpython: settings.toml: CIRCUITPY_DISPLAY_ROTATION %d is not 0, 90, 180 or 270; 0 it is\r\n",
+            (int)rotation);
         rotation = 0;
     }
     if (width < 16 || height < 16 || width > 4096 || height > 4096) {
+        fprintf(stderr, "circuitpython: settings.toml: a display of %dx%d is not 16 to 4096 each; no board.DISPLAY\r\n",
+            width, height);
         return;
     }
     desktop_sdl_configure(scale, fullscreen);

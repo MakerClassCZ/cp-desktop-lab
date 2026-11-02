@@ -117,6 +117,8 @@ void parts_detach(part_t *part);
 part_t *parts_encoder(uint8_t a, uint8_t b, int *sign, const char **why);
 // The attached button a key presses (an SDL keycode), or NULL.
 part_t *parts_key_button(int32_t key);
+// The first attached button whose key the MIDI keyboard takes, or NULL.
+part_t *parts_key_taken(void);
 // The user's side, from the panel or the key script: traced, and a button or switch drives its pin.
 void parts_press(part_t *part, bool down);
 void parts_set(part_t *part, uint32_t value);

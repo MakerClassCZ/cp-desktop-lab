@@ -42,6 +42,8 @@ bool midi_keyboard_held(int note);
 void midi_keyboard_note(int note, bool down, int velocity);
 // A computer key (an SDL scancode): true when it is the keyboard's, played or moving the octave.
 bool midi_keyboard_key(int scancode, bool down);
+// The keyboard is there and plays the key (an SDL keycode): the gamepad and buttons never get it.
+bool midi_keyboard_takes(int keycode);
 // The computer key that plays a key of the keyboard (0-24 from its lowest note), or 0 for none.
 int midi_keyboard_scancode(int offset);
 // The keyboard an octave up (1) or down (-1), its held notes let go first.

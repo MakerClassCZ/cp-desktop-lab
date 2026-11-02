@@ -101,7 +101,16 @@ bool i2c_virtual_attach_default(uint8_t address) {
                 return false;
             }
             i2c_virtual_slot(address)->automatic = true;
-            fprintf(stderr, "virtual: %s attached at I2C 0x%02x (automatic)\r\n", name, (unsigned)address);
+            // The other models at the address, so a driver for one of them knows what to write.
+            char others[96] = "";
+            for (size_t j = i + 1; _models[j] != NULL; j++) {
+                if (_models[j]->address == address && _models[j]->attach == NULL) {
+                    size_t used = strlen(others);
+                    snprintf(others + used, sizeof(others) - used, "%s[i2c] X = \"%s\"", used ? " or " : "; for another chip: ",
+                        _models[j]->name);
+                }
+            }
+            fprintf(stderr, "virtual: %s attached at I2C 0x%02x (automatic%s)\r\n", name, (unsigned)address, others);
             return true;
         }
     }

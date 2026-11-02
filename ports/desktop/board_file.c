@@ -45,6 +45,9 @@
 
 static mp_map_elem_t *_table;
 static size_t _used;
+// The file each name came from, by its index in _table; -1 for the board's own.
+static int8_t _file_of[MAX_NAMES];
+static int _file;
 
 static bool _key_is(mp_obj_t key, const char *name) {
     size_t len;
@@ -98,11 +101,17 @@ static bool _add_pin(const char *where, const char *name, const char *target) {
         return false;
     }
     mp_map_elem_t *e = _find(name);
+    // A name an earlier board file gave, moved: the layering is meant, the move is still said.
+    if (e != NULL && _file_of[e - _table] >= 0 && _file_of[e - _table] != _file && e->value != MP_OBJ_FROM_PTR(pin)) {
+        fprintf(stderr, "circuitpython: %s: %s is now GPIO%u, over an earlier board file's GPIO%u\n", where, name,
+            (unsigned)pin->number, (unsigned)((const mcu_pin_obj_t *)MP_OBJ_TO_PTR(e->value))->number);
+    }
     if (e == NULL) {
         if (_used == MAX_NAMES) {
             fprintf(stderr, "circuitpython: %s: more than %d names on the board\n", where, MAX_NAMES);
             return false;
         }
+        _file_of[_used] = (int8_t)_file;
         e = &_table[_used++];
         e->key = _key(name);
         if (e->key == MP_OBJ_NULL) {
@@ -425,10 +434,23 @@ bool board_file_apply(void) {
     }
     memcpy(_table, map->table, map->used * sizeof(mp_map_elem_t));
     _used = map->used;
+    memset(_file_of, -1, sizeof(_file_of));
     for (int i = 0; i < desktop_options.board_file_count; i++) {
+        _file = i;
         if (!_load(desktop_options.board_files[i])) {
             return false;
         }
+    }
+    // Keys the [midi] keyboard plays reach no button: refused once every file is read, in any order.
+    const char *why = NULL;
+    part_t *taken = parts_key_taken();
+    if (!gamepad_check_keys(&why)) {
+        fprintf(stderr, "circuitpython: %s\n", why);
+        return false;
+    }
+    if (taken != NULL) {
+        fprintf(stderr, "circuitpython: [button] %s: %s plays the [midi] keyboard\n", taken->name, SDL_GetKeyName(taken->key));
+        return false;
     }
     for (int i = 0; i < desktop_options.neopixel_count; i++) {
         char spec[128];

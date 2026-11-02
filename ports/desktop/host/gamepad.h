@@ -27,8 +27,11 @@ void gamepad_use(int button);
 bool gamepad_add(int button, int pin, const char *keys, const char **why);
 // The button a key presses, or -1.
 int gamepad_key_button(SDL_Keycode key);
-// The first key that presses a button, as SDL names it; "" for none.
+// The first key that presses a button, as SDL names it, of those the MIDI keyboard leaves it; ""
+// for none.
 const char *gamepad_key_name(int button);
+// After the board files: false with *why set when a key a [gamepad] line gives plays the keyboard.
+bool gamepad_check_keys(const char **why);
 // The board file has a [gamepad]: the panel shows it.
 void gamepad_show(void);
 bool gamepad_shown(void);
