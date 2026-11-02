@@ -120,9 +120,9 @@ void common_hal_busio_uart_never_reset(busio_uart_obj_t *self) {
 
 // Up to len bytes: until they are all there, or timeout passes with no new byte.
 size_t common_hal_busio_uart_read(busio_uart_obj_t *self, uint8_t *data, size_t len, int *errcode) {
-    if (self->ble != NULL) {
+    if (self->hci_link) {
         // The HCI link: what is there now, never a wait.
-        int n = self->ble->read(data, len);
+        int n = ble_host_read(data, len);
         if (n <= 0) {
             *errcode = n < 0 ? MP_EIO : MP_EAGAIN;
             return MP_STREAM_ERROR;
@@ -174,8 +174,8 @@ size_t common_hal_busio_uart_read(busio_uart_obj_t *self, uint8_t *data, size_t 
 }
 
 size_t common_hal_busio_uart_write(busio_uart_obj_t *self, const uint8_t *data, size_t len, int *errcode) {
-    if (self->ble != NULL) {
-        int n = self->ble->write(data, len);
+    if (self->hci_link) {
+        int n = ble_host_write(data, len);
         if (n < 0) {
             *errcode = MP_EIO;
             return MP_STREAM_ERROR;
@@ -222,13 +222,13 @@ void common_hal_busio_uart_set_timeout(busio_uart_obj_t *self, mp_float_t timeou
 }
 
 uint32_t common_hal_busio_uart_rx_characters_available(busio_uart_obj_t *self) {
-    int n = self->ble != NULL ? self->ble->available()
+    int n = self->hci_link ? ble_host_available()
         : self->virtual_port ? 0 : serial_host_available(&self->port);
     return n > 0 ? (uint32_t)n : 0;
 }
 
 void common_hal_busio_uart_clear_rx_buffer(busio_uart_obj_t *self) {
-    if (self->ble == NULL && !self->virtual_port) {
+    if (!self->hci_link && !self->virtual_port) {
         serial_host_flush_input(&self->port);
     }
 }

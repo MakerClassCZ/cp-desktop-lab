@@ -239,7 +239,11 @@ static void _draw_ble(int y) {
     ble_host_state_t s;
     const char *status = _ble_status(&s);
     char value[64];
-    snprintf(value, sizeof(value), s.advertising ? "%s \"%s\"" : "%s", status, s.name);
+    if (s.advertising) {
+        snprintf(value, sizeof(value), "%s \"%s\"", status, s.name);
+    } else {
+        snprintf(value, sizeof(value), "%s", status);
+    }
     _text(PAD, y + 4, "BLE", 0xd0d0d0);
     _fill(CTRL_X, y + 4, 24, 24, s.connected ? 0x3080e0 : s.advertising ? 0x205090 : 0x303030);
     _text(CTRL_X + 36, y + 8, value, 0xd0d0d0);

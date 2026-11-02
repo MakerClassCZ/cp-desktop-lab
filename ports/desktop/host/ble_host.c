@@ -7,7 +7,7 @@
 // Bluetooth LE for _bleio (devices/ble_hci, the AirLift boards' host stack): the HCI link behind
 // the port's own adapter. The controller is the virtual one (virtual/ble_controller.c) or a real
 // one on a serial port of the computer (--ble PORT: a Pico 2 W bridge, Zephyr's hci_uart), and
-// every H4 packet is framed here on its way, both ways.
+// every H4 packet goes to ble_host_packet() on its way, both ways.
 
 #include "ble_host.h"
 
@@ -28,65 +28,51 @@ static bool _real;              // ... on a serial port
 static serial_host_t _serial;
 static busio_uart_obj_t _uart;  // the adapter's hci_uart
 
-// One direction's bytes gathered into whole H4 packets.
-typedef struct {
-    uint8_t data[1100];
-    size_t have;
-} framer_t;
-
-static framer_t _from_controller;
-static framer_t _to_controller;
+// The controller's bytes gathered into whole H4 packets: the host reads them a byte at a time.
+// What the host writes is a whole packet each time.
+static uint8_t _packet[1100];
+static size_t _have;
 
 // An H4 packet's whole length from its first bytes; 0 while its header is not all there.
 static size_t _h4_length(const uint8_t *p, size_t have) {
     switch (p[0]) {
-        case 0x01:              // command: opcode, length
-            return have >= 4 ? 4 + (size_t)p[3] : 0;
         case 0x02:              // ACL data: handle and flags, 16-bit length
             return have >= 5 ? 5 + (size_t)(p[3] | p[4] << 8) : 0;
         case 0x04:              // event: code, length
             return have >= 3 ? 3 + (size_t)p[2] : 0;
-        default:                // not H4: dropped a byte at a time
+        default:                // not H4 from a controller: dropped a byte at a time
             return 1;
     }
 }
 
-static void _frame(framer_t *f, bool to_controller, const uint8_t *data, size_t len) {
-    for (size_t i = 0; i < len; i++) {
-        f->data[f->have++] = data[i];
-        size_t whole = _h4_length(f->data, f->have);
-        if (whole > sizeof(f->data)) {
-            f->have = 0;
-        } else if (whole != 0 && f->have == whole) {
-            if (f->data[0] == 0x01 || f->data[0] == 0x02 || f->data[0] == 0x04) {
-                ble_host_packet(to_controller, f->data, whole);
-            }
-            f->have = 0;
-        }
-    }
-}
-
-static int _available(void) {
+int ble_host_available(void) {
     return _real ? serial_host_available(&_serial) : ble_controller_available();
 }
 
-static int _read(uint8_t *data, size_t len) {
+int ble_host_read(uint8_t *data, size_t len) {
     int n = _real ? serial_host_read(&_serial, data, len, 0) : ble_controller_read(data, len);
-    if (n > 0) {
-        _frame(&_from_controller, false, data, (size_t)n);
+    for (int i = 0; i < n; i++) {
+        _packet[_have++] = data[i];
+        size_t whole = _h4_length(_packet, _have);
+        if (whole > sizeof(_packet)) {
+            _have = 0;
+        } else if (whole != 0 && _have == whole) {
+            if (_packet[0] == 0x02 || _packet[0] == 0x04) {
+                ble_host_packet(false, _packet, whole);
+            }
+            _have = 0;
+        }
     }
     return n;
 }
 
-static int _write(const uint8_t *data, size_t len) {
+int ble_host_write(const uint8_t *data, size_t len) {
     int n = _real ? serial_host_write(&_serial, data, len, 1000) : ble_controller_write(data, len);
     if (n > 0) {
-        _frame(&_to_controller, true, data, (size_t)n);
+        ble_host_packet(true, data, (size_t)n);
     }
     return n;
 }
-
-static const ble_transport_t _transport = { _available, _read, _write };
 
 bool ble_host_board_setting(const char *value) {
     if (strcmp(value, "on") == 0 || strcmp(value, "off") == 0) {
@@ -97,16 +83,22 @@ bool ble_host_board_setting(const char *value) {
     return false;
 }
 
+const char *ble_host_port(void) {
+    const char *ble = desktop_options.ble;
+    return ble == NULL || strcmp(ble, "off") == 0 || strcmp(ble, "virtual") == 0 ? NULL : ble;
+}
+
 bool ble_host_init(void) {
     const char *ble = desktop_options.ble;
     if (ble == NULL ? _board_off : strcmp(ble, "off") == 0) {
         return true;
     }
-    if (ble == NULL || strcmp(ble, "virtual") == 0) {
+    const char *port = ble_host_port();
+    if (port == NULL) {
         ble_controller_reset();
     } else {
         char err[256];
-        if (!serial_host_open(&_serial, ble, err, sizeof(err))) {
+        if (!serial_host_open(&_serial, port, err, sizeof(err))) {
             fprintf(stderr, "circuitpython: --ble: %s\n", err);
             return false;
         }
@@ -120,7 +112,7 @@ bool ble_host_init(void) {
     }
     _uart.base.type = &busio_uart_type;
     _uart.open = true;
-    _uart.ble = &_transport;
+    _uart.hci_link = true;
     _on = true;
     return true;
 }

@@ -18,6 +18,8 @@
 bool control_api_start(void);
 // Closes the listening socket, so a process started by a reset can take the port.
 void control_api_stop(void);
+// Before the process ends: up to 300 ms for a reader of the console to have its last bytes.
+void control_api_linger(void);
 // The requests that need the VM (the panel, the state, the displays), run on the VM thread from
 // the background task; returns at once when there are none.
 void control_api_vm_task(void);

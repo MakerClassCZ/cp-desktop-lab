@@ -5,21 +5,16 @@
 // SPDX-License-Identifier: MIT
 
 // A Bluetooth LE controller in the lab, for _bleio's HCI host stack: it answers the commands the
-// host sends as a real controller does (the values a Pico 2 W's CYW43439 gave), keeps what the
-// program advertises, and joins one peer to it, the phone, which the control API plays. It has no
-// time of its own: nothing happens until the host or the phone does something.
+// host sends as a real controller does (the values a Pico 2 W's CYW43439 gave), and joins one peer
+// to what the program advertises, the phone, which the control API plays. It has no time of its
+// own: nothing happens until the host or the phone does something.
 
 #include "ble_controller.h"
 
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef _WIN32
-#include <unistd.h>
-#endif
 
-#include "common-hal/microcontroller/Processor.h"
-#include "shared-bindings/microcontroller/Processor.h"
 #include "shared-bindings/os/__init__.h"
 
 #define H4_COMMAND 0x01
@@ -45,25 +40,18 @@ static uint8_t _out[16384];
 static size_t _out_head;
 static size_t _out_count;
 
-// The command or ACL packet arriving from the host.
-static uint8_t _in[1100];
-static size_t _in_have;
-
 // A test's fault (CIRCUITPY_BLE_VIRTUAL_FAULT): "no-completed" keeps the host's ACL credit,
-// "silent" answers no command, as a controller that hangs.
-static enum { FAULT_NONE, FAULT_NO_COMPLETED, FAULT_SILENT } _fault;
+// "silent" answers no command, as a controller that hangs, and "no-public-address" has none, as
+// Zephyr's on an nRF.
+static enum { FAULT_NONE, FAULT_NO_COMPLETED, FAULT_SILENT, FAULT_NO_PUBLIC_ADDRESS } _fault;
 
-static uint8_t _public_address[6];
-static uint8_t _static_address[6];
-static uint8_t _random_address[6];
+// The lab's addresses, least significant byte first: 02:dc:00:00:00:01 public, and a static random
+// one for a host that asks for the controller's (Zephyr's vendor command).
+static const uint8_t _public_address[6] = { 0x01, 0x00, 0x00, 0x00, 0xdc, 0x02 };
+static const uint8_t _static_address[6] = { 0x01, 0x00, 0x00, 0x00, 0xdc, 0xc2 };
 
-// What the program advertises.
+// What the program advertises: ADV_IND and ADV_DIRECT_IND (0, 1) take a connection.
 static uint8_t _adv_type;
-static uint8_t _adv_own_address_type;
-static uint8_t _adv_data[31];
-static uint8_t _adv_len;
-static uint8_t _scan_rsp[31];
-static uint8_t _scan_rsp_len;
 static bool _advertising;
 
 // The phone: a random static address, as a phone's is; the connection to it.
@@ -128,11 +116,13 @@ static void _command(uint16_t opcode, const uint8_t *p, uint8_t len) {
         case 0x0c03:            // Reset
             _advertising = false;
             _connected = false;
-            _adv_len = _scan_rsp_len = 0;
             _ok(opcode);
             break;
         case 0x0c01:            // Set Event Mask
         case 0x2001:            // LE Set Event Mask
+        case 0x2005:            // LE Set Random Address
+        case 0x2008:            // LE Set Advertising Data
+        case 0x2009:            // LE Set Scan Response Data
         case 0x200b:            // LE Set Scan Parameters
         case 0x200c:            // LE Set Scan Enable
             _ok(opcode);
@@ -145,7 +135,9 @@ static void _command(uint16_t opcode, const uint8_t *p, uint8_t len) {
             _complete(opcode, ret, 9);
             break;
         case 0x1009:            // Read BD_ADDR
-            memcpy(ret + 1, _public_address, 6);
+            if (_fault != FAULT_NO_PUBLIC_ADDRESS) {
+                memcpy(ret + 1, _public_address, 6);
+            }
             _complete(opcode, ret, 7);
             break;
         case 0x2002:            // LE Read Buffer Size: 251 bytes, 8 packets
@@ -157,25 +149,9 @@ static void _command(uint16_t opcode, const uint8_t *p, uint8_t len) {
             ret[1] = 0x01;
             _complete(opcode, ret, 9);
             break;
-        case 0x2005:            // LE Set Random Address
-            if (len >= 6) {
-                memcpy(_random_address, p, 6);
-            }
-            _ok(opcode);
-            break;
         case 0x2006:            // LE Set Advertising Parameters
-            if (len >= 6) {
+            if (len >= 5) {
                 _adv_type = p[4];
-                _adv_own_address_type = p[5];
-            }
-            _ok(opcode);
-            break;
-        case 0x2008:            // LE Set Advertising Data
-        case 0x2009:            // LE Set Scan Response Data
-            if (len >= 1) {
-                uint8_t n = p[0] <= 31 && p[0] < len ? p[0] : 0;
-                memcpy(opcode == 0x2008 ? _adv_data : _scan_rsp, p + 1, n);
-                *(opcode == 0x2008 ? &_adv_len : &_scan_rsp_len) = n;
             }
             _ok(opcode);
             break;
@@ -235,65 +211,18 @@ static void _acl(const uint8_t *p, size_t len) {
     _frame_have = 0;
 }
 
-// A whole command or ACL packet from the host.
-static void _from_host(const uint8_t *p, size_t len) {
-    if (p[0] == H4_COMMAND && _fault != FAULT_SILENT) {
-        _command((uint16_t)(p[1] | p[2] << 8), p + 4, p[3]);
-    } else if (p[0] == H4_ACL && len >= 5) {
-        _acl(p, len);
-    }
-}
-
-// No machine id (Windows, macOS): sixteen bytes from the computer's name, the same at each start.
-static void _uid_from_name(uint8_t uid[COMMON_HAL_MCU_PROCESSOR_UID_LENGTH]) {
-    char name[256] = "";
-    const char *env = getenv("COMPUTERNAME");
-    if (env != NULL) {
-        strncpy(name, env, sizeof(name) - 1);
-    }
-    #ifndef _WIN32
-    if (name[0] == '\0') {
-        gethostname(name, sizeof(name) - 1);
-    }
-    #endif
-    // FNV-1a over the name, once for each byte.
-    uint32_t h = 2166136261u;
-    for (int i = 0; i < COMMON_HAL_MCU_PROCESSOR_UID_LENGTH; i++) {
-        for (const char *c = name; *c != '\0'; c++) {
-            h = (h ^ (uint8_t)*c) * 16777619u;
-        }
-        h = (h ^ (uint32_t)i) * 16777619u;
-        uid[i] = (uint8_t)(h >> 24);
-    }
-}
-
 void ble_controller_reset(void) {
     pthread_mutex_lock(&_lock);
     _out_head = _out_count = 0;
-    _in_have = 0;
     _advertising = false;
-    _adv_len = _scan_rsp_len = 0;
     _connected = false;
     _pdu_head = _pdu_count = 0;
     _frame_have = 0;
-    // Addresses of this lab, from its UID: the public one and the static one in the "FICR".
-    uint8_t uid[COMMON_HAL_MCU_PROCESSOR_UID_LENGTH];
-    common_hal_mcu_processor_get_uid(uid);
-    static const uint8_t no_uid[COMMON_HAL_MCU_PROCESSOR_UID_LENGTH] = { 0 };
-    if (memcmp(uid, no_uid, sizeof(no_uid)) == 0) {
-        _uid_from_name(uid);
-    }
-    memcpy(_public_address, uid, 6);
-    memcpy(_static_address, uid + 6, 6);
-    _static_address[5] |= 0xc0;
-    // A test reaches the host's path for a controller without one, as Zephyr's on an nRF is.
     const char *fault = getenv("CIRCUITPY_BLE_VIRTUAL_FAULT");
-    _fault = fault == NULL ? FAULT_NONE : strcmp(fault, "no-completed") == 0 ? FAULT_NO_COMPLETED
-        : strcmp(fault, "silent") == 0 ? FAULT_SILENT : FAULT_NONE;
-    const char *no_public = getenv("CIRCUITPY_BLE_NO_PUBLIC_ADDRESS");
-    if (no_public != NULL && no_public[0] == '1') {
-        memset(_public_address, 0, sizeof(_public_address));
-    }
+    _fault = fault == NULL ? FAULT_NONE
+        : strcmp(fault, "no-completed") == 0 ? FAULT_NO_COMPLETED
+        : strcmp(fault, "silent") == 0 ? FAULT_SILENT
+        : strcmp(fault, "no-public-address") == 0 ? FAULT_NO_PUBLIC_ADDRESS : FAULT_NONE;
     pthread_mutex_unlock(&_lock);
 }
 
@@ -316,25 +245,12 @@ int ble_controller_read(uint8_t *data, size_t len) {
     return (int)n;
 }
 
-int ble_controller_write(const uint8_t *data, size_t len) {
+int ble_controller_write(const uint8_t *packet, size_t len) {
     pthread_mutex_lock(&_lock);
-    for (size_t i = 0; i < len; i++) {
-        _in[_in_have++] = data[i];
-        size_t whole = 0;
-        if (_in[0] == H4_COMMAND && _in_have >= 4) {
-            whole = 4 + _in[3];
-        } else if (_in[0] == H4_ACL && _in_have >= 5) {
-            whole = 5 + (size_t)(_in[3] | _in[4] << 8);
-        } else if (_in[0] != H4_COMMAND && _in[0] != H4_ACL) {
-            _in_have = 0;
-            continue;
-        }
-        if (whole > sizeof(_in)) {
-            _in_have = 0;
-        } else if (whole != 0 && _in_have == whole) {
-            _from_host(_in, whole);
-            _in_have = 0;
-        }
+    if (packet[0] == H4_COMMAND && len >= 4 && _fault != FAULT_SILENT) {
+        _command((uint16_t)(packet[1] | packet[2] << 8), packet + 4, packet[3]);
+    } else if (packet[0] == H4_ACL && len >= 5) {
+        _acl(packet, len);
     }
     pthread_mutex_unlock(&_lock);
     return (int)len;

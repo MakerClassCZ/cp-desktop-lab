@@ -25,5 +25,5 @@ typedef struct {
     bool open;
     bool virtual_port;          // the virtual board with no --uart: nothing on the other end
     // The port's HCI link to a Bluetooth controller (host/ble_host.c), not a UART of the program.
-    const struct ble_transport *ble;
+    bool hci_link;
 } busio_uart_obj_t;

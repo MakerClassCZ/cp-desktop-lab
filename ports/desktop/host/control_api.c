@@ -76,6 +76,7 @@ static pthread_mutex_t _lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t _slot_free = PTHREAD_COND_INITIALIZER;
 static bool _on;
 static api_ring_t _console;
+static uint64_t _console_served;   // the console's end as last sent to a reader; 0: no reader
 static api_ring_t _trace;
 // The supervisor's status, from the terminal title it writes: "code.py", "REPL", "Done" ...
 static char _status[64] = "starting";
@@ -326,6 +327,24 @@ static void _stream(request_t *r, api_ring_t *ring) {
     free(data);
     _answer_json(r, 200, &b);
     api_buf_free(&b);
+    if (ring == &_console) {
+        pthread_mutex_lock(&_lock);
+        _console_served = info.end > _console_served ? info.end : _console_served;
+        pthread_mutex_unlock(&_lock);
+    }
+}
+
+void control_api_linger(void) {
+    for (int i = 0; i < 60; i++) {
+        pthread_mutex_lock(&_lock);
+        bool done = !_on || _console_served == 0 || _console_served >= api_ring_end(&_console);
+        pthread_mutex_unlock(&_lock);
+        if (done) {
+            return;
+        }
+        struct timespec t = { 0, 5 * 1000 * 1000 };
+        nanosleep(&t, NULL);
+    }
 }
 
 static void _ok(request_t *r) {
@@ -901,68 +920,84 @@ static void _ble_state(request_t *r) {
     api_buf_free(&b);
 }
 
+// The phone's endpoints play the virtual controller's peer; with a real one the phone is real.
+static bool _phone(request_t *r) {
+    if (strcmp(ble_host_controller(), "virtual") == 0) {
+        return true;
+    }
+    _error(r, 409, "no virtual controller: the phone is a real one, or there is no Bluetooth");
+    return false;
+}
+
+static void _ble_att_send(request_t *r) {
+    uint8_t pdu[512];
+    int n = r->body == NULL ? -1 : _unhex(r->body, r->body_len, pdu, sizeof(pdu));
+    if (n <= 0) {
+        _error(r, 400, "the body is an ATT PDU in hex");
+    } else if (!ble_controller_att_send(pdu, (size_t)n)) {
+        _error(r, 409, "no phone is connected");
+    } else {
+        _ok(r);
+    }
+}
+
+// Every PDU the program has sent the phone; with wait=MS, the first one waited for.
+static void _ble_att_take(request_t *r) {
+    long long wait = _param_int(r, "wait", 0);
+    wait = wait < 0 ? 0 : wait > WAIT_MAX_MS ? WAIT_MAX_MS : wait;
+    api_buf_t b = {0};
+    api_buf_add(&b, "{\"pdus\": [", 10);
+    uint8_t pdu[512];
+    bool first = true;
+    for (long long waited = 0;;) {
+        size_t n = ble_controller_att_take(pdu, sizeof(pdu));
+        if (n > 0) {
+            api_buf_add(&b, first ? "\"" : ", \"", first ? 1 : 3);
+            _buf_hex(&b, pdu, n);
+            api_buf_add(&b, "\"", 1);
+            first = false;
+            continue;
+        }
+        if (!first || waited >= wait) {
+            break;
+        }
+        struct timespec t = { 0, 5 * 1000 * 1000 };
+        nanosleep(&t, NULL);
+        waited += 5;
+    }
+    api_buf_add(&b, "]}", 2);
+    _answer_json(r, 200, &b);
+    api_buf_free(&b);
+}
+
 static void _ble(request_t *r, bool get, bool post) {
     if (strcmp(r->path, "/api/ble") == 0 && get) {
         _ble_state(r);
-        return;
-    }
-    bool att = strcmp(r->path, "/api/ble/att") == 0;
-    if (!(post && (strcmp(r->path, "/api/ble/connect") == 0 || strcmp(r->path, "/api/ble/disconnect") == 0 || att))
-        && !(get && att)) {
-        _error(r, 404, "no such endpoint");
-        return;
-    }
-    if (strcmp(ble_host_controller(), "virtual") != 0) {
-        _error(r, 409, "no virtual controller: the phone is a real one, or there is no Bluetooth");
-        return;
-    }
-    if (strcmp(r->path, "/api/ble/connect") == 0) {
-        if (ble_controller_connect() != 0) {
-            _error(r, 409, "the program advertises nothing connectable, or a phone is connected");
+    } else if (strcmp(r->path, "/api/ble/connect") == 0 && post) {
+        if (!_phone(r)) {
             return;
         }
-        _ok(r);
-    } else if (strcmp(r->path, "/api/ble/disconnect") == 0) {
-        // 0x13: the remote user ended it, as a phone that leaves does.
-        ble_controller_disconnect(0x13);
-        _ok(r);
-    } else if (post) {
-        uint8_t pdu[512];
-        int n = r->body == NULL ? -1 : _unhex(r->body, r->body_len, pdu, sizeof(pdu));
-        if (n <= 0) {
-            _error(r, 400, "the body is an ATT PDU in hex");
-        } else if (!ble_controller_att_send(pdu, (size_t)n)) {
-            _error(r, 409, "no phone is connected");
+        if (ble_controller_connect() != 0) {
+            _error(r, 409, "the program advertises nothing connectable, or a phone is connected");
         } else {
             _ok(r);
         }
-    } else {
-        // Every PDU the program has sent the phone; with wait=MS, the first one waited for.
-        long long wait = _param_int(r, "wait", 0);
-        wait = wait < 0 ? 0 : wait > WAIT_MAX_MS ? WAIT_MAX_MS : wait;
-        api_buf_t b = {0};
-        api_buf_add(&b, "{\"pdus\": [", 10);
-        uint8_t pdu[512];
-        bool first = true;
-        for (long long waited = 0;;) {
-            size_t n = ble_controller_att_take(pdu, sizeof(pdu));
-            if (n > 0) {
-                api_buf_add(&b, first ? "\"" : ", \"", first ? 1 : 3);
-                _buf_hex(&b, pdu, n);
-                api_buf_add(&b, "\"", 1);
-                first = false;
-                continue;
-            }
-            if (!first || waited >= wait) {
-                break;
-            }
-            struct timespec t = { 0, 5 * 1000 * 1000 };
-            nanosleep(&t, NULL);
-            waited += 5;
+    } else if (strcmp(r->path, "/api/ble/disconnect") == 0 && post) {
+        if (_phone(r)) {
+            // 0x13: the remote user ended it, as a phone that leaves does.
+            ble_controller_disconnect(0x13);
+            _ok(r);
         }
-        api_buf_add(&b, "]}", 2);
-        _answer_json(r, 200, &b);
-        api_buf_free(&b);
+    } else if (strcmp(r->path, "/api/ble/att") == 0 && post) {
+        if (_phone(r)) {
+            _ble_att_send(r);
+        }
+    } else if (strcmp(r->path, "/api/ble/att") == 0 && get) {
+        if (_phone(r)) {
+            _ble_att_take(r);
+        }
+    } else {
+        _error(r, 404, "no such endpoint");
     }
 }
 

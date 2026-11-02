@@ -220,6 +220,8 @@ void desktop_power_off(int status) {
     // thread or the console handler: the VM thread may be inside a transfer.
     if (desktop_on_vm_thread()) {
         desktop_pin_backend->close();
+        // exit() ends the API's threads at once, a reply to a reader with them.
+        control_api_linger();
     }
     desktop_serial_restore();
     exit(status);

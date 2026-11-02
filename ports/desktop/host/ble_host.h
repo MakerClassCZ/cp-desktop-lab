@@ -10,16 +10,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// The HCI link of _bleio (devices/ble_hci), H4 bytes both ways. read and write never wait:
-// they move what there is, 0 when nothing; -1 when the link is gone.
-typedef struct ble_transport {
-    int (*available)(void);
-    int (*read)(uint8_t *data, size_t len);
-    int (*write)(const uint8_t *data, size_t len);
-} ble_transport_t;
+// The HCI link of _bleio (devices/ble_hci), H4 bytes both ways, for the port's busio.UART:
+// read and write never wait, they move what there is, 0 when nothing, -1 when the link is gone;
+// a write is one whole packet.
+int ble_host_available(void);
+int ble_host_read(uint8_t *data, size_t len);
+int ble_host_write(const uint8_t *data, size_t len);
 
 // A board file's [board] ble: "on" or "off"; false (and the cause printed) for anything else.
 bool ble_host_board_setting(const char *value);
+// The serial port --ble names, or NULL for the virtual controller or none.
+const char *ble_host_port(void);
 // The controller --ble chose, opened before anything runs: the virtual one (no --ble),
 // a serial port, or none (--ble off, or the board file's off). False: the cause is printed.
 bool ble_host_init(void);

@@ -95,8 +95,7 @@ static int optional_port(int argc, char **argv, int *i, int fallback) {
 // Real hardware (another board, a serial port, the computer's microphone) needs real time.
 static bool fast_time_allowed(void) {
     if (desktop_pin_backend != &desktop_virtual_backend || desktop_options.uart_path != NULL
-        || (desktop_options.ble != NULL && strcmp(desktop_options.ble, "off") != 0
-            && strcmp(desktop_options.ble, "virtual") != 0)) {
+        || ble_host_port() != NULL) {
         return false;
     }
     for (int i = 0; i < parts_count(); i++) {
