@@ -35,6 +35,13 @@ typedef enum {
     MIC_HOST,           // the computer's microphone
 } mic_source_t;
 
+// The values an option takes, as its errors and board.parts's repr say them.
+#define PARTS_COLOURS "red, green, blue, yellow, orange, white, amber or #rrggbb"
+#define PARTS_BUTTON_LEVELS "\"low\" or \"high\", then key=KEY"
+#define PARTS_MIC_SOURCES "\"tone 440\", \"noise\" or \"mic\""
+#define PARTS_IR_CODES "four bytes, \"255,2,247,8\""
+#define PARTS_NEOPIXEL_LAYOUTS "\"10\", \"8x8\", \"16x16 serpentine GRBW\""
+
 #define PARTS_NO_PIN 0xff        // the pin of a part on none: a sensor, a CC slider
 
 typedef struct {

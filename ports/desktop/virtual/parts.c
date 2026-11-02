@@ -95,7 +95,7 @@ static bool _options(part_t *p, const char *options, const char **why) {
             if (level == 4 && strncmp(options, "high", 4) == 0) {
                 p->active_high = true;
             } else if (level != 0 && !(level == 3 && strncmp(options, "low", 3) == 0)) {
-                *why = "bad button (\"low\" or \"high\", then key=KEY)";
+                *why = "bad button (" PARTS_BUTTON_LEVELS ")";
                 return false;
             }
             if (key != NULL) {
@@ -109,7 +109,7 @@ static bool _options(part_t *p, const char *options, const char **why) {
         }
         case PART_LED:
             if (!_colour(options, &p->colour)) {
-                *why = "bad colour (red, green, blue, yellow, orange, white, amber or #rrggbb)";
+                *why = "bad colour (" PARTS_COLOURS ")";
                 return false;
             }
             return true;
@@ -125,7 +125,7 @@ static bool _options(part_t *p, const char *options, const char **why) {
             } else if (sscanf(options, "tone %u%c", &hz, &rest) == 1 && hz > 0 && hz < 100000) {
                 p->tone_hz = hz;
             } else if (*options != '\0' && strcmp(options, "tone") != 0) {
-                *why = "bad microphone (\"tone 440\", \"noise\" or \"mic\")";
+                *why = "bad microphone (" PARTS_MIC_SOURCES ")";
                 return false;
             }
             return true;
@@ -133,7 +133,7 @@ static bool _options(part_t *p, const char *options, const char **why) {
         case PART_IR:
             // The Adafruit mini remote's 1 unless the board file names another code.
             if (!parts_ir_code(*options != '\0' ? options : "255,2,247,8", p->ir_code)) {
-                *why = "bad IR code (four bytes: \"255,2,247,8\")";
+                *why = "bad IR code (" PARTS_IR_CODES ")";
                 return false;
             }
             return true;

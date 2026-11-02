@@ -477,8 +477,9 @@ default the model's), `name=` (by default its kind numbered,
 NeoPixel strip its pin's name; up to 23 characters, 11 for a sensor) and at
 most one option, written as the board file writes it: `Button(pin, pressed="low")`,
 `LED(pin, color="red")`, `Lamp(pin, color="red")`, `Mic(pin, source="tone 440")`,
-`IR(pin, code="255,2,247,8")`, `NeoPixel(pin, layout="10")`. A kind's `repr` lists them, and a
-sensor's channels with their units.
+`IR(pin, code="255,2,247,8")`, `NeoPixel(pin, layout="10")`. A kind's `repr` lists them with the values
+its option takes (`LED(pin, *, color="red", name=None)  color: red, green, ...`), and a sensor's
+channels with their units; a keyword the kind does not take raises with that line.
 
 An attached part's values are its attributes; setting one is what moving its control on the
 panel does:

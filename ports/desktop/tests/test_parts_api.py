@@ -117,6 +117,25 @@ with launch('print("up")\n', board=PINS) as b:
         "address=0x77" in out and "temp C" in out,
         out,
     )
+    out = b.exec(
+        "print(repr(board.parts.LED))\nprint(repr(board.parts.Button))\nprint(repr(board.parts.Encoder))"
+    )
+    check(
+        "a kind's repr gives its option's values",
+        'LED(pin, *, color="red", name=None)  color: red, green, blue, yellow, orange, white, amber or #rrggbb'
+        in out
+        and 'pressed: "low" or "high", then key=KEY' in out
+        and "Encoder(pin_a, pin_b, *, name=None)" in out,
+        out,
+    )
+    out = b.exec(
+        "try:\n    board.parts.LED(board.GPIO25, colour='blue')\nexcept TypeError as e:\n    print('err', e)"
+    )
+    check(
+        "an unknown keyword says what the kind takes",
+        "err" in out and "colour" in out and 'LED(pin, *, color="red", name=None)' in out,
+        out,
+    )
     b.write("board.parts.BM\t")
     check("Tab completes the catalogue", "BME280" in b.wait("BME280", timeout=5), "")
 

@@ -142,6 +142,34 @@ static void _kind_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind
         mp_printf(print, ", %q=\"%s\"", kind->keyword, kind->initial);
     }
     mp_print_str(print, ", name=None)");
+    const char *values = kind->keyword == MP_QSTR_color ? PARTS_COLOURS
+        : kind->keyword == MP_QSTR_pressed ? PARTS_BUTTON_LEVELS
+        : kind->keyword == MP_QSTR_source ? PARTS_MIC_SOURCES
+        : kind->keyword == MP_QSTR_code ? PARTS_IR_CODES
+        : kind->keyword == MP_QSTR_layout ? PARTS_NEOPIXEL_LAYOUTS : NULL;
+    if (values != NULL) {
+        mp_printf(print, "  %q: %s", kind->keyword, values);
+    }
+}
+
+// A keyword the kind does not take: a TypeError with the kind's line, so the REPL shows what it takes.
+static void _check_keywords(const board_part_kind_t *kind, size_t n_args, size_t n_kw, const mp_obj_t *args,
+    const mp_arg_t *allowed, size_t n_allowed) {
+    for (size_t i = 0; i < n_kw; i++) {
+        qstr given = mp_obj_str_get_qstr(args[n_args + 2 * i]);
+        bool known = false;
+        for (size_t k = 0; k < n_allowed; k++) {
+            known |= allowed[k].qst == given && allowed[k].qst != MP_QSTRnull;
+        }
+        if (!known) {
+            vstr_t line;
+            mp_print_t print;
+            vstr_init_print(&line, 64, &print);
+            _kind_print(&print, MP_OBJ_FROM_PTR(kind), PRINT_REPR);
+            mp_raise_msg_varg(&mp_type_TypeError, MP_ERROR_TEXT("unexpected keyword argument '%q': %s"), given,
+                vstr_null_terminated_str(&line));
+        }
+    }
 }
 
 // ---- a part ----
@@ -567,6 +595,7 @@ static mp_obj_t _kind_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const m
     mp_arg_val_t vals[MP_ARRAY_SIZE(allowed)];
     mp_map_t kw_args;
     mp_map_init_fixed_table(&kw_args, n_kw, args + n_args);
+    _check_keywords(kind, n_args, n_kw, args, allowed, MP_ARRAY_SIZE(allowed));
     if (encoder) {
         // pin_a, pin_b positional, then name=: the table's order is not the call's.
         mp_arg_t order[] = { allowed[0], allowed[2], allowed[1] };
@@ -680,7 +709,7 @@ static mp_obj_t _attach(mp_obj_t part_in) {
         bool serpentine;
         char order[5];
         if (!neopixel_emu_parse(self->options, &cols, &rows, &serpentine, order)) {
-            mp_raise_ValueError_varg(MP_ERROR_TEXT("bad NeoPixel layout \"%s\" (\"10\", \"8x8\", \"16x16 serpentine GRBW\")"), self->options);
+            mp_raise_ValueError_varg(MP_ERROR_TEXT("bad NeoPixel layout \"%s\" (%s)"), self->options, PARTS_NEOPIXEL_LAYOUTS);
         }
         if (!neopixel_emu_add(self->pin, cols, rows, serpentine, order)) {
             mp_raise_ValueError_varg(MP_ERROR_TEXT("more than %d NeoPixel pins"), NEOPIXEL_EMU_STRIPS);
