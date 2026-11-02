@@ -370,4 +370,89 @@ for fast in (False, True):
             b.console(since=0)["data"][-300:],
         )
 
+# ---- The final review's findings, each pinned ----
+
+# The default virtual controller has a public address, on every system (the UID is zero where
+# the system gives none).
+with launch(PERIPHERAL) as b:
+    seen(b, "advertising")
+    state = b.request("GET", "/api/ble")
+check(
+    "the virtual controller has a public address",
+    state["public"] and state["address"] != "00:00:00:00:00:00",
+    state,
+)
+
+# The adapter's name in the run after a reload: no pointer into the previous run's heap.
+NAME = """
+import _bleio, supervisor
+if supervisor.runtime.run_reason == supervisor.RunReason.STARTUP:
+    _bleio.adapter.enabled = True
+    print("first", _bleio.adapter.name)
+else:
+    print("second", _bleio.adapter.name)
+"""
+with launch(NAME) as b:
+    seen(b, "first")
+    b.reload()
+    ok = seen(b, "second CIRCUITPY", 10)
+    out = b.console(since=0)["data"][-300:]
+check("the adapter's name in the run after a reload", ok, out)
+
+# A controller that never gives the host its ACL credit back: the program goes on, its sends fail.
+HEARTBEAT = """
+import _bleio, time
+a = _bleio.adapter
+a.start_advertising(bytes([2, 1, 6]), connectable=True)
+print("ready")
+n = 0
+while True:
+    n += 1
+    print("beat", n)
+    time.sleep(0.1)
+"""
+with launch(HEARTBEAT, env=dict(HEADLESS, CIRCUITPY_BLE_VIRTUAL_FAULT="no-completed")) as b:
+    seen(b, "ready")
+    b.request("POST", "/api/ble/connect")
+    for _ in range(12):
+        b.request("POST", "/api/ble/att", "02f700")
+    before = b.console(since=0)["data"].count("beat")
+    import time
+
+    time.sleep(8)
+    after = b.console(since=0)["data"].count("beat")
+check(
+    "a controller that keeps the ACL credit does not hang the program",
+    after > before + 5,
+    (before, after),
+)
+
+# A controller that does not answer: the first use fails, and the adapter is not left half on.
+SILENT = """
+import _bleio
+a = _bleio.adapter
+try:
+    a.enabled = True
+except Exception as e:
+    print("failed", type(e).__name__)
+print("enabled", a.enabled)
+"""
+with launch(SILENT, env=dict(HEADLESS, CIRCUITPY_BLE_VIRTUAL_FAULT="silent")) as b:
+    seen(b, "enabled", 20)
+    out = b.console(since=0)["data"][-300:]
+check(
+    "a controller that does not answer leaves the adapter off",
+    "failed" in out and "enabled False" in out,
+    out,
+)
+
+# An L2CAP frame longer than the host's 255-byte buffer, in two fragments: dropped, the host goes on.
+with launch(PERIPHERAL) as b:
+    seen(b, "advertising")
+    b.request("POST", "/api/ble/connect")
+    seen(b, "connected 1")
+    b.request("POST", "/api/ble/att", "52" + "0300" + "41" * 297)
+    mtu = att(b, "02f700")
+check("a 300-byte frame in fragments does not break the host", (mtu or "").startswith("03"), mtu)
+
 print("DONE")

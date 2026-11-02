@@ -14,6 +14,9 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 #include "common-hal/microcontroller/Processor.h"
 #include "shared-bindings/microcontroller/Processor.h"
@@ -45,6 +48,10 @@ static size_t _out_count;
 // The command or ACL packet arriving from the host.
 static uint8_t _in[1100];
 static size_t _in_have;
+
+// A test's fault (CIRCUITPY_BLE_VIRTUAL_FAULT): "no-completed" keeps the host's ACL credit,
+// "silent" answers no command, as a controller that hangs.
+static enum { FAULT_NONE, FAULT_NO_COMPLETED, FAULT_SILENT } _fault;
 
 static uint8_t _public_address[6];
 static uint8_t _static_address[6];
@@ -208,8 +215,10 @@ static void _acl(const uint8_t *p, size_t len) {
         memcpy(_frame + _frame_have, p + 5, n);
         _frame_have += n;
     }
-    uint8_t done[5] = { 1, HANDLE & 0xff, HANDLE >> 8, 1, 0 };
-    _event(EVT_NUMBER_OF_COMPLETED_PACKETS, done, sizeof(done));
+    if (_fault != FAULT_NO_COMPLETED) {
+        uint8_t done[5] = { 1, HANDLE & 0xff, HANDLE >> 8, 1, 0 };
+        _event(EVT_NUMBER_OF_COMPLETED_PACKETS, done, sizeof(done));
+    }
     if (_frame_have < 4) {
         return;
     }
@@ -228,10 +237,33 @@ static void _acl(const uint8_t *p, size_t len) {
 
 // A whole command or ACL packet from the host.
 static void _from_host(const uint8_t *p, size_t len) {
-    if (p[0] == H4_COMMAND) {
+    if (p[0] == H4_COMMAND && _fault != FAULT_SILENT) {
         _command((uint16_t)(p[1] | p[2] << 8), p + 4, p[3]);
     } else if (p[0] == H4_ACL && len >= 5) {
         _acl(p, len);
+    }
+}
+
+// No machine id (Windows, macOS): sixteen bytes from the computer's name, the same at each start.
+static void _uid_from_name(uint8_t uid[COMMON_HAL_MCU_PROCESSOR_UID_LENGTH]) {
+    char name[256] = "";
+    const char *env = getenv("COMPUTERNAME");
+    if (env != NULL) {
+        strncpy(name, env, sizeof(name) - 1);
+    }
+    #ifndef _WIN32
+    if (name[0] == '\0') {
+        gethostname(name, sizeof(name) - 1);
+    }
+    #endif
+    // FNV-1a over the name, once for each byte.
+    uint32_t h = 2166136261u;
+    for (int i = 0; i < COMMON_HAL_MCU_PROCESSOR_UID_LENGTH; i++) {
+        for (const char *c = name; *c != '\0'; c++) {
+            h = (h ^ (uint8_t)*c) * 16777619u;
+        }
+        h = (h ^ (uint32_t)i) * 16777619u;
+        uid[i] = (uint8_t)(h >> 24);
     }
 }
 
@@ -247,10 +279,17 @@ void ble_controller_reset(void) {
     // Addresses of this lab, from its UID: the public one and the static one in the "FICR".
     uint8_t uid[COMMON_HAL_MCU_PROCESSOR_UID_LENGTH];
     common_hal_mcu_processor_get_uid(uid);
+    static const uint8_t no_uid[COMMON_HAL_MCU_PROCESSOR_UID_LENGTH] = { 0 };
+    if (memcmp(uid, no_uid, sizeof(no_uid)) == 0) {
+        _uid_from_name(uid);
+    }
     memcpy(_public_address, uid, 6);
     memcpy(_static_address, uid + 6, 6);
     _static_address[5] |= 0xc0;
     // A test reaches the host's path for a controller without one, as Zephyr's on an nRF is.
+    const char *fault = getenv("CIRCUITPY_BLE_VIRTUAL_FAULT");
+    _fault = fault == NULL ? FAULT_NONE : strcmp(fault, "no-completed") == 0 ? FAULT_NO_COMPLETED
+        : strcmp(fault, "silent") == 0 ? FAULT_SILENT : FAULT_NONE;
     const char *no_public = getenv("CIRCUITPY_BLE_NO_PUBLIC_ADDRESS");
     if (no_public != NULL && no_public[0] == '1') {
         memset(_public_address, 0, sizeof(_public_address));
@@ -334,13 +373,16 @@ bool ble_controller_att_send(const uint8_t *pdu, size_t len) {
     pthread_mutex_lock(&_lock);
     bool ok = _connected && len <= PDU_MAX;
     if (ok) {
-        // ACL to the host: the first (and only) fragment of an L2CAP frame on the ATT channel.
-        uint8_t head[9] = {
-            H4_ACL, HANDLE & 0xff, (HANDLE >> 8) | 0x20, (uint8_t)(len + 4), (uint8_t)((len + 4) >> 8),
-            (uint8_t)len, (uint8_t)(len >> 8), L2CAP_CID_ATT & 0xff, L2CAP_CID_ATT >> 8,
-        };
-        _put(head, sizeof(head));
-        _put(pdu, len);
+        // An L2CAP frame on the ATT channel, in ACL packets of at most 251 bytes, as LE's are:
+        // the first flagged as a start, the rest as continuations.
+        uint8_t frame[4 + PDU_MAX] = { (uint8_t)len, (uint8_t)(len >> 8), L2CAP_CID_ATT & 0xff, L2CAP_CID_ATT >> 8 };
+        memcpy(frame + 4, pdu, len);
+        for (size_t at = 0; at < len + 4; at += 251) {
+            size_t n = len + 4 - at < 251 ? len + 4 - at : 251;
+            uint8_t head[5] = { H4_ACL, HANDLE & 0xff, (HANDLE >> 8) | (at == 0 ? 0x20 : 0x10), (uint8_t)n, (uint8_t)(n >> 8) };
+            _put(head, sizeof(head));
+            _put(frame + at, n);
+        }
     }
     pthread_mutex_unlock(&_lock);
     return ok;
