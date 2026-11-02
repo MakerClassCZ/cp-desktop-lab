@@ -18,9 +18,20 @@ export PYTHONIOENCODING=utf-8      # the console text has emoji; Windows would w
 WORK=$(mktemp -d)
 cp "$HERE"/tests/*.py "$HERE/tools/cpapi.py" "$HERE/tools/cp_mcp.py" "$WORK/"
 mkdir "$WORK/board_files" && cp "$HERE"/boards/files/*.toml "$WORK/board_files/"
+# adafruit_ble from its frozen submodule, when fetched, for test_ble's BLERadio() program
+# (git submodule update --init frozen/Adafruit_CircuitPython_BLE); a CIRCUITPY_LIB set wins.
+BLE_LIB="$HERE/../../frozen/Adafruit_CircuitPython_BLE/adafruit_ble"
+if [ -z "$CIRCUITPY_LIB" ] && [ -d "$BLE_LIB" ]; then
+    mkdir "$WORK/lib" && cp -r "$BLE_LIB" "$WORK/lib/"
+    CIRCUITPY_LIB="$WORK/lib"
+    # Windows's Python takes a Windows path.
+    command -v cygpath > /dev/null && CIRCUITPY_LIB=$(cygpath -w "$CIRCUITPY_LIB")
+    export CIRCUITPY_LIB
+fi
 cd "$WORK" || exit 2
 [ $# -gt 0 ] || set -- test_*.py
 failed=""
+again=""
 # One test run; true when it passed. Its summary line, and what failed.
 run_test() {
     "$TIMEOUT" 300 "$PYTHON" "$1" "$PROGRAM" > "$1.out" 2>&1
@@ -36,9 +47,15 @@ for t in "$@"; do
     # A failure is run once more: a slow runner's timing passes the second time, a bug fails again.
     if ! run_test "$t"; then
         echo "$t: again"
-        run_test "$t" || failed="$failed $t"
+        if run_test "$t"; then
+            again="$again $t"
+        else
+            failed="$failed $t"
+        fi
     fi
 done
+# Shown so that a test that passes only now and then does not hide.
+[ -n "$again" ] && echo "passed the second time:$again"
 if [ -n "$failed" ]; then
     echo "failed:$failed"
     exit 1

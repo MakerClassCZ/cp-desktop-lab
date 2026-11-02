@@ -92,12 +92,9 @@ jobs:
             dist/*.vsix
           if-no-files-found: error
       - name: The BLE library for the tests
-        # adafruit_ble from its frozen submodule: test_ble runs BLERadio() code from a CLUE with it.
+        # adafruit_ble from its frozen submodule: ci-test.sh gives it to test_ble's BLERadio() program.
         if: matrix.target != 'windows'
-        run: |
-          git submodule update --init --depth 1 frozen/Adafruit_CircuitPython_BLE
-          mkdir -p cplib && cp -r frozen/Adafruit_CircuitPython_BLE/adafruit_ble cplib/
-          echo "CIRCUITPY_LIB=$PWD/cplib" >> $GITHUB_ENV
+        run: git submodule update --init --depth 1 frozen/Adafruit_CircuitPython_BLE
       - name: Tests (Linux)
         if: startsWith(matrix.target, 'linux')
         run: |
@@ -122,11 +119,7 @@ jobs:
         with:
           name: windows-X64
       - name: The BLE library for the tests
-        shell: bash
-        run: |
-          git submodule update --init --depth 1 frozen/Adafruit_CircuitPython_BLE
-          mkdir -p cplib && cp -r frozen/Adafruit_CircuitPython_BLE/adafruit_ble cplib/
-          echo "CIRCUITPY_LIB=$(cygpath -w "$PWD/cplib")" >> $GITHUB_ENV
+        run: git submodule update --init --depth 1 frozen/Adafruit_CircuitPython_BLE
       - name: Tests
         shell: bash
         run: |
