@@ -1,11 +1,9 @@
 # A Circuit Playground's names on the virtual board:
 #   circuitpython --board-file boards/files/circuitplayground.toml
 # The ring of ten NeoPixels is drawn as a row. Its buttons read high while pressed, as on the
-# real board (press them on the board panel; the keyboard's keys read low). The light sensor and
+# real board; the Z and X keys press them, as does the board panel. The light sensor and
 # the thermistor are sliders: LIGHT and TEMPERATURE read what the slider says. The accelerometer
 # is a LIS3DH on a virtual I2C bus, its x, y and z sliders; the microphone the panel's generator.
-# They sit on keys' pins, there being no more free ones: ACCELEROMETER_SCL and _SDA on L and R
-# (Q, W), its interrupt on SELECT (Backspace), the microphone on START and Y (Return, S).
 
 [pins]
 NEOPIXEL = "GPIO14"
@@ -30,7 +28,7 @@ BUTTON_B = "GPIO26"
 D5 = "GPIO26"
 LIGHT = "GPIO27"
 A8 = "GPIO27"
-TEMPERATURE = "GPIO12"   # SW_MENU's pin: the board panel drives it
+TEMPERATURE = "GPIO12"
 A9 = "GPIO12"
 A0 = "SPEAKER"
 ACCELEROMETER_SCL = "GPIO10"
@@ -50,8 +48,8 @@ NEOPIXEL = "10"
 LED = "red"
 
 [button]
-BUTTON_A = "high"
-BUTTON_B = "high"
+BUTTON_A = "high key=Z"
+BUTTON_B = "high key=X"
 
 [switch]
 SLIDE_SWITCH = ""

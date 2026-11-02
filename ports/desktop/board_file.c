@@ -9,11 +9,11 @@
 //
 //     [pins]
 //     NEOPIXEL = "GPIO14"     # a pin number, 0-27
-//     BUTTON = "SW_A"         # or a name the board has
+//     BUTTON = "GPIO4"        # or a name the board has
 //     [neopixel]
 //     NEOPIXEL = "8x8 serpentine"
-//     [gamepad]               # the handheld's buttons on the panel
-//     A = "Space, Z"          # and their keys (gamepad.c)
+//     [gamepad]               # a handheld's buttons on the panel (gamepad.c)
+//     A = "pin=BUTTON keys=Space, Z"
 //     [i2c]                   # devices on the virtual I2C bus (i2c_virtual.c)
 //     ACCEL = "lis3dh 0x19"
 //
@@ -225,6 +225,50 @@ static bool _add_midi(const char *where, const char *name, const char *spec) {
     return ok;
 }
 
+// BUTTON = "pin=PIN keys=KEY, KEY": a gamepad button on a pin, with its keys; either may be left
+// out (no pin: a shift register reads it; no keys: its default ones). keys= takes the rest of the
+// line, as SDL's key names have spaces (Left Shift).
+static bool _add_gamepad(const char *where, const char *name, const char *spec) {
+    int button = gamepad_button(name);
+    if (button < 0) {
+        fprintf(stderr, "circuitpython: %s: no gamepad button %s (UP, DOWN, LEFT, RIGHT, A, B, X, Y, START, SELECT, L, R, MENU)\n",
+            where, name);
+        return false;
+    }
+    char pin_name[64] = "";
+    const char *keys = NULL;
+    const char *s = spec;
+    if (strncmp(s, "pin=", 4) == 0) {
+        size_t n = strcspn(s + 4, " ");
+        snprintf(pin_name, sizeof(pin_name), "%.*s", (int)n, s + 4);
+        s += 4 + n;
+        while (*s == ' ') {
+            s++;
+        }
+    }
+    if (strncmp(s, "keys=", 5) == 0) {
+        keys = s + 5;
+    } else if (*s != '\0') {
+        fprintf(stderr, "circuitpython: %s: a [gamepad] button is \"pin=PIN keys=KEY, KEY\" (either may be left out)\n", where);
+        return false;
+    }
+    int pin = -1;
+    if (pin_name[0] != '\0') {
+        const mcu_pin_obj_t *obj = _pin(pin_name);
+        if (obj == NULL || !desktop_pin_is_gpio(obj->number)) {
+            fprintf(stderr, "circuitpython: %s: no pin %s\n", where, pin_name);
+            return false;
+        }
+        pin = obj->number;
+    }
+    const char *why = NULL;
+    if (!gamepad_add(button, pin, keys, &why)) {
+        fprintf(stderr, "circuitpython: %s: %s\n", where, why);
+        return false;
+    }
+    return true;
+}
+
 // DATA = "clock=PIN latch=PIN keys=B,A,START,...": the gamepad's buttons behind a shift register.
 static bool _add_shiftreg(const char *where, const char *name, const char *spec) {
     const mcu_pin_obj_t *data = _pin(name);
@@ -341,9 +385,11 @@ static bool _load(const char *path) {
             ok = _add_spi(where, key, value);
         } else if (section == MIDI) {
             ok = _add_midi(where, key, value);
-        } else if (section == GAMEPAD || section == I2C) {
+        } else if (section == GAMEPAD) {
+            ok = _add_gamepad(where, key, value);
+        } else if (section == I2C) {
             const char *why = NULL;
-            ok = section == GAMEPAD ? gamepad_set_keys(key, value, &why) : i2c_virtual_add(key, value, &why);
+            ok = i2c_virtual_add(key, value, &why);
             if (!ok) {
                 fprintf(stderr, "circuitpython: %s: %s\n", where, why);
             }

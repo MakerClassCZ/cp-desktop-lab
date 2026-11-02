@@ -31,20 +31,20 @@ check(
     repr(lb.stdout),
 )
 
-# the virtual board is the default: its names, the virtual buses on any pins, all 28 GPIO numbers,
+# the virtual board is the default: its pins by number and no handheld's buttons, the virtual buses on any pins, all 28 GPIO numbers,
 # and sys.platform naming the host as CPython does (libraries test it to tell boards apart)
 console, _ = run(
     """import board, busio, microcontroller, sys
-print("board", board.board_id, hasattr(board, "SW_A"), hasattr(board, "D0"))
-busio.SPI(board.SW_A, board.SW_B, board.SW_X)
-busio.I2C(board.SW_Y, board.SW_L)
+print("board", board.board_id, board.GPIO4 is microcontroller.pin.GPIO4, hasattr(board, "SW_A"), hasattr(board, "D0"))
+busio.SPI(board.GPIO4, board.GPIO5, board.GPIO6)
+busio.I2C(board.GPIO7, board.GPIO10)
 print("buses built")
 print("mcu pins", hasattr(microcontroller.pin, "GPIO27"), hasattr(microcontroller.pin, "GPIO28"))
 print("platform", sys.platform)
 """,
     expect="platform",
 )
-check("virtual board_id and names", "board virtual True False" in console, console)
+check("virtual board_id and names", "board virtual True False False" in console, console)
 check(
     "the virtual board's SPI and I2C are virtual buses, on any pins",
     "buses built" in console,

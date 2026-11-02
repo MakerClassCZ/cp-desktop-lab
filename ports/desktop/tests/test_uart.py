@@ -102,7 +102,7 @@ print("waiting", w, uart.in_waiting, uart.baudrate)
 
     # Refusals: swapped pins, flow control.
     r = run("""import board, busio
-for args, kw in (((board.RX, board.TX), {}), ((board.TX, board.RX), {"rts": board.SW_A})):
+for args, kw in (((board.RX, board.TX), {}), ((board.TX, board.RX), {"rts": board.GPIO4})):
     try:
         busio.UART(*args, **kw)
         print("accepted")

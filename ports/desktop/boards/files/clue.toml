@@ -12,12 +12,12 @@ LED = "GPIO15"
 P17 = "GPIO15"
 D17 = "GPIO15"
 WHITE_LEDS = "GPIO16"
-BUTTON_A = "SW_A"
-P5 = "SW_A"
-D5 = "SW_A"
-BUTTON_B = "SW_B"
-P11 = "SW_B"
-D11 = "SW_B"
+BUTTON_A = "GPIO4"
+P5 = "GPIO4"
+D5 = "GPIO4"
+BUTTON_B = "GPIO5"
+P11 = "GPIO5"
+D11 = "GPIO5"
 MICROPHONE_CLOCK = "GPIO17"
 MICROPHONE_DATA = "GPIO18"
 P0 = "GPIO19"
@@ -45,10 +45,14 @@ P16 = "GPIO26"
 D16 = "GPIO26"
 A1 = "GPIO26"
 PROXIMITY_LIGHT_INTERRUPT = "GPIO27"
-ACCELEROMETER_GYRO_INTERRUPT = "GPIO12"   # SW_MENU's pin: an input nothing drives
+ACCELEROMETER_GYRO_INTERRUPT = "GPIO12"   # an input nothing drives
 
 [neopixel]
 NEOPIXEL = "1"
+
+[button]
+BUTTON_A = "key=Z"
+BUTTON_B = "key=X"
 
 [led]
 L = "red"

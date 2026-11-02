@@ -1,5 +1,5 @@
 # A Feather's names on the virtual board: circuitpython --board-file boards/files/feather.toml
-# Pins 0-12 are the keyboard's buttons (pressed = low), 13 the speaker, 14-27 free virtual pins.
+# Its button is the Z key (pressed = low); GPIO13 is the speaker.
 # TX and RX are the board's own (--uart); SCL, SDA and board.I2C() are its virtual I2C bus,
 # with the sensors a Feather project often has at their default addresses; SCK, MOSI, MISO and
 # board.SPI() its virtual SPI bus. The board panel shows the NeoPixel, the LED, the analog pins
@@ -21,7 +21,7 @@ A2 = "GPIO24"
 A3 = "GPIO25"
 A4 = "GPIO26"
 A5 = "GPIO27"
-BUTTON = "SW_A"          # the Z key, or the panel
+BUTTON = "GPIO4"
 # Outputs a program sets and leaves, on keys' pins (no free ones are left): an output wins
 # over the key.
 NEOPIXEL_POWER = "GPIO9" # ESP32-S2/S3 Feathers power their NeoPixel through it
@@ -40,7 +40,7 @@ NEOPIXEL = "1"
 LED = "red"
 
 [button]
-BUTTON = ""
+BUTTON = "key=Z"         # the Z key, or the panel
 
 [analog]
 A0 = ""

@@ -3,15 +3,16 @@
 `examples/gamepad` again, drawn with `picogame`, CircuitPython's game engine: the D-pad flies a
 ship over the stars with a flame behind it, A fires, and a shot that hits a rock breaks it into
 sparks, with a sound for each. The top bar counts the rocks, the bottom one lists the buttons
-held. `board.toml` shows the gamepad on the board panel.
+held. `boards/files/picopad.toml` gives the virtual board the PicoPad's buttons and shows them on the
+board panel.
 
 From a release package:
 
-    circuitpython --drive examples/picogame/CIRCUITPY --board-file examples/picogame/board.toml
+    circuitpython --drive examples/picogame/CIRCUITPY --board-file boards/files/picopad.toml
 
 From the port's directory after a build:
 
-    build-linux/circuitpython --drive examples/picogame/CIRCUITPY --board-file examples/picogame/board.toml
+    build-linux/circuitpython --drive examples/picogame/CIRCUITPY --board-file boards/files/picopad.toml
 
 - Click the panel's buttons, or use the keys: the arrows, A on `Z`, B on `X`, X on `A`, Y on `S`,
   START on Enter, SELECT on Backspace.

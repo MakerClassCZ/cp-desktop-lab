@@ -19,6 +19,7 @@
 #include "desktop_port.h"
 #include "midi_in.h"
 #include "panel.h"
+#include "parts.h"
 #include "sdl_host.h"
 
 #define FRAME_MS 16
@@ -296,6 +297,9 @@ void desktop_sdl_task(void) {
                     break;
                 }
                 button = gamepad_key_button(event.key.keysym.sym);
+                if (button < 0 && parts_key_button(event.key.keysym.sym) != NULL) {
+                    parts_press(parts_key_button(event.key.keysym.sym), pressed);
+                }
                 break;
             case SDL_WINDOWEVENT:
                 // The display's window (the panel takes its own events): no cursor over it.

@@ -17,6 +17,7 @@
 #include "ble_host.h"
 #include "desktop_pins.h"
 #include "desktop_port.h"
+#include "gamepad.h"
 
 // --code FILE: the supervisor's next code file (as supervisor.set_next_code_file sets it), kept
 // for every run, from the file's directory. A file that is not on the drive stops the start.
@@ -54,7 +55,7 @@ static void _code_file(void) {
 
 void board_init(void) {
     if (desktop_pin_backend->accepts_drive) {
-        desktop_buttons_release_all();
+        gamepad_release_all();
     }
     // A 320x240 picture, or the board file's, in a window twice its size.
     sdl_framebuffer_autoconstruct(desktop_display_width, desktop_display_height, 2, false);

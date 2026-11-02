@@ -12,7 +12,7 @@ FEATHER = """# a few names of a Feather
 [pins]
 NEOPIXEL = "GPIO14"
 LED = "GPIO15"
-BUTTON = "SW_A"     # an existing name: the Z key
+BUTTON = "GPIO4"    # an existing name
 "D5" = "GPIO16"
 
 [neopixel]
@@ -31,7 +31,7 @@ def show(pin, data):
 out, trace = run(
     """import board, microcontroller
 print("names", board.NEOPIXEL is microcontroller.pin.GPIO14, board.LED is microcontroller.pin.GPIO15,
-      board.BUTTON is board.SW_A, board.D5 is microcontroller.pin.GPIO16, "NEOPIXEL" in dir(board))
+      board.BUTTON is board.GPIO4, board.D5 is microcontroller.pin.GPIO16, "NEOPIXEL" in dir(board))
 print("repr", repr(board.NEOPIXEL), repr(board.BUTTON))
 """,
     "",
@@ -41,7 +41,7 @@ print("repr", repr(board.NEOPIXEL), repr(board.BUTTON))
 check("board file: new names and an alias", "names True True True True True" in out, out)
 check(
     "board file: a pin's repr still works",
-    "repr microcontroller.pin.GPIO14 board.SW_A" in out,
+    "repr board.GPIO14 board.GPIO4" in out,
     out,
 )
 
@@ -69,12 +69,12 @@ check(
 
 out, trace = run(
     WRITE
-    + """show(board.SW_X, [0, 16, 0, 0, 0, 32, 64, 0, 0, 0, 0, 255])
+    + """show(board.GPIO6, [0, 16, 0, 0, 0, 32, 64, 0, 0, 0, 0, 255])
 print("written")
 """,
     "",
     "written",
-    args=["--neopixel", "SW_X=3 GRBW"],
+    args=["--neopixel", "GPIO6=3 GRBW"],
 )
 check(
     "--neopixel on the command line, GRBW as rrggbbww",
@@ -84,7 +84,7 @@ check(
 
 out, trace = run(
     WRITE
-    + """show(board.SW_Y, [1, 2, 3, 4, 5, 6])
+    + """show(board.GPIO7, [1, 2, 3, 4, 5, 6])
 print("written")
 """,
     "",
@@ -116,18 +116,18 @@ for bad, why in (
     ('[pins]\nX = "NOPE"\n', "no pin NOPE"),
     ("[pins]\nX = GPIO99\n", "no pin GPIO99"),
     ("[colors]\n", "unknown section"),
-    ('[neopixel]\nSW_A = "0x3"\n', "bad NeoPixel layout"),
+    ('[neopixel]\nGPIO4 = "0x3"\n', "bad NeoPixel layout"),
     ('[board]\ncolour = "red"\n', "unknown [board] setting colour"),
     ('[board]\ndisplay = "240"\n', "[board] display 240: expected WIDTHxHEIGHT"),
     ('[button]\nD99 = ""\n', "no pin D99"),
-    ('[led]\nSW_A = "plaid"\n', "bad colour"),
-    ('[ir]\nSW_A = "1,2,3"\n', "bad IR code"),
+    ('[led]\nGPIO4 = "plaid"\n', "bad colour"),
+    ('[ir]\nGPIO4 = "1,2,3"\n', "bad IR code"),
     (
         '[spi]\nX = "st9999 240x240 cs=GPIO20 dc=GPIO21"\n',
         "unknown SPI display st9999 (st7789, ili9341, hx8357, gc9a01 or st7735)",
     ),
     ('[spi]\nX = "st7789 240x240"\n', "needs cs= and dc="),
-    ('[gamepad]\nA = "nokey"\n', "unknown key nokey"),
+    ('[gamepad]\nA = "keys=nokey"\n', "unknown key nokey"),
     ('[gamepad]\nZ = "z"\n', "no gamepad button Z"),
     (
         '[i2c]\nX = "bmp999"\n',

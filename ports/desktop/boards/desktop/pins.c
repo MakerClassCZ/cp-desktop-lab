@@ -13,25 +13,40 @@
 // The virtual board, the default. Its id is the runtime board's, not the build's (desktop).
 static const MP_DEFINE_STR_OBJ(virtual_board_id_obj, "virtual");
 
-// The buttons use the PicoPad's names, so games written for it run unchanged.
+// A neutral board: its pins by their numbers; a board file adds a real board's names and parts.
 mp_map_elem_t virtual_board_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_board) },
     { MP_ROM_QSTR(MP_QSTR_board_id), MP_OBJ_FROM_PTR(&virtual_board_id_obj) },
     CIRCUITPY_BOARD_HARDWARE_KEYS
 
-    { MP_ROM_QSTR(MP_QSTR_SW_UP), MP_OBJ_FROM_PTR(&pin_GPIO0) },
-    { MP_ROM_QSTR(MP_QSTR_SW_DOWN), MP_OBJ_FROM_PTR(&pin_GPIO1) },
-    { MP_ROM_QSTR(MP_QSTR_SW_LEFT), MP_OBJ_FROM_PTR(&pin_GPIO2) },
-    { MP_ROM_QSTR(MP_QSTR_SW_RIGHT), MP_OBJ_FROM_PTR(&pin_GPIO3) },
-    { MP_ROM_QSTR(MP_QSTR_SW_A), MP_OBJ_FROM_PTR(&pin_GPIO4) },
-    { MP_ROM_QSTR(MP_QSTR_SW_B), MP_OBJ_FROM_PTR(&pin_GPIO5) },
-    { MP_ROM_QSTR(MP_QSTR_SW_X), MP_OBJ_FROM_PTR(&pin_GPIO6) },
-    { MP_ROM_QSTR(MP_QSTR_SW_Y), MP_OBJ_FROM_PTR(&pin_GPIO7) },
-    { MP_ROM_QSTR(MP_QSTR_SW_START), MP_OBJ_FROM_PTR(&pin_GPIO8) },
-    { MP_ROM_QSTR(MP_QSTR_SW_SELECT), MP_OBJ_FROM_PTR(&pin_GPIO9) },
-    { MP_ROM_QSTR(MP_QSTR_SW_L), MP_OBJ_FROM_PTR(&pin_GPIO10) },
-    { MP_ROM_QSTR(MP_QSTR_SW_R), MP_OBJ_FROM_PTR(&pin_GPIO11) },
-    { MP_ROM_QSTR(MP_QSTR_SW_MENU), MP_OBJ_FROM_PTR(&pin_GPIO12) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO0), MP_OBJ_FROM_PTR(&pin_GPIO0) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO1), MP_OBJ_FROM_PTR(&pin_GPIO1) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO2), MP_OBJ_FROM_PTR(&pin_GPIO2) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO3), MP_OBJ_FROM_PTR(&pin_GPIO3) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO4), MP_OBJ_FROM_PTR(&pin_GPIO4) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO5), MP_OBJ_FROM_PTR(&pin_GPIO5) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO6), MP_OBJ_FROM_PTR(&pin_GPIO6) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO7), MP_OBJ_FROM_PTR(&pin_GPIO7) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO8), MP_OBJ_FROM_PTR(&pin_GPIO8) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO9), MP_OBJ_FROM_PTR(&pin_GPIO9) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO10), MP_OBJ_FROM_PTR(&pin_GPIO10) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO11), MP_OBJ_FROM_PTR(&pin_GPIO11) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO12), MP_OBJ_FROM_PTR(&pin_GPIO12) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO13), MP_OBJ_FROM_PTR(&pin_GPIO13) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO14), MP_OBJ_FROM_PTR(&pin_GPIO14) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO15), MP_OBJ_FROM_PTR(&pin_GPIO15) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO16), MP_OBJ_FROM_PTR(&pin_GPIO16) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO17), MP_OBJ_FROM_PTR(&pin_GPIO17) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO18), MP_OBJ_FROM_PTR(&pin_GPIO18) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO19), MP_OBJ_FROM_PTR(&pin_GPIO19) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO20), MP_OBJ_FROM_PTR(&pin_GPIO20) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO21), MP_OBJ_FROM_PTR(&pin_GPIO21) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO22), MP_OBJ_FROM_PTR(&pin_GPIO22) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO23), MP_OBJ_FROM_PTR(&pin_GPIO23) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO24), MP_OBJ_FROM_PTR(&pin_GPIO24) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO25), MP_OBJ_FROM_PTR(&pin_GPIO25) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO26), MP_OBJ_FROM_PTR(&pin_GPIO26) },
+    { MP_ROM_QSTR(MP_QSTR_GPIO27), MP_OBJ_FROM_PTR(&pin_GPIO27) },
 
     // audioio.AudioOut(board.SPEAKER) plays through the host's sound output.
     { MP_ROM_QSTR(MP_QSTR_SPEAKER), MP_OBJ_FROM_PTR(&pin_GPIO13) },

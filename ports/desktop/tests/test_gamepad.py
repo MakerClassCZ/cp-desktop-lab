@@ -1,18 +1,30 @@
-"""The panel's gamepad: python3 test_gamepad.py /path/to/circuitpython
+"""The panel's gamepad and keys: python3 test_gamepad.py /path/to/circuitpython
 
-A [gamepad] section in the board file shows the handheld's buttons on the panel and sets their
-keys. Played through the control API ("down KEY", "up KEY", "press NAME", "release NAME"), each
-step waiting for the program to report what it saw, and checked in its output and the bus trace.
+A [gamepad] section in the board file puts a handheld's buttons on pins and sets their keys; a
+[button] part can have a key of its own; without either a key presses nothing. Played through the
+control API ("down KEY", "up KEY", "press NAME", "release NAME"), each step waiting for the program
+to report what it saw, and checked in its output and the bus trace.
 """
 
-from harness import check, run
+import cpapi
+from harness import check, launch, refused, run
+
+PINS = '[pins]\nSW_A = "GPIO4"\nSW_UP = "GPIO0"\nSW_R = "GPIO11"\nSW_START = "GPIO8"\n'
 
 
-def watch(changes):
-    """Prints each change of (A, UP, R, START) as it comes, then all of them after that many."""
-    return (
-        """import board, digitalio, time
-pins = [digitalio.DigitalInOut(getattr(board, n)) for n in ("SW_A", "SW_UP", "SW_R", "SW_START")]
+def gamepad(**keys):
+    """A board file with A, UP, R and START on their pins; keys= for the ones given."""
+    lines = "".join(
+        '%s = "pin=SW_%s%s"\n' % (b, b, " keys=" + keys[b] if b in keys else "")
+        for b in ("A", "UP", "R", "START")
+    )
+    return PINS + "[gamepad]\n" + lines
+
+
+def watch(changes, names=("SW_A", "SW_UP", "SW_R", "SW_START")):
+    """Prints each change of the pins as it comes, then all of them after that many."""
+    return """import board, digitalio, time
+pins = [digitalio.DigitalInOut(getattr(board, n)) for n in %r]
 for p in pins:
     p.pull = digitalio.Pull.UP
 seen = []
@@ -23,9 +35,7 @@ while len(seen) < %d:
         print("state", v)
     time.sleep(0.01)
 print("seen", seen)
-"""
-        % changes
-    )
+""" % (tuple(names), changes)
 
 
 def keys(*pairs, first="wait state 1111\n"):
@@ -45,10 +55,10 @@ out, trace = run(
         ("up w", "1111"),
     ),
     "seen ",
-    "[gamepad]\n",
+    gamepad(),
 )
 check(
-    "default keys press A, UP and R",
+    "default keys press A, UP and R on their pins",
     "seen ['1111', '0111', '1111', '1011', '1111', '1101', '1111']" in out,
     out,
 )
@@ -74,7 +84,7 @@ out, trace = run(
         first="wait state 1111\ndown z\nup z\n",
     ),
     "seen ",
-    '[gamepad]\nA = "space"\nUP = "w, I"\n',
+    gamepad(A="space", UP="w, I"),
 )
 check(
     "keys from the board file replace the defaults, a key leaves the button it had",
@@ -84,7 +94,7 @@ check(
 
 # A gamepad button by its name, as the mouse does
 out, trace = run(
-    watch(3), keys(("press START", "1110"), ("release START", "1111")), "seen ", "[gamepad]\n"
+    watch(3), keys(("press START", "1110"), ("release START", "1111")), "seen ", gamepad()
 )
 check("press START by name", "seen ['1111', '1110', '1111']" in out, out)
 check(
@@ -92,6 +102,40 @@ check(
     "GAMEPAD START pressed" in trace and "GAMEPAD START released" in trace,
     trace,
 )
+
+# The bare virtual board has no gamepad: a key presses no pin, a button's name is no part.
+with launch(watch(2, ("GPIO4", "GPIO0", "GPIO11", "GPIO8")), None) as b:
+    b.wait("state 1111")
+    b.panel("down z")
+    b.panel("up z")
+    try:
+        b.panel("press A")
+        refused_press = ""
+    except cpapi.ApiError as e:
+        refused_press = str(e)
+    print_out = b.console(since=0)["data"]
+check("without a board file the keys press no pin", "state 0111" not in print_out, print_out)
+check("without a board file A is no part", "no part A" in refused_press, refused_press)
+
+# A [button] part with a key: Z presses it, the panel's click still does.
+out, trace = run(
+    watch(3, ("BUTTON",)),
+    "wait state 1\ndown z\nwait state 0\nup z\n",
+    "seen ",
+    '[pins]\nBUTTON = "GPIO4"\n[button]\nBUTTON = "key=Z"\n',
+)
+check("a button part's key presses it", "seen ['1', '0', '1']" in out, out)
+check("trace: the button part pressed by its key", "BUTTON BUTTON pressed" in trace, trace)
+
+# Wrong [gamepad] and [button] lines stop the start, saying why.
+for text, why in (
+    ('[gamepad]\nA = "Space"\n', 'a [gamepad] button is "pin=PIN keys=KEY, KEY"'),
+    ('[gamepad]\nA = "pin=NOWHERE"\n', "no pin NOWHERE"),
+    ('[gamepad]\nJUMP = "keys=Space"\n', "no gamepad button JUMP"),
+    ('[pins]\nB = "GPIO4"\n[button]\nB = "key=NoSuchKey"\n', "unknown key"),
+):
+    status, said = refused(board=text)
+    check("refused: " + why, status not in (None, 0) and why in said, said)
 
 # A shift register of the gamepad's buttons, read as adafruit_pybadger reads a PyBadge's
 out, trace = run(

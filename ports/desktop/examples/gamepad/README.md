@@ -1,16 +1,16 @@
 # A ship on the PicoPad's gamepad
 
 `code.py` reads the PicoPad's buttons with `keypad.Keys`, as on the handheld: the D-pad flies a
-ship over the stars, A fires, and the bottom line lists the buttons held. `board.toml` shows the
-gamepad on the board panel.
+ship over the stars, A fires, and the bottom line lists the buttons held. `boards/files/picopad.toml` gives
+the virtual board the PicoPad's buttons and shows them on the board panel.
 
 From a release package:
 
-    circuitpython --drive examples/gamepad/CIRCUITPY --board-file examples/gamepad/board.toml
+    circuitpython --drive examples/gamepad/CIRCUITPY --board-file boards/files/picopad.toml
 
 From the port's directory after a build:
 
-    build-linux/circuitpython --drive examples/gamepad/CIRCUITPY --board-file examples/gamepad/board.toml
+    build-linux/circuitpython --drive examples/gamepad/CIRCUITPY --board-file boards/files/picopad.toml
 
 - Click the panel's buttons, or use the keys: the arrows, A on `Z`, B on `X`, X on `A`, Y on `S`,
   START on Enter, SELECT on Backspace.

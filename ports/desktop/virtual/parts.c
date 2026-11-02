@@ -64,14 +64,29 @@ static bool _options(part_t *p, const char *options, const char **why) {
     p->colour = 0xff2020;
     p->servo = false;
     switch (p->kind) {
-        case PART_BUTTON:
-            if (strcmp(options, "high") == 0) {
+        case PART_BUTTON: {
+            // "low", "high", "key=Z", "high key=Left Shift": key= takes the rest, as SDL's names have spaces.
+            p->key = 0;
+            const char *key = strstr(options, "key=");
+            size_t level = key != NULL ? (size_t)(key - options) : strlen(options);
+            while (level > 0 && options[level - 1] == ' ') {
+                level--;
+            }
+            if (level == 4 && strncmp(options, "high", 4) == 0) {
                 p->active_high = true;
-            } else if (*options != '\0' && strcmp(options, "low") != 0) {
-                *why = "bad button (\"low\" or \"high\")";
+            } else if (level != 0 && !(level == 3 && strncmp(options, "low", 3) == 0)) {
+                *why = "bad button (\"low\" or \"high\", then key=KEY)";
                 return false;
             }
+            if (key != NULL) {
+                p->key = SDL_GetKeyFromName(key + 4);
+                if (p->key == SDLK_UNKNOWN) {
+                    *why = "unknown key (SDL names: Space, W, Up, Return, ...)";
+                    return false;
+                }
+            }
             return true;
+        }
         case PART_LED:
             if (!_colour(options, &p->colour)) {
                 *why = "bad colour (red, green, blue, yellow, orange, white, amber or #rrggbb)";
@@ -123,6 +138,15 @@ static bool _options(part_t *p, const char *options, const char **why) {
 static void _drive(part_t *p) {
     bool level = p->kind == PART_BUTTON ? (p->on == p->active_high) : p->on;
     desktop_pin_drive(p->pin, level);
+}
+
+part_t *parts_key_button(int32_t key) {
+    for (int i = 0; key != 0 && i < _count; i++) {
+        if (_parts[i].kind == PART_BUTTON && _parts[i].key == key && !_parts[i].detached) {
+            return &_parts[i];
+        }
+    }
+    return NULL;
 }
 
 part_t *parts_find(uint8_t pin, part_kind_t kind) {
@@ -247,6 +271,9 @@ part_t *parts_add(part_kind_t kind, uint8_t pin, const char *name, const char *o
 }
 
 void parts_pin_name(uint8_t pin, char *name, size_t len) {
+    // The board's first name for the pin other than its number (a board file's LED), else GPIOn.
+    char number[8];
+    snprintf(number, sizeof(number), "GPIO%u", (unsigned)pin);
     const mcu_pin_obj_t *obj = desktop_pin_obj(pin);
     const mp_map_t *map = &board_module_globals.map;
     for (size_t i = 0; obj != NULL && i < map->used; i++) {
@@ -255,11 +282,14 @@ void parts_pin_name(uint8_t pin, char *name, size_t len) {
             mp_obj_t key = map->table[i].key;
             const char *s = mp_obj_is_qstr(key) ? (const char *)qstr_data(MP_OBJ_QSTR_VALUE(key), &n)
                 : mp_obj_str_get_data(key, &n);
+            if (n == strlen(number) && memcmp(s, number, n) == 0) {
+                continue;
+            }
             snprintf(name, len, "%.*s", (int)n, s);
             return;
         }
     }
-    snprintf(name, len, "GPIO%u", (unsigned)pin);
+    snprintf(name, len, "%s", number);
 }
 
 part_t *parts_for_pin(uint8_t pin, part_kind_t kind) {
@@ -518,6 +548,7 @@ part_t *parts_add_shiftreg(uint8_t data, uint8_t clock, uint8_t latch, const cha
             *why = message;
             return NULL;
         }
+        gamepad_use(button);
         p->keys[p->key_count++] = (int8_t)button;
     }
     _count++;
@@ -588,7 +619,7 @@ static void _shift(uint8_t pin) {
             p->latch_level = level;
             p->latched = 0;
             for (int k = 0; k < p->key_count; k++) {
-                p->latched |= (uint16_t)(desktop_button_held(p->keys[k]) ? 1u << k : 0);
+                p->latched |= (uint16_t)(gamepad_pressed(p->keys[k]) ? 1u << k : 0);
             }
             p->bit = 0;
         } else if (pin == p->clock_pin && level != p->clock_level) {

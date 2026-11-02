@@ -47,6 +47,7 @@ typedef struct {
     bool automatic;     // added by parts_for_pin, not by a board file or board.attach
     // options
     bool active_high;   // a button: pressed reads high
+    int32_t key;        // a button: the SDL key that presses it, 0 for none
     uint32_t colour;    // a lamp: 0xRRGGBB
     bool servo;         // a PWM: show the angle of a 1-2 ms pulse
     // state
@@ -102,6 +103,8 @@ int parts_count(void);
 // Pulled out: what it drives on its pin let go, left out of the panel, its slot kept.
 void parts_detach(part_t *part);
 
+// The attached button a key presses (an SDL keycode), or NULL.
+part_t *parts_key_button(int32_t key);
 // The user's side, from the panel or the key script: traced, and a button or switch drives its pin.
 void parts_press(part_t *part, bool down);
 void parts_set(part_t *part, uint32_t value);

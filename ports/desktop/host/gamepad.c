@@ -30,6 +30,10 @@ static SDL_Keycode _keys[DESKTOP_BUTTON_COUNT][KEYS_MAX] = {
 };
 
 static bool _shown;
+static bool _used[DESKTOP_BUTTON_COUNT];
+static bool _held[DESKTOP_BUTTON_COUNT];
+// Each button's pin plus one; 0 for none.
+static uint8_t _pin[DESKTOP_BUTTON_COUNT];
 
 int gamepad_button(const char *name) {
     for (int i = 0; i < DESKTOP_BUTTON_COUNT; i++) {
@@ -44,8 +48,21 @@ const char *gamepad_name(int button) {
     return button >= 0 && button < DESKTOP_BUTTON_COUNT ? _names[button] : "";
 }
 
+bool gamepad_used(int button) {
+    return button >= 0 && button < DESKTOP_BUTTON_COUNT && _used[button];
+}
+
+void gamepad_use(int button) {
+    if (button >= 0 && button < DESKTOP_BUTTON_COUNT) {
+        _used[button] = true;
+    }
+}
+
 int gamepad_key_button(SDL_Keycode key) {
     for (int i = 0; key != SDLK_UNKNOWN && i < DESKTOP_BUTTON_COUNT; i++) {
+        if (!_used[i]) {
+            continue;
+        }
         for (int k = 0; k < KEYS_MAX; k++) {
             if (_keys[i][k] == key) {
                 return i;
@@ -62,13 +79,12 @@ const char *gamepad_key_name(int button) {
     return SDL_GetKeyName(_keys[button][0]);
 }
 
-bool gamepad_set_keys(const char *name, const char *keys, const char **why) {
+bool gamepad_add(int button, int pin, const char *keys, const char **why) {
     static char message[128];
-    int button = gamepad_button(name);
-    if (button < 0) {
-        snprintf(message, sizeof(message), "no gamepad button %s (UP, DOWN, LEFT, RIGHT, A, B, X, Y, ...)", name);
-        *why = message;
-        return false;
+    _used[button] = true;
+    _pin[button] = pin >= 0 ? (uint8_t)(pin + 1) : 0;
+    if (keys == NULL) {
+        return true;
     }
     SDL_Keycode found[KEYS_MAX] = { SDLK_UNKNOWN };
     int n = 0;
@@ -95,10 +111,11 @@ bool gamepad_set_keys(const char *name, const char *keys, const char **why) {
         found[n++] = code;
     }
     for (int k = 0; k < n; k++) {
-        int had = gamepad_key_button(found[k]);
-        for (int j = 0; had >= 0 && j < KEYS_MAX; j++) {
-            if (_keys[had][j] == found[k]) {
-                _keys[had][j] = SDLK_UNKNOWN;
+        for (int i = 0; i < DESKTOP_BUTTON_COUNT; i++) {
+            for (int j = 0; j < KEYS_MAX; j++) {
+                if (_keys[i][j] == found[k]) {
+                    _keys[i][j] = SDLK_UNKNOWN;
+                }
             }
         }
     }
@@ -116,14 +133,26 @@ bool gamepad_shown(void) {
 }
 
 void gamepad_press(int button, bool down) {
-    if (button < 0 || button >= DESKTOP_BUTTON_COUNT) {
+    if (!gamepad_used(button)) {
         return;
     }
-    desktop_button_set(button, down);
+    _held[button] = down;
+    if (_pin[button] != 0) {
+        desktop_pin_drive(_pin[button] - 1, !down);
+    }
     bus_trace_text("GAMEPAD %s %s", _names[button], down ? "pressed" : "released");
     panel_changed();
 }
 
 bool gamepad_pressed(int button) {
-    return desktop_button_held(button);
+    return gamepad_used(button) && _held[button];
+}
+
+void gamepad_release_all(void) {
+    for (int i = 0; i < DESKTOP_BUTTON_COUNT; i++) {
+        _held[i] = false;
+        if (_pin[i] != 0) {
+            desktop_pin_drive(_pin[i] - 1, true);
+        }
+    }
 }

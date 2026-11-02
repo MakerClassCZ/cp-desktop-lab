@@ -92,19 +92,13 @@ void desktop_host_sleep_ms(unsigned ms);
 // The program's wall time in seconds: the host's plus the skipped sleep.
 int64_t desktop_program_time(void);
 
-// The console's buttons, in board pin order (GPIO0 = UP ... GPIO12 = MENU).
+// The gamepad's buttons (host/gamepad.c); a board file puts each on a pin or behind a shift register.
 enum {
     DESKTOP_BUTTON_UP, DESKTOP_BUTTON_DOWN, DESKTOP_BUTTON_LEFT, DESKTOP_BUTTON_RIGHT,
     DESKTOP_BUTTON_A, DESKTOP_BUTTON_B, DESKTOP_BUTTON_X, DESKTOP_BUTTON_Y,
     DESKTOP_BUTTON_START, DESKTOP_BUTTON_SELECT, DESKTOP_BUTTON_L, DESKTOP_BUTTON_R, DESKTOP_BUTTON_MENU,
     DESKTOP_BUTTON_COUNT
 };
-
-// A button pulls its pin low while pressed, like a button to ground.
-void desktop_button_set(int button, bool pressed);
-// A button a key, controller or the panel holds down now.
-bool desktop_button_held(int button);
-void desktop_buttons_release_all(void);
 
 // Watch the CIRCUITPY directory and auto-reload when the host changes a file in it; once.
 void desktop_watch_start(const char *root);

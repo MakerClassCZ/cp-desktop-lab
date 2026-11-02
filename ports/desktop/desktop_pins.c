@@ -211,17 +211,3 @@ bool desktop_virtual_pin(uint8_t number, bool *output, bool *level) {
     *output = _pins[number].output;
     return _virtual_read(number, level);
 }
-
-void desktop_button_set(int button, bool pressed) {
-    desktop_pin_drive(button, !pressed);
-}
-
-bool desktop_button_held(int button) {
-    return button >= 0 && button < DESKTOP_BUTTON_COUNT && _pins[button].driven && !_pins[button].driven_level;
-}
-
-void desktop_buttons_release_all(void) {
-    for (int i = 0; i < DESKTOP_BUTTON_COUNT; i++) {
-        desktop_button_set(i, false);
-    }
-}

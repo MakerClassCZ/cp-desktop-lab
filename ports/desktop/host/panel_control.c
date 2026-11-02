@@ -107,7 +107,7 @@ bool panel_apply(const char *line, char *err, size_t errlen) {
         return true;
     }
     part_t *p = n >= 2 ? parts_by_name(name) : NULL;
-    int button = n >= 2 && p == NULL ? gamepad_button(name) : -1;
+    int button = n >= 2 && p == NULL && gamepad_used(gamepad_button(name)) ? gamepad_button(name) : -1;
     if (button >= 0 && (strcmp(verb, "press") == 0 || strcmp(verb, "release") == 0)) {
         gamepad_press(button, verb[0] == 'p');
     } else if (n < 2 || (strcmp(verb, "set") != 0 && strcmp(verb, "turn") != 0 && strcmp(verb, "send") != 0

@@ -1,18 +1,44 @@
-# A PicoPad's buttons on the board panel: circuitpython --board-file boards/files/picopad.toml
-# The virtual board already names them as PicoPad does (SW_UP ... SW_SELECT); this shows them as
-# a gamepad to click, and sets the keys that press them.
+# A PicoPad: circuitpython --board-file boards/files/picopad.toml
+# Its buttons by the PicoPad's names (board.SW_UP ... board.SW_MENU), low while pressed, as a
+# gamepad on the board panel, pressed by keys, a game controller or the mouse.
 #
-# Each line gives a button its keys, comma separated, by their SDL names (Space, W, Up, Return,
-# Left Shift, Keypad 8, ...); a key named here leaves the button it had by default. Without a
-# line a button keeps its default:
+# A [gamepad] line puts a button on a pin and may give it keys, comma separated, by their SDL
+# names (Space, W, Up, Return, Left Shift, Keypad 8, ...): UP = "pin=SW_UP keys=W, Up". A key named
+# there leaves the button it had. Without keys= a button keeps its default:
 #   UP, DOWN, LEFT, RIGHT  the arrows
 #   A, B, X, Y             Z, X, A, S
 #   START, SELECT          Return, Backspace
 #   L, R, MENU             Q, W, Escape (keys only, not drawn)
 
+[pins]
+SW_UP = "GPIO0"
+SW_DOWN = "GPIO1"
+SW_LEFT = "GPIO2"
+SW_RIGHT = "GPIO3"
+SW_A = "GPIO4"
+SW_B = "GPIO5"
+SW_X = "GPIO6"
+SW_Y = "GPIO7"
+SW_START = "GPIO8"
+SW_SELECT = "GPIO9"
+SW_L = "GPIO10"
+SW_R = "GPIO11"
+SW_MENU = "GPIO12"
+
 [gamepad]
-# A = "Space, Z"
-# UP = "W, Up"
+UP = "pin=SW_UP"
+DOWN = "pin=SW_DOWN"
+LEFT = "pin=SW_LEFT"
+RIGHT = "pin=SW_RIGHT"
+A = "pin=SW_A"
+B = "pin=SW_B"
+X = "pin=SW_X"
+Y = "pin=SW_Y"
+START = "pin=SW_START"
+SELECT = "pin=SW_SELECT"
+L = "pin=SW_L"
+R = "pin=SW_R"
+MENU = "pin=SW_MENU"
 
 [board]
 ble = "off"  # no Bluetooth on this board

@@ -432,10 +432,13 @@ static void _draw_part(const part_t *p, int y) {
 }
 
 // A handheld's face, PicoPad's: the D-pad left, SELECT and START between, Y X over B A right.
-// L, R and MENU are keys only. False for a button not drawn.
+// L, R and MENU are keys only. False for a button not drawn, or one the board file has not.
 static bool _gamepad_rect(int button, SDL_Rect *r, bool *round) {
     int cy = _gamepad_top + 88, dx = PAD + 110, fx = WIDTH - PAD - 100;
     *round = false;
+    if (!gamepad_used(button)) {
+        return false;
+    }
     switch (button) {
         case DESKTOP_BUTTON_UP:
             *r = (SDL_Rect) { dx - DPAD / 2, cy - DPAD * 3 / 2, DPAD, DPAD };

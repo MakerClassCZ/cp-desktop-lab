@@ -11,7 +11,7 @@ from harness import check, run
 
 out, trace = run(
     """import board, busio, time
-u = busio.UART(board.SW_X, board.SW_Y, baudrate=9600, timeout=0.3)
+u = busio.UART(board.GPIO6, board.GPIO7, baudrate=9600, timeout=0.3)
 u.write(b"AT\\r\\n")
 t = time.monotonic()
 r = u.read(4)

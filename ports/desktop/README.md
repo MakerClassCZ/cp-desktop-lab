@@ -104,9 +104,11 @@ and KMS/DRM or fbdev on a handheld. `settings.toml` sets it up:
 | `CIRCUITPY_DISPLAY_FULLSCREEN` | false | fill the screen, whole-pixel scaling |
 | `CIRCUITPY_DISPLAY_ROTATION` | 0 | 0, 90, 180 or 270 |
 
-The buttons are pins with the PicoPad's names, `board.SW_UP` to `board.SW_MENU`, low while
-pressed, so `keypad.Keys` and code written for the PicoPad work unchanged. They follow a game
-controller, which is how SDL reports a handheld's own buttons, or the keyboard:
+The virtual board is neutral: `board.GPIO0` to `board.GPIO27`, the buses and the display, no
+buttons. A board file brings a real board's names and buttons. `--board-file
+boards/files/picopad.toml` gives it the PicoPad's, `board.SW_UP` to `board.SW_MENU`, low while
+pressed, so `keypad.Keys` and code written for the PicoPad work unchanged. A gamepad's buttons
+follow a game controller, which is how SDL reports a handheld's own buttons, or the keyboard:
 
 | button | key | button | key |
 |---|---|---|---|
@@ -115,18 +117,23 @@ controller, which is how SDL reports a handheld's own buttons, or the keyboard:
 | X, Y | A, S | L, R | Q, W |
 | MENU | Esc | | |
 
-A `[gamepad]` section in a board file (below) shows them on the board panel as the PicoPad's
-face, the D-pad, SELECT and START, Y X over B A, to click, each with its key; and gives a button
-keys of its own, by their SDL names, in place of its defaults (a key named leaves the button it
-had):
+A `[gamepad]` section in a board file (below) puts a button on a pin and shows the gamepad on
+the board panel as the PicoPad's face, the D-pad, SELECT and START, Y X over B A, to click, each
+with its key. `keys=` gives a button keys of its own, by their SDL names, in place of its
+defaults (a key named leaves the button it had). A button the section does not name is not
+there:
 
 ```
+[pins]
+SW_A = "GPIO4"
+SW_UP = "GPIO0"
 [gamepad]
-A = "Space, Z"
-UP = "W, Up"
+A = "pin=SW_A keys=Space, Z"
+UP = "pin=SW_UP"
 ```
 
-`boards/files/picopad.toml` is such a file. The keys work in the panel's window as in the
+A button without `pin=` is for a `[shiftreg]` to read. A single button that is not a handheld's
+takes a key in `[button]`: `BUTTON = "key=Z"`. The keys work in the panel's window as in the
 display's. `examples/gamepad` flies a ship with them, and `examples/picogame` the same ship in
 `picogame`, with a flame and sparks.
 
@@ -280,7 +287,7 @@ Python with `board.attach` (see [Plugging parts in from Python](#plugging-parts-
 | part | in the program | on the panel |
 |---|---|---|
 | NeoPixels | `neopixel_write` (the `neopixel` library) | a row or a matrix, as LEDs look |
-| `[button]` | `digitalio` input | pressed while the mouse holds it (`"low"`, the default, or `"high"` when pressed) |
+| `[button]` | `digitalio` input | pressed while the mouse or its key holds it (`"low"`, the default, or `"high"` when pressed; `key=Z` a key, by its SDL name) |
 | `[switch]` | `digitalio` input | toggled by a click |
 | `[led]` | `digitalio` output | a lamp in a colour (`"red"`, `"#ffa000"` ...) |
 | `[analog]` | `analogio.AnalogIn` / `AnalogOut` | a slider (drag; the wheel moves 1/64, Shift+wheel 1 count) / a bar, raw and volts |
@@ -300,12 +307,12 @@ as `settings.toml`:
 ```
 [pins]
 NEOPIXEL = "GPIO14"      # a pin number, 0-27
-BUTTON = "SW_A"          # or a name the board has: here the Z key
+BUTTON = "GPIO4"         # or a name the board has
 A0 = "GPIO21"
 [neopixel]
 NEOPIXEL = "8x8 serpentine"
 [button]
-BUTTON = ""
+BUTTON = "key=Z"         # the Z key presses it, as does the panel
 [analog]
 A0 = ""
 ```
@@ -318,12 +325,11 @@ name, replaces it: the first file can be a board, the next what is plugged in to
 NeoPixel layouts are `"10"` (a row), `"8x8"` (a matrix, filled row by row) or `"16x16
 serpentine GRBW"` (every other row reversed, as most matrices are wired, and the byte order of
 RGBW pixels; `GRB`, the WS2812's, is the default); `--neopixel NAME=LAYOUT` does the same on the
-command line. On the virtual board pins 0-12 are the keyboard's buttons (pressed = low), 13 the
-speaker and 14-27 free virtual pins. `boards/files/` has board files for a Feather, a Circuit
-Playground, a Trinket or Gemma M0, a Pico (`GP0`-`GP27`, the Pico's own numbers, so 0-12 are
-the keys too), a MagTag (its buttons the Z X A S keys), a CLUE (its five sensors on the virtual
+command line. On the virtual board pin 13 is also the speaker. `boards/files/` has board files for a Feather, a Circuit
+Playground, a Trinket or Gemma M0, a Pico (`GP0`-`GP27`, the Pico's own numbers), a MagTag (its buttons the
+Z X A S keys), a CLUE (its five sensors on the virtual
 I2C bus), a PyBadge and a PyGamer (their buttons the gamepad's, through a shift register), a
-MatrixPortal (its HUB75 matrix on the panel) and the PicoPad's gamepad. A board file's `[board]` section names the real board where libraries
+MatrixPortal (its HUB75 matrix on the panel) and a PicoPad (its gamepad). A board file's `[board]` section names the real board where libraries
 ask: `platform = "Atmel SAMD21"` is `sys.platform` (adafruit_circuitplayground picks by it),
 `machine = "Adafruit Pybadge with samd51j19"` is `os.uname().machine` (adafruit_pybadger,
 the MagTag and PyPortal libraries pick by it), and `display = "240x240"` is the size of the

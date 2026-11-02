@@ -77,8 +77,8 @@ with launch('print("up")\n', board=PINS) as b:
     )
     check("a bad option says what the board file would", "err bad colour" in out, out)
     out = b.exec(
-        "sw = board.attach(board.parts.Switch(board.SW_A))\nsw.on = True\n"
-        "print(sw.on, digitalio.DigitalInOut(board.SW_A).value)"
+        "sw = board.attach(board.parts.Switch(board.GPIO4))\nsw.on = True\n"
+        "print(sw.on, digitalio.DigitalInOut(board.GPIO4).value)"
     )
     check("a switch set from Python drives its pin", out.strip() == "True True", out)
     out = b.exec(

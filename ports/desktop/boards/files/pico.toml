@@ -1,7 +1,6 @@
 # A Raspberry Pi Pico's names on the virtual board: circuitpython --board-file boards/files/pico.toml
-# GPn is the virtual board's pin n, as on the Pico. Mind that pins 0-12 are also the keyboard's
-# buttons (a key pressed reads low on its pin) and 13 the speaker; the virtual board has 28 pins,
-# so GP28 (A2) is left out. The board panel shows the LED and A0, A1 as sliders.
+# GPn is the virtual board's pin n, as on the Pico. Mind that 13 is also the speaker; the virtual
+# board has 28 pins, so GP28 (A2) is left out. The board panel shows the LED and A0, A1 as sliders.
 
 [pins]
 GP0 = "GPIO0"
