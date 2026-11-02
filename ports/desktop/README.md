@@ -693,11 +693,9 @@ On Windows `python` and `build-windows/circuitpython.exe`. Without `--program` i
 a time; it runs headless unless `launch` asks for the window. `stop`, or the server's end, quits a
 board it launched; one it attached to keeps running. Console text comes without escape sequences,
 at most its last 20000 characters, and a call waits at most 60 s. `tests/test_mcp.py` drives it
-as a host would.
+as a host would. `--code` is `code_file` in `cpapi`'s `Board.launch` and the MCP `launch`.
 
 ### Fast time
-
-`--code` is `code_file` in `cpapi`'s `Board.launch` and the MCP `launch`.
 
 `--fast-time` (`fast_time=True` in `cpapi`, `fast_time` in the MCP `launch`) is for tests of
 programs that wait: a game whose enemy takes eight seconds to cross the screen, an animation
