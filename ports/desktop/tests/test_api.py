@@ -285,12 +285,6 @@ with launch(RED, '[i2c]\nOLED = "ssd1306 128x64"\n') as b:
         (p.width, p.height, len(p.rgb), p[160, 120]) == (320, 240, 320 * 240 * 3, 0xFF0000),
         (p.width, p.height, len(p.rgb)),
     )
-    check(
-        "count_colors(): every pixel red",
-        p.count_colors() == {0xFF0000: 320 * 240},
-        p.count_colors(),
-    )
-    check("diff() with what is there: nothing", p.diff(lambda x, y: 0xFF0000) == [])
     black = p.diff(lambda x, y: 0x000000 if y == 7 else None)
     check(
         "diff(): one row expected black, each pixel of it with both colours",

@@ -20,10 +20,6 @@ def run(code, *args, timeout=90):
     return p.returncode, (p.stdout + p.stderr).decode(errors="replace")
 
 
-rc, out = run('print("hello from run")\n')
-check("a script that ends: its console, status 0", rc == 0 and "hello from run" in out, (rc, out))
-check("the window's title escapes are left out", "\x1b]0;" not in out, repr(out[:300]))
-
 RED = """import board, displayio
 bitmap = displayio.Bitmap(board.DISPLAY.width, board.DISPLAY.height, 1)
 palette = displayio.Palette(1); palette[0] = 0xff0000
@@ -41,15 +37,37 @@ saved = open(png, "rb").read() if os.path.exists(png) else b""
 p = cpapi.Picture.from_png(saved) if saved else None
 check("--png: the display saved", p is not None and p[5, 5] == 0xFF0000, (rc, len(saved)))
 
+rc, out = run("1/0\n")
+check(
+    "code.py that ends in an exception: status 3, its traceback",
+    rc == 3 and "ZeroDivisionError" in out,
+    (rc, out[-300:]),
+)
+
+rc, out = run('import board\nprint("leaving")\nboard.exit(3)\n')
+check(
+    "a program that ends itself: status 1, its exit status, no traceback of run's",
+    rc == 1 and "leaving" in out and "the program ended" in out and "Traceback" not in out,
+    (rc, out[-400:]),
+)
+
+p = subprocess.run([sys.executable, CPAPI, "run", BIN], capture_output=True, env=HEADLESS)
+check(
+    "run without CODE: a usage error, status 64",
+    p.returncode == 64,
+    (p.returncode, p.stderr[-200:]),
+)
+
 rc, out = run('print("never")\nwhile True:\n    pass\n', "--wait", "nope", "--timeout", "2")
 check("--wait for text that never comes: status 1", rc == 1 and "never" in out, (rc, out[-300:]))
 
 rc, out = run('print("each run")\n', "--runs", "3")
 check(
-    "--runs 3: code.py three times in one process, each run's console",
+    "a script that ends, --runs 3: status 0, each run's console",
     rc == 0 and out.count("--- run ") == 3 and out.count("each run") == 3,
     (rc, out[-500:]),
 )
+check("the window's title escapes are left out", "\x1b]0;" not in out, repr(out[:300]))
 
 CRASH = """import displayio, terminalio
 font = terminalio.FONT

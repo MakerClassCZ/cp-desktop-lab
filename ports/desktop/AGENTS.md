@@ -26,7 +26,8 @@ python3 ports/desktop/tools/cpapi.py run PROGRAM repro.py --wait drawn --colors 
 `--wait`'s text comes; the console is printed without the terminal's escapes, then the display's
 pixels per colour and the PNG if asked. `--runs N` runs it N times in one process (Ctrl-D), for
 bugs of a second run; `--board-file`, `--display NAME`, `--fast-time`, `--timeout S`. Exit status
-0, 1 when it did not end in time, 2 after a hard fault, whose backtrace is printed last.
+0; 1 when it did not end in time or the program ended; 2 after a hard fault, whose backtrace is
+printed last; 3 when `code.py` ended in an exception; 64 for wrong arguments.
 
 ## Driving it: tools/cpapi.py
 

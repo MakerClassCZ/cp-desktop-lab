@@ -17,9 +17,36 @@ import subprocess
 import sys
 import time
 import zlib
+from collections import Counter
 from urllib.parse import urlencode
 
 ANNOUNCE = re.compile(rb"circuitpython: api (http://[^/\s]+/) token ([0-9a-fA-F]+)")
+
+
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+# Terminal escapes: OSC (the title bar) up to BEL or ST, CSI, and the two-byte ones.
+ESCAPES = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-Z\\-_]")
+
+
+def plain(text):
+    """Console text as a reader wants it: no escapes, \\n line ends."""
+    return ESCAPES.sub("", text).replace("\r\n", "\n").replace("\r", "")
+
+
+def png_parts(data):
+    """A PNG's IHDR and its image data inflated: (ihdr bytes, raw rows)."""
+    if data[:8] != PNG_SIGNATURE:
+        raise ValueError("not a PNG")
+    pos, idat, ihdr = 8, b"", None
+    while pos < len(data):
+        n, kind = struct.unpack(">I4s", data[pos : pos + 8])
+        if kind == b"IHDR":
+            ihdr = data[pos + 8 : pos + 8 + n]
+        elif kind == b"IDAT":
+            idat += data[pos + 8 : pos + 8 + n]
+        pos += 12 + n
+    return ihdr, zlib.decompress(idat)
 
 
 class Picture:
@@ -32,17 +59,11 @@ class Picture:
     @classmethod
     def from_png(cls, data):
         """The program's PNG (/api/display): 8-bit RGB, each row after a filter byte of 0."""
-        pos, idat, w, h = 8, b"", 0, 0
-        while pos < len(data):
-            n, kind = struct.unpack(">I4s", data[pos : pos + 8])
-            body = data[pos + 8 : pos + 8 + n]
-            if kind == b"IHDR":
-                w, h = struct.unpack(">II", body[:8])
-            elif kind == b"IDAT":
-                idat += body
-            pos += 12 + n
-        raw = zlib.decompress(idat)
+        ihdr, raw = png_parts(data)
+        w, h, depth, color = struct.unpack(">IIBB", ihdr[:10])
         row = 1 + 3 * w
+        if (depth, color) != (8, 2) or any(raw[y * row] for y in range(h)):
+            raise ValueError("not the port's PNG: 8-bit RGB, unfiltered")
         return cls(w, h, b"".join(raw[y * row + 1 : (y + 1) * row] for y in range(h)))
 
     def __getitem__(self, xy):
@@ -51,11 +72,8 @@ class Picture:
 
     def count_colors(self):
         """{0xRRGGBB: how many pixels have it}."""
-        counts = {}
-        for i in range(0, len(self.rgb), 3):
-            c = self.rgb[i] << 16 | self.rgb[i + 1] << 8 | self.rgb[i + 2]
-            counts[c] = counts.get(c, 0) + 1
-        return counts
+        rgb = self.rgb
+        return dict(Counter(int.from_bytes(rgb[i : i + 3], "big") for i in range(0, len(rgb), 3)))
 
     def diff(self, expected):
         """[(x, y, colour here, colour expected)] for each pixel that differs, row by row.
@@ -505,7 +523,8 @@ def uuid(u):
         u = u[2:]
     if len(u) <= 8 and "-" not in u:
         return "%08x%s" % (int(u, 16), BASE_UUID)
-    return u
+    h = u.replace("-", "")
+    return "%s-%s-%s-%s-%s" % (h[:8], h[8:12], h[12:16], h[16:20], h[20:])
 
 
 def _uuid_from_le(data):
@@ -551,6 +570,7 @@ class Characteristic:
     def __init__(self, uuid, handle, properties):
         self.uuid, self.handle, self.properties = uuid, handle, properties
         self.cccd = None  # the handle of its Client Characteristic Configuration, if it has one
+        self.subscribed = False
 
     def __repr__(self):
         return "Characteristic(%s, 0x%04x)" % (self.uuid, self.handle)
@@ -580,49 +600,51 @@ NUS_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"  # the program notifies here
 class Peer:
     """The phone connected to the program: a GATT client over ATT PDUs through the control API."""
 
-    def __init__(self, board, mtu=247):
+    MTU = 247  # asked for; the program's stack answers what it takes
+
+    def __init__(self, board):
         self.board = board
         self.mtu = 23
-        self._pending = []  # PDUs read but not yet asked for
         self._notified = {}  # value handle: [values]
         self._services = None
-        answer = self._request(bytes([0x02]) + struct.pack("<H", mtu), 0x03)
-        self.mtu = max(23, min(mtu, struct.unpack("<H", answer[1:3])[0]))
+        answer = self._request(bytes([0x02]) + struct.pack("<H", self.MTU), 0x03)
+        self.mtu = max(23, min(self.MTU, struct.unpack("<H", answer[1:3])[0]))
 
     def _send(self, pdu):
         self.board.request("POST", "/api/ble/att", pdu.hex())
 
     def _take(self, timeout):
-        """The PDUs the program sent, waiting up to timeout for the first one."""
+        """The PDUs the program sent that are not notifications, waiting up to timeout for one.
+        Notifications are kept for notifications(); an indication is confirmed."""
         pdus = self.board.request("GET", "/api/ble/att?wait=%d" % int(timeout * 1000))["pdus"]
+        answers = []
         for hexed in pdus:
             pdu = bytes.fromhex(hexed)
             if pdu[:1] in (b"\x1b", b"\x1d"):
                 handle = struct.unpack("<H", pdu[1:3])[0]
                 self._notified.setdefault(handle, []).append(pdu[3:])
                 if pdu[0] == 0x1D:
-                    self._send(b"\x1e")  # an indication is confirmed
+                    self._send(b"\x1e")
             else:
-                self._pending.append(pdu)
+                answers.append(pdu)
+        return answers
 
     def _request(self, pdu, answer, timeout=5):
-        """pdu sent; the program's answer of opcode answer, or AttError."""
+        """pdu sent; the program's answer of opcode answer, or AttError. ATT has one request at a
+        time, so an answer to another one (late, after a timeout) is dropped."""
         self._send(pdu)
         end = time.time() + timeout
         while True:
-            for i, got in enumerate(self._pending):
-                if got[0] == answer or (got[0] == 0x01 and got[1] == pdu[0]):
-                    del self._pending[i]
-                    if got[0] == 0x01:
-                        raise AttError(got[1], struct.unpack("<H", got[2:4])[0], got[4])
+            for got in self._take(min(max(end - time.time(), 0), 1)):
+                if got[0] == 0x01 and got[1] == pdu[0]:
+                    raise AttError(got[1], struct.unpack("<H", got[2:4])[0], got[4])
+                if got[0] == answer:
                     return got
-            left = end - time.time()
-            if left <= 0:
+            if time.time() > end:
                 raise TimeoutError("no answer to ATT 0x%02x" % pdu[0])
-            self._take(min(left, 1))
 
     def _each(self, opcode, answer, start, end, extra):
-        """The answers of a request repeated over a handle range: (handle, entry) pairs."""
+        """The entries of a request repeated over a handle range."""
         while start <= end:
             try:
                 got = self._request(
@@ -654,7 +676,7 @@ class Peer:
             for e in self._each(0x08, 0x09, s.start, s.end, struct.pack("<H", 0x2803)):
                 props, value = e[2], struct.unpack("<H", e[3:5])[0]
                 s.characteristics.append(Characteristic(_uuid_from_le(e[5:]), value, props))
-            # A characteristic's descriptors lie between its value and the next declaration.
+            # A characteristic's CCCD lies between its value and the next declaration.
             for i, c in enumerate(s.characteristics):
                 last = (
                     s.characteristics[i + 1].handle - 2
@@ -669,9 +691,8 @@ class Peer:
                     continue
                 size = 4 if got[1] == 1 else 18
                 for k in range(2, len(got) - size + 1, size):
-                    h = struct.unpack("<H", got[k : k + 2])[0]
                     if got[k + 2 : k + size] == b"\x02\x29":
-                        c.cccd = h
+                        c.cccd = struct.unpack("<H", got[k : k + 2])[0]
         self._services = found
         return found
 
@@ -688,7 +709,12 @@ class Peer:
         c = self.characteristic(u)
         value = self._request(b"\x0a" + struct.pack("<H", c.handle), 0x0B)[1:]
         while len(value) and len(value) % (self.mtu - 1) == 0:
-            more = self._request(b"\x0c" + struct.pack("<HH", c.handle, len(value)), 0x0D)[1:]
+            try:
+                more = self._request(b"\x0c" + struct.pack("<HH", c.handle, len(value)), 0x0D)[1:]
+            except AttError as e:
+                if e.code == 0x07:  # invalid offset: the value ended exactly at the last answer
+                    break
+                raise
             if not more:
                 break
             value += more
@@ -705,43 +731,36 @@ class Peer:
         else:
             self._send(b"\x52" + struct.pack("<H", c.handle) + data)
 
-    def subscribe(self, u, indicate=False):
-        """Notifications (or indications) of a characteristic on."""
+    def subscribe(self, u):
+        """A characteristic's notifications on; once is enough."""
         c = self.characteristic(u)
         if c.cccd is None:
             raise ValueError("%s has no notifications" % c.uuid)
-        self._request(b"\x12" + struct.pack("<HH", c.cccd, 2 if indicate else 1), 0x13)
+        if not c.subscribed:
+            self._request(b"\x12" + struct.pack("<HH", c.cccd, 1), 0x13)
+            c.subscribed = True
 
     def notifications(self, u, timeout=1):
-        """The values notified since the last call, waiting up to timeout for the first."""
+        """The values notified since the last call (notifications turned on at the first),
+        waiting up to timeout for the first."""
+        self.subscribe(u)
         c = self.characteristic(u)
         end = time.time() + timeout
-        while not self._notified.get(c.handle):
-            left = end - time.time()
-            if left <= 0:
-                break
-            self._take(min(left, 1))
+        while not self._notified.get(c.handle) and time.time() < end:
+            self._take(min(end - time.time(), 1))
         self._take(0)
         return self._notified.pop(c.handle, [])
 
-    def _uart(self):
-        """The UART's TX, notifications on: on before the first write, as a phone's app has them."""
-        c = self.characteristic(NUS_TX)
-        if not getattr(c, "subscribed", False):
-            self.subscribe(NUS_TX)
-            c.subscribed = True
-        return c
-
     def uart_write(self, text):
-        """Text (or bytes) to the program's Nordic UART service, in pieces an MTU takes."""
-        self._uart()
+        """Text (or bytes) to the program's Nordic UART service, in pieces an MTU takes; its TX
+        notifications on first, as a phone's app has them."""
+        self.subscribe(NUS_TX)
         data = text.encode() if isinstance(text, str) else bytes(text)
         for k in range(0, len(data), self.mtu - 3):
             self.write(NUS_RX, data[k : k + self.mtu - 3], response=False)
 
     def uart_read(self, timeout=1):
         """What the program wrote to its Nordic UART since the last call."""
-        self._uart()
         return b"".join(self.notifications(NUS_TX, timeout)).decode(errors="replace")
 
     def disconnect(self):
@@ -763,14 +782,15 @@ class Ble:
         return Advertisement(s) if s.get("advertising") else None
 
     def connect(self, timeout=5):
-        """The phone joins the program's advertisement: a Peer, its MTU exchanged."""
+        """The phone joins the program's advertisement: a Peer, its MTU exchanged. Waits up to
+        timeout for the program to advertise; any other refusal is raised at once."""
         end = time.time() + timeout
         while True:
             try:
                 self.board.request("POST", "/api/ble/connect")
                 return Peer(self.board)
             except ApiError as e:
-                if e.status != 409 or time.time() > end:
+                if "advertises nothing" not in e.message or time.time() > end:
                     raise
                 time.sleep(0.05)
 
@@ -795,16 +815,16 @@ class bluefruit:
         return bluefruit._packet(b"!A" + struct.pack("<fff", x, y, z))
 
 
-# The terminal's escapes (the window title, line erases), left out of what run prints.
-_ESCAPES = re.compile(r"\x1b\][^\x1b\x07]*(?:\x1b\\|\x07)|\x1b\[[0-9;?]*[A-Za-z]")
-
-
 def _until(b, texts, timeout):
     """(the console read on from where b was, the first of texts in it or None) within timeout.
-    Read as it comes, so the text before a hard fault's reset is kept."""
+    Read as it comes, so the text before a hard fault's reset is kept; a program that has ended
+    ends it too."""
     out, end = "", time.time() + timeout
     while True:
-        r = b.console(timeout=0.1)
+        try:
+            r = b.console(timeout=0.1)
+        except (OSError, http.client.HTTPException):
+            return out, None
         b.offset = r["next"]
         out += r["data"]
         seen = next((t for t in texts if t in out), None)
@@ -815,7 +835,8 @@ def _until(b, texts, timeout):
 def run(argv):
     """cpapi.py run PROGRAM CODE: CODE (a .py file as code.py, or a directory as the drive) run
     headless until code.py ends or --wait's text comes; its console printed, and the display if
-    asked. Exit status 0, 1 when it did not end in time, 2 after a hard fault."""
+    asked. Exit status 0; 1 when it did not end in time, or the program ended; 2 after a hard
+    fault; 3 when code.py ended in an exception; 64 for wrong arguments."""
     import argparse
     import shutil
     import tempfile
@@ -832,7 +853,13 @@ def run(argv):
     ap.add_argument("--png", help="save the display as this PNG after the last run")
     ap.add_argument("--colors", action="store_true", help="print the display's pixels per colour")
     ap.add_argument("--fast-time", action="store_true")
-    a = ap.parse_args(argv)
+    try:
+        a = ap.parse_args(argv)
+    except SystemExit as e:
+        return 64 if e.code else 0
+    # The console may have bytes the terminal's code page cannot print.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
 
     drive = os.path.join(tempfile.mkdtemp(), "CIRCUITPY")
     if os.path.isdir(a.code):
@@ -851,15 +878,21 @@ def run(argv):
                 b.reload()
             out, seen = _until(b, texts, a.timeout)
             print("--- run %d" % (i + 1))
-            print(_ESCAPES.sub("", out).replace("\r\n", "\n").rstrip())
+            print(plain(out).rstrip())
             if seen == "You are in safe mode":
                 status = 2
+                break
+            if b.process is not None and b.process.poll() is not None:
+                print("--- the program ended, status %d" % b.process.returncode)
+                status = 1
                 break
             if seen is None:
                 print("--- not ended in %g s" % a.timeout)
                 status = 1
                 break
-        if status != 2 and (a.png or a.colors):
+            if "Traceback (most recent call last)" in out:
+                status = 3
+        if status in (0, 3) and (a.png or a.colors):
             data = b.display(a.display)
             if a.png:
                 open(a.png, "wb").write(data)
@@ -884,5 +917,5 @@ def run(argv):
 if __name__ == "__main__":
     if sys.argv[1:2] != ["run"]:
         print("usage: python cpapi.py run PROGRAM CODE [options]  (run --help)", file=sys.stderr)
-        sys.exit(2)
+        sys.exit(64)
     sys.exit(run(sys.argv[2:]))

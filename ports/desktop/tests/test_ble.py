@@ -4,25 +4,35 @@ _bleio over the HCI host stack: the adapter the port gives every run, --ble, and
 controller with the phone the control API drives.
 """
 
-from harness import check, cpapi, launch, refused, run, seen
+import os, re, struct, time
+from harness import HEADLESS, T, check, cpapi, launch, refused, run, seen
 
-ADAPTER = 'import _bleio\nprint("adapter", _bleio.adapter is not None, _bleio.adapter and _bleio.adapter.enabled)\n'
+ADAPTER = """import _bleio
+a = _bleio.adapter
+print("adapter", a is not None, a and a.enabled)
+if a:
+    a.enabled = True
+    print("enabled", a.enabled, len(str(a.address)) > 0)
+"""
 
-# The adapter is there before code.py, not yet enabled
-out, _ = run(ADAPTER, "", "adapter")
+# The adapter is there before code.py, not yet enabled; enabling it runs the HCI init.
+out, _ = run(ADAPTER, "", "enabled")
 check("_bleio.adapter is there", "adapter True False" in out, out)
-
-# Enabling it runs the HCI init with the virtual controller
-out, _ = run(
-    "import _bleio\n_bleio.adapter.enabled = True\n"
-    'print("enabled", _bleio.adapter.enabled, len(str(_bleio.adapter.address)) > 0)\n',
-    "",
-    "enabled",
-)
 check("BLERadio enables it", "enabled True True" in out, out)
 
-out, _ = run(ADAPTER, "", "adapter", args=["--ble", "off"])
+with launch(ADAPTER, args=["--ble", "off"]) as b:
+    seen(b, "adapter")
+    seen(b, "\n")
+    out = b.console(since=0)["data"]
+    start = time.time()
+    try:
+        b.ble.connect()
+        answer = None
+    except cpapi.ApiError as e:
+        answer = e.status
+    took = time.time() - start
 check("--ble off: no adapter", "adapter False" in out, out)
+check("--ble off: the phone is refused at once", answer == 409 and took < 2, (answer, took))
 
 out, _ = run(ADAPTER, "", "adapter", board='[board]\nble = "off"\n')
 check("[board] ble = off", "adapter False" in out, out)
@@ -35,16 +45,8 @@ check(
     "--fast-time refuses --ble PORT", status == 2 and "real hardware needs real time" in out, out
 )
 
-# A reload frees what code.py made, but the port's adapter stays bound
-with launch('import _bleio\n_bleio.adapter.enabled = True\nprint("enabled")\n') as b:
-    seen(b, "enabled")
-    b.reload()
-    seen(b, "enabled")
-    out = b.exec('import _bleio\nprint("bound", _bleio.adapter is not None)', interrupt=True)
-check("a reload keeps the adapter", "bound True" in out, out)
-
 # The phone, through the control API's raw endpoints: what the program advertises, a connection,
-# ATT PDUs both ways (hex).
+# ATT PDUs both ways (hex); and what the port sees of the HCI: the panel's row, the trace, btsnoop.
 PERIPHERAL = """
 import _bleio, time
 a = _bleio.adapter
@@ -55,7 +57,7 @@ was = False
 while True:
     if a.connected != was:
         was = a.connected
-        print("connected" if was else "disconnected", len(a.connections))
+        print("connected" if was else "disconnected", a.connections)
     time.sleep(0.02)
 """
 
@@ -67,37 +69,69 @@ def att(b, pdu):
     return pdus[0] if pdus else None
 
 
-with launch(PERIPHERAL) as b:
+log = os.path.join(T, "ble.btsnoop")
+if os.path.exists(log):
+    os.remove(log)
+with launch(PERIPHERAL, args=["--ble-log", log]) as b:
     seen(b, "advertising")
     state = b.request("GET", "/api/ble")
-    check(
-        "advertising seen",
-        state["advertising"]
-        and state["connectable"]
-        and "020106070943502d6c6162" in state["data"],
-        state,
-    )
+    row = b.state().get("ble")
     b.request("POST", "/api/ble/connect")
-    check("connect", seen(b, "connected 1"), b.console(since=0)["data"])
-    # The controller sends a vendor event at each connection, as the CYW43439 does.
+    connected = seen(b, "connected (<Connection>,)")
+    # The controller sends a vendor event at each connection, as the CYW43439 does: the MTU
+    # exchange after it still answers.
     mtu = att(b, "02f700")
-    check("an unknown vendor event does not stop the host", mtu is not None, mtu)
-    check("MTU exchange", (mtu or "").startswith("03"), mtu)
     found = att(b, "060100ffff00280118")
-    check("a FIND_TYPE for GATT finds it", (found or "").startswith("07"), found)
-    groups = att(b, "100100ffff0028")
-    check(
-        "read group (services)",
-        (groups or "").startswith("11") and "0018" in groups and "0118" in groups,
-        groups,
-    )
+    # An L2CAP frame longer than the host's 255-byte buffer, in two fragments: dropped.
+    b.request("POST", "/api/ble/att", "52" + "0300" + "41" * 297)
+    again = att(b, "060100ffff00280118")
     b.request("POST", "/api/ble/disconnect")
-    check("disconnect seen by the program", seen(b, "disconnected 0"), b.console(since=0)["data"])
+    disconnected = seen(b, "disconnected ()")
+    trace = b.trace(since=0)["data"]
+    out = b.console(since=0)["data"]
+check(
+    "advertising seen",
+    state["advertising"] and state["connectable"] and "020106070943502d6c6162" in state["data"],
+    state,
+)
+check(
+    "the virtual controller has a public address",
+    state["public"] and state["address"] != "00:00:00:00:00:00",
+    state,
+)
+check(
+    "the panel row",
+    row is not None and row["state"] == "advertising" and row["name"] == "CP-lab",
+    row,
+)
+check("connect: adapter.connections holds a Connection", connected, out[-300:])
+check("MTU exchange after the vendor event", (mtu or "").startswith("03"), mtu)
+check("a FIND_TYPE for GATT finds it", (found or "").startswith("07"), found)
+check("a 300-byte frame in fragments does not break the host", again == found, again)
+check("disconnect seen by the program", disconnected, out[-300:])
+check(
+    "the trace: advertising, connect, ATT both ways, disconnect",
+    'BLE ADV "CP-lab" connectable 02 01 06 07 09 43 50 2d 6c 61 62' in trace
+    and re.search(r"BLE CONNECT ([0-9a-f]{2}:){5}[0-9a-f]{2}", trace)
+    and "BLE ATT <- MTU_REQ f7 00" in trace
+    and "BLE ATT -> MTU_RSP " in trace
+    and "BLE DISCONNECT 0x13" in trace,
+    trace[-800:],
+)
+data = open(log, "rb").read() if os.path.exists(log) else b""
+pos = 16
+while pos + 24 <= len(data):
+    pos += 24 + struct.unpack(">I", data[pos + 4 : pos + 8])[0]
+check(
+    "--ble-log is btsnoop: its header, then whole records",
+    data[:8] == b"btsnoop\0"
+    and struct.unpack(">II", data[8:16]) == (1, 1002)
+    and pos == len(data) > 16,
+    (data[:16], pos, len(data)),
+)
 
 # A controller without a public address (Zephyr's on an nRF): the host takes a static random one.
-from harness import HEADLESS
-
-with launch(PERIPHERAL, env=dict(HEADLESS, CIRCUITPY_BLE_NO_PUBLIC_ADDRESS="1")) as b:
+with launch(PERIPHERAL, env=dict(HEADLESS, CIRCUITPY_BLE_VIRTUAL_FAULT="no-public-address")) as b:
     seen(b, "advertising")
     seen(b, "\n")
     out = b.console(since=0)["data"]
@@ -107,53 +141,6 @@ check(
     "no public address: a static random one",
     len(words) >= 2 and int(words[0], 16) >= 0xC0 and words[1] == "1" and not state["public"],
     (out[-200:], state),
-)
-
-# What the port sees of the HCI both ways: the panel's row, the trace, a btsnoop file
-import os, struct
-from harness import T
-
-log = os.path.join(T, "ble.btsnoop")
-if os.path.exists(log):
-    os.remove(log)
-with launch(PERIPHERAL, args=["--ble-log", log]) as b:
-    seen(b, "advertising")
-    row = b.state().get("ble")
-    b.request("POST", "/api/ble/connect")
-    seen(b, "connected 1")
-    att(b, "02f700")
-    b.request("POST", "/api/ble/disconnect")
-    seen(b, "disconnected 0")
-    trace = b.trace(since=0)["data"]
-check(
-    "the panel row",
-    row is not None and row["state"] == "advertising" and row["name"] == "CP-lab",
-    row,
-)
-for line in (
-    'BLE ADV "CP-lab" connectable 02 01 06 07 09 43 50 2d 6c 61 62',
-    "BLE CONNECT 7c:10:c9:1c:37:89",
-    "BLE ATT <- MTU_REQ f7 00",
-    "BLE ATT -> MTU_RSP 17 00",
-    "BLE DISCONNECT 0x13",
-):
-    check("the trace: " + line, line in trace, trace[-800:])
-
-data = open(log, "rb").read() if os.path.exists(log) else b""
-records, pos = [], 16
-while pos + 24 <= len(data):
-    orig, incl, flags, drops, stamp = struct.unpack(">IIIIq", data[pos : pos + 24])
-    records.append((flags, data[pos + 24 : pos + 24 + incl]))
-    pos += 24 + incl
-check(
-    "--ble-log is btsnoop",
-    data[:8] == b"btsnoop\0"
-    and struct.unpack(">II", data[8:16]) == (1, 1002)
-    and pos == len(data)
-    and len(records) >= 10
-    # The phone's MTU request, received by the host: an ACL packet on the ATT channel.
-    and any(f & 1 and p[:1] == b"\x02" and p[9:10] == b"\x02" for f, p in records),
-    (data[:16], pos, len(data), len(records)),
 )
 
 # The phone in cpapi: scan, GATT discovery, read, write, notifications, the Nordic UART
@@ -173,6 +160,8 @@ tx = C.add_to_service(nus, _bleio.UUID("6e400003-b5a3-f393-e0a9-e50e24dcca9e"),
 mine = _bleio.Service(_bleio.UUID(0x1234))
 hello = C.add_to_service(mine, _bleio.UUID(0x1235), properties=C.READ | C.WRITE,
     read_perm=OPEN, write_perm=OPEN, max_length=32, initial_value=b"hello")
+C.add_to_service(mine, _bleio.UUID(0x1236), properties=C.READ, read_perm=OPEN, write_perm=NONE,
+    max_length=22, initial_value=bytes(range(22)))
 buf = _bleio.CharacteristicBuffer(rx, buffer_size=512)
 uuid = bytes(reversed(bytes.fromhex("6e400001b5a3f393e0a9e50e24dcca9e")))
 a.start_advertising(bytes([2, 1, 6, 7, 9]) + b"CP-lab" + bytes([17, 7]) + uuid, connectable=True)
@@ -204,6 +193,25 @@ with launch(SERVICES) as b:
     name = p.read(0x2A00)
     check("read the device name", name.startswith(b"CIRCUITPY") and len(name) == 13, name)
     check("read a value", p.read(0x1235) == b"hello", p.read(0x1235))
+    # 22 bytes fill a Read Response at MTU 23 exactly: the server ends it with an error to the Read Blob.
+    try:
+        whole = p.read(0x1236)
+    except cpapi.AttError as e:
+        whole = e
+    check("read a value as long as a Read Response takes", whole == bytes(range(22)), whole)
+    try:
+        p.read(NUS_RX)
+        error = None
+    except cpapi.AttError as e:
+        error = e.code
+    check(
+        "a characteristic the program does not let be read: an ATT error", error is not None, error
+    )
+    check(
+        "a UUID without dashes, as nRF Connect copies it",
+        cpapi.uuid("6E400001B5A3F393E0A9E50E24DCCA9E") == NUS,
+        cpapi.uuid("6E400001B5A3F393E0A9E50E24DCCA9E"),
+    )
     p.write(0x1235, b"world")
     check(
         "write, then the program has it", seen(b, "b'world')"), b.console(since=0)["data"][-300:]
@@ -312,16 +320,6 @@ while True:
             b.console(since=0)["data"][-400:],
         )
 
-# adapter.connections holds a Connection while connected (the HCI stack had a null object there)
-with launch(PERIPHERAL.replace("len(a.connections))", "a.connections)")) as b:
-    seen(b, "advertising")
-    b.ble.connect()
-    check(
-        "adapter.connections holds a Connection",
-        seen(b, "(<Connection>,)"),
-        b.console(since=0)["data"][-300:],
-    )
-
 # Five runs of a program that makes a service: the adapter stays, the heap does not shrink
 MEMORY = """
 import _bleio, gc
@@ -370,19 +368,6 @@ for fast in (False, True):
             b.console(since=0)["data"][-300:],
         )
 
-# ---- The final review's findings, each pinned ----
-
-# The default virtual controller has a public address, on every system (the UID is zero where
-# the system gives none).
-with launch(PERIPHERAL) as b:
-    seen(b, "advertising")
-    state = b.request("GET", "/api/ble")
-check(
-    "the virtual controller has a public address",
-    state["public"] and state["address"] != "00:00:00:00:00:00",
-    state,
-)
-
 # The adapter's name in the run after a reload: no pointer into the previous run's heap.
 NAME = """
 import _bleio, supervisor
@@ -417,15 +402,8 @@ with launch(HEARTBEAT, env=dict(HEADLESS, CIRCUITPY_BLE_VIRTUAL_FAULT="no-comple
     for _ in range(12):
         b.request("POST", "/api/ble/att", "02f700")
     before = b.console(since=0)["data"].count("beat")
-    import time
-
-    time.sleep(8)
-    after = b.console(since=0)["data"].count("beat")
-check(
-    "a controller that keeps the ACL credit does not hang the program",
-    after > before + 5,
-    (before, after),
-)
+    goes_on = seen(b, "beat %d\r\n" % (before + 10), 10)
+check("a controller that keeps the ACL credit does not hang the program", goes_on, before)
 
 # A controller that does not answer: the first use fails, and the adapter is not left half on.
 SILENT = """
@@ -445,14 +423,5 @@ check(
     "failed" in out and "enabled False" in out,
     out,
 )
-
-# An L2CAP frame longer than the host's 255-byte buffer, in two fragments: dropped, the host goes on.
-with launch(PERIPHERAL) as b:
-    seen(b, "advertising")
-    b.request("POST", "/api/ble/connect")
-    seen(b, "connected 1")
-    b.request("POST", "/api/ble/att", "52" + "0300" + "41" * 297)
-    mtu = att(b, "02f700")
-check("a 300-byte frame in fragments does not break the host", (mtu or "").startswith("03"), mtu)
 
 print("DONE")

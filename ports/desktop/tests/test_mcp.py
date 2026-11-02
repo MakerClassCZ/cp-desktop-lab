@@ -301,6 +301,12 @@ r = c.call("ble_scan")
 check("ble_scan: the name", not r.get("isError") and '"echo"' in text(r), r)
 r = c.call("ble_connect")
 check("ble_connect", not r.get("isError") and "MTU" in text(r), r)
+r = c.call("ble_connect")
+check(
+    "ble_connect again: a new connection, not a dead end",
+    not r.get("isError") and "MTU" in text(r),
+    r,
+)
 r = c.call("ble_services")
 check("ble_services lists the program's", not r.get("isError") and "00001235-" in text(r), r)
 r = c.call("ble_read", uuid="0x1235")

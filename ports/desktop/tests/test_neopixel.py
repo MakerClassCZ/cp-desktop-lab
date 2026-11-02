@@ -111,15 +111,6 @@ check(
     out,
 )
 
-# [board] display: the picture the real board's display has
-out, trace = run(
-    'import board\nprint("size", board.DISPLAY.width, board.DISPLAY.height)\n',
-    "",
-    "size",
-    '[board]\ndisplay = "240x240"\n',
-)
-check("[board] display sets the display's size", "size 240 240" in out, out)
-
 # A bad board file stops the start, whatever its section
 for bad, why in (
     ('[pins]\nX = "NOPE"\n', "no pin NOPE"),

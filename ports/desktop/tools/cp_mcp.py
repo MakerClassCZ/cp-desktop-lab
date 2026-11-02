@@ -12,7 +12,6 @@ import base64
 import http.client
 import json
 import os
-import re
 import shutil
 import signal
 import struct
@@ -27,13 +26,7 @@ MAX_TEXT = 20000  # characters of console or trace returned at most
 MAX_WAIT = 60  # seconds a call waits at most, so the host's own timeout does not fire first
 MAX_FILE = 1 << 20
 
-# Terminal escapes: OSC (the title bar) up to BEL or ST, CSI, and the two-byte ones.
-ESCAPES = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-Z\\-_]")
-
-
-def plain(text):
-    """Console text as a reader wants it: no escapes, \\n line ends."""
-    return ESCAPES.sub("", text).replace("\r\n", "\n").replace("\r", "")
+plain = cpapi.plain
 
 
 def tail(text):
@@ -545,7 +538,13 @@ class Server:
         )
 
     def t_ble_connect(self):
-        self.peer = self._api(self._need().ble.connect)
+        if self.peer is not None:
+            return "connected already, MTU %d" % self.peer.mtu
+        board = self._need()
+        # A connection left by a connect that did not finish would refuse this one.
+        if self._api(board.ble.state).get("connected"):
+            self._api(board.request, "POST", "/api/ble/disconnect")
+        self.peer = self._api(board.ble.connect)
         return "connected, MTU %d" % self.peer.mtu
 
     def t_ble_services(self):
@@ -575,16 +574,11 @@ class Server:
         return "written %d bytes" % len(data)
 
     def t_ble_notifications(self, uuid, timeout=1):
-        peer = self._peer()
-        c = self._api(peer.characteristic, uuid)
-        if not getattr(c, "subscribed", False):
-            self._api(peer.subscribe, uuid)
-            c.subscribed = True
-        values = self._api(peer.notifications, uuid, min(float(timeout), MAX_WAIT))
+        values = self._api(self._peer().notifications, uuid, clamp_wait(timeout, 1))
         return "\n".join(self._value(v) for v in values) or "no notifications"
 
     def t_ble_disconnect(self):
-        self._api(self._peer().disconnect)
+        self._api(self._need().request, "POST", "/api/ble/disconnect")
         self.peer = None
         return "disconnected"
 
@@ -682,18 +676,8 @@ def split_last_expression(code):
 def repack(png, scale=None):
     """The port's PNG (stored deflate) compressed, a small one scaled up by a whole factor:
     (png, (width, height), factor)."""
-    if png[:8] != b"\x89PNG\r\n\x1a\n":
-        raise ValueError("not a PNG")
-    pos, idat, ihdr = 8, b"", None
-    while pos < len(png):
-        n, kind = struct.unpack(">I4s", png[pos : pos + 8])
-        if kind == b"IHDR":
-            ihdr = png[pos + 8 : pos + 8 + n]
-        elif kind == b"IDAT":
-            idat += png[pos + 8 : pos + 8 + n]
-        pos += 12 + n
+    ihdr, raw = cpapi.png_parts(png)
     w, h, depth, color = struct.unpack(">IIBB", ihdr[:10])
-    raw = zlib.decompress(idat)
     s = int(scale) if scale else (-(-256 // w) if w < 200 else 1)
     s = max(1, min(8, s))
     row = 1 + w * 3

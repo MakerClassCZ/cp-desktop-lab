@@ -659,8 +659,9 @@ Python of one's own: CODE (a `.py` file as `code.py`, or a directory as the driv
 `code.py` ends or `--wait TEXT` comes, its console printed without the terminal's escapes.
 `--colors` adds the display's pixels per colour, `--png PATH` saves it, `--runs N` runs `code.py`
 N times in one process (Ctrl-D between), and `--board-file`, `--board`, `--display`,
-`--fast-time` and `--timeout` are as above. The exit status is 0, 1 when it did not end in time,
-or 2 after a hard fault, whose backtrace comes last.
+`--fast-time` and `--timeout` are as above. The exit status is 0; 1 when it did not end in time
+or the program ended; 2 after a hard fault, whose backtrace comes last; 3 when `code.py` ended in
+an exception; 64 for wrong arguments.
 
 `tests/test_api.py` and the button and encoder cases of `tests/test_panel.py` use it.
 
