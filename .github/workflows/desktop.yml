@@ -127,7 +127,7 @@ jobs:
           PYTHON=python sh ports/desktop/tools/ci-test.sh circuitpython-windows-x64/circuitpython.exe
 
   hci-bridge:
-    # The Pico 2 W Bluetooth controller for --ble PORT (ports/desktop/tools/hci-bridge), on the
+    # The Pico W and Pico 2 W Bluetooth controllers for --ble PORT (ports/desktop/tools/hci-bridge), on the
     # Pico SDK and the drivers this repository has as submodules.
     runs-on: ubuntu-22.04
     steps:
@@ -145,9 +145,12 @@ jobs:
               ports/raspberrypi/lib/lwip lib/tinyusb
           export PICO_SDK_PATH=$PWD/ports/raspberrypi/sdk PICO_TINYUSB_PATH=$PWD/lib/tinyusb
           export PICO_CYW43_DRIVER_PATH=$PWD/ports/raspberrypi/lib/cyw43-driver PICO_LWIP_PATH=$PWD/ports/raspberrypi/lib/lwip
-          cmake -S ports/desktop/tools/hci-bridge/pico -B build-hci-bridge
-          make -C build-hci-bridge -j4
-          mkdir -p dist && cp build-hci-bridge/hci_bridge.uf2 dist/hci-bridge-pico2w.uf2
+          mkdir -p dist
+          for board in pico2_w pico_w; do
+            cmake -S ports/desktop/tools/hci-bridge/pico -B build-hci-bridge-$board -DPICO_BOARD=$board
+            make -C build-hci-bridge-$board -j4
+            cp build-hci-bridge-$board/hci_bridge.uf2 dist/hci-bridge-${board/_/}.uf2
+          done
       - uses: actions/upload-artifact@v7
         with:
           name: hci-bridge
@@ -171,4 +174,4 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --prerelease \
             --title "CircuitPython desktop $GITHUB_REF_NAME" \
-            --notes "Experimental, unofficial build of ports/desktop. Linux: libsdl2-2.0-0 must be installed (libsdl2-2.0-0:i386 for the i386 package). The -debug packages have the same programs with their symbols, for a crash's backtrace. hci-bridge-pico2w.uf2 makes a Pico 2 W a Bluetooth controller for --ble PORT (ports/desktop/tools/hci-bridge). macOS: see README.txt in the package (xattr)."
+            --notes "Experimental, unofficial build of ports/desktop. Linux: libsdl2-2.0-0 must be installed (libsdl2-2.0-0:i386 for the i386 package). The -debug packages have the same programs with their symbols, for a crash's backtrace. hci-bridge-pico2w.uf2 and hci-bridge-picow.uf2 make a Pico 2 W or a Pico W a Bluetooth controller for --ble PORT (ports/desktop/tools/hci-bridge). macOS: see README.txt in the package (xattr)."

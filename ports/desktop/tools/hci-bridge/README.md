@@ -5,14 +5,16 @@ HCI (H4, as on a UART) to a real Bluetooth controller on a serial port of the co
 program in the lab advertises to and serves a real phone, and every packet is in the trace and,
 with `--ble-log PATH`, in a btsnoop file for Wireshark. Two boards make good controllers.
 
-## A Pico 2 W
+## A Pico 2 W or a Pico W
 
 `pico/` is a bridge between the board's USB serial port and its CYW43439's Bluetooth core, on the
-Pico SDK. The release has it built: `hci-bridge-pico2w.uf2`.
+Pico SDK. The release has it built: `hci-bridge-pico2w.uf2` for a Pico 2 W, `hci-bridge-picow.uf2`
+for a Pico W (the same chip on an RP2040).
 
-1. Hold BOOTSEL, plug the Pico 2 W in, copy `hci-bridge-pico2w.uf2` to the `RP2350` drive. Its LED
+1. Hold BOOTSEL, plug the board in, copy its `.uf2` to the `RP2350` (`RPI-RP2`) drive. Its LED
    lights when the Bluetooth core is up, and it is a serial port named "Pico HCI bridge" (USB
-   2E8A:0009).
+   2E8A:0009 on a Pico 2 W, 2E8A:000A on a Pico W). A 1200-baud open of the port puts it back in
+   the bootloader.
 2. `circuitpython --ble COM7` (`/dev/ttyACM0` on Linux, `/dev/cu.usbmodem…` on macOS).
 
 Its address is the board's own, from the chip (88:A2:9E:… on a Raspberry Pi board). The bridge
@@ -26,6 +28,8 @@ export PICO_SDK_PATH=$PWD/ports/raspberrypi/sdk PICO_TINYUSB_PATH=$PWD/lib/tinyu
 export PICO_CYW43_DRIVER_PATH=$PWD/ports/raspberrypi/lib/cyw43-driver PICO_LWIP_PATH=$PWD/ports/raspberrypi/lib/lwip
 cmake -S ports/desktop/tools/hci-bridge/pico -B build-hci-bridge && make -C build-hci-bridge
 ```
+
+`-DPICO_BOARD=pico_w` on the `cmake` line builds it for a Pico W.
 
 ## An nRF52840 board with Zephyr's `hci_uart`
 
