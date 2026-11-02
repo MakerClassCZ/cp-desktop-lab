@@ -35,6 +35,8 @@ typedef enum {
     MIC_HOST,           // the computer's microphone
 } mic_source_t;
 
+#define PARTS_NO_PIN 0xff        // the pin of a part on none: a sensor, a CC slider
+
 typedef struct {
     part_kind_t kind;
     uint8_t pin;
@@ -120,6 +122,9 @@ void parts_turn(part_t *part, int detents);
 // The program's side: the part of a kind at a pin, attached or not. A pin nothing was ever at gets
 // one now, named as the board names it; at a pin whose part was pulled out it is added detached.
 part_t *parts_for_pin(uint8_t pin, part_kind_t kind);
+static inline bool parts_on_pin(const part_t *part) {
+    return part->pin != PARTS_NO_PIN;
+}
 // The name the board gives a pin: the first key whose value it is, else GPIOn.
 void parts_pin_name(uint8_t pin, char *name, size_t len);
 // A virtual pin the program wrote or reconfigured: an LED on it follows.

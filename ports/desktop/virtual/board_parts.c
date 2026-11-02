@@ -595,7 +595,7 @@ static mp_obj_t _kind_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const m
 static part_t *_attached_at(uint8_t pin) {
     for (int i = 0; i < parts_count(); i++) {
         part_t *p = parts_at(i);
-        if (p->pin == pin && p->kind != PART_SENSOR) {
+        if (p->pin == pin) {
             return p;
         }
     }

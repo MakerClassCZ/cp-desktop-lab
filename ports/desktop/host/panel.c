@@ -693,7 +693,7 @@ static void _part_json(api_buf_t *b, const part_t *p) {
     api_buf_add(b, "{\"name\": ", 9);
     api_buf_json_string(b, p->name, strlen(p->name));
     _json_name(b, "kind", _kind_name(p->kind));
-    if (p->kind != PART_SENSOR && p->kind != PART_CC) {
+    if (parts_on_pin(p)) {
         api_buf_printf(b, ", \"pin\": \"GPIO%u\"", (unsigned)p->pin);
         desktop_virtual_pin(p->pin, &output, &level);
     }

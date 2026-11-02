@@ -179,7 +179,7 @@ void parts_detach(part_t *p) {
 static bool _emptied(uint8_t pin) {
     bool any = false;
     for (int i = 0; i < _count; i++) {
-        if (_parts[i].pin == pin && _parts[i].kind != PART_SENSOR) {
+        if (_parts[i].pin == pin) {
             if (!_parts[i].detached) {
                 return false;
             }
@@ -422,7 +422,7 @@ part_t *parts_add_cc(const char *name, const char *options, const char **why) {
     bool added = p->kind != PART_CC || p->detached;
     memset(p, 0, sizeof(*p));
     p->kind = PART_CC;
-    p->pin = 0xff;
+    p->pin = PARTS_NO_PIN;
     p->cc = (uint8_t)cc;
     p->midi_channel = (uint8_t)channel;
     p->value = (uint16_t)value;
@@ -461,7 +461,7 @@ part_t *parts_add_sensor(void *device, int channel) {
     }
     memset(p, 0, sizeof(*p));
     p->kind = PART_SENSOR;
-    p->pin = 0xff;
+    p->pin = PARTS_NO_PIN;
     p->device = device;
     p->channel = (uint8_t)channel;
     snprintf(p->name, sizeof(p->name), "%s.%s", dev->name, dev->model->channels[channel].name);
