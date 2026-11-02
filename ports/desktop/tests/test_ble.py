@@ -20,6 +20,14 @@ out, _ = run(ADAPTER, "", "enabled")
 check("_bleio.adapter is there", "adapter True False" in out, out)
 check("BLERadio enables it", "enabled True True" in out, out)
 
+# A name set before anything enabled the adapter (adafruit_ble: BLERadio(), then ble.name = ...)
+out, _ = run(
+    'import _bleio\n_bleio.adapter.name = "CP-Lab"\nprint("name", _bleio.adapter.name)\n',
+    "",
+    "name",
+)
+check("the name set on an adapter not yet on", "name CP-Lab" in out, out[-300:])
+
 with launch(ADAPTER, args=["--ble", "off"]) as b:
     seen(b, "adapter")
     seen(b, "\n")
