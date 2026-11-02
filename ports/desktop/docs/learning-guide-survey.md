@@ -215,3 +215,24 @@ What stops the rest first, by class: pins of boards with no board file ~330 over
 ~115 over 35 addresses (IS31FL3741 0x30 12, seesaw boards 0x36 11, HT16K33 0x70 10), `_bleio` 84,
 an AirLift (`ESP_BUSY`, `ESP_CS`) 50, a file 44 (a library's, or one the program writes first),
 modules no port of this kind has (`picodvi`, `usb`, `alarm`, `espcamera`, `sdcardio`, `PIL`) ~115.
+
+## One run of every program, three builds (2026-11-02)
+
+The counts above add up rounds: a program that ran once was not run again, so a program that runs
+only now and then (online, timing) stayed counted. Here every program ran once, each with the
+board file it is written for and the build's own board files, made-up settings, the same data
+files:
+
+| build | ran |
+|---|---|
+| 2026-10-26 (`90b4b20c88`, where the 852 above were counted) | 727 |
+| release 0.7 | 762 |
+| 2026-11-02 (the neutral virtual board, the encoder on two pins) | 762 |
+
+Program by program, 0.7 and today are the same, and no program that ran on 26 October stops
+today. The 35 more are the programs that stopped at `_bleio`: of its 84, 35 run on the virtual
+BLE controller, 16 are Circuit Playground Bluefruit programs given `circuitplayground.toml`, whose
+board has no Bluetooth (`RuntimeError: No adapter available`), 4 meet what the HCI host does not
+do (`NotImplementedError`), and the rest stop at their board's pins. What stops programs first
+now: an AirLift (`ESP_BUSY`, `ESP_CS`) 67, a file 44, Gemma and Trinket pins on other boards
+(`D0`-`D8`) about 150, `picodvi` 29, `alarm` 20, `usb` 19, `PIL` 18, `espcamera` 17.
