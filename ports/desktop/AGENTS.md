@@ -10,7 +10,9 @@ the details of everything below.
 
 - From a release (MakerClassCZ/cp-desktop-lab): `circuitpython-linux-x86_64`, `-aarch64`,
   `-macos-arm64`, `-windows-x64`; `circuitpython-linux-i386` is 32-bit, as the MCUs are; each
-  has a `-debug` twin with the same program unstripped.
+  has a `-debug` twin with the same program unstripped. In a package, `cpapi.py`, `cp_mcp.py`
+  and this file lie beside the program: below, `ports/desktop/tools/` and the build directories
+  are that folder.
 - From source, to test a change in the shared code: `make -C ports/desktop` (Linux, macOS),
   the Windows cross build in README.md. `make CC="gcc -m32" BUILD=build-linux-i386` for 32-bit.
 - The port follows adafruit/circuitpython `main` with a delay. A fix meant for a PR goes on a

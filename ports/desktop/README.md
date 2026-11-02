@@ -587,11 +587,13 @@ circuitpython: hard fault, signal 11; backtrace for addr2line -f -e circuitpytho
   0x7f3c1a242520 (outside the program)
   0x1129e5
   0x12ef7e
+  addr2line -f -e /home/me/circuitpython 0x1129e5 0x12ef7e
 ```
 
-The debug package's program turns the addresses into functions, files and lines, also those a
-stripped program of the same release printed, since the code is the same:
-`addr2line -f -e circuitpython 0x1129e5 0x12ef7e` on Linux, `llvm-addr2line` (or
+On Linux the last line is that command for this program, to paste. The debug package's program
+turns the addresses into functions, files and lines, also those a stripped program of the same
+release printed, since the code is the same: `addr2line -f -e circuitpython 0x1129e5 0x12ef7e`
+on Linux (with the debug program's path), `llvm-addr2line` (or
 `x86_64-w64-mingw32-addr2line`) on Windows, `atos -o circuitpython` on macOS, where the lines are
 in `circuitpython.dSYM` beside it.
 
@@ -728,8 +730,8 @@ file. `CIRCUITPY_SDL_KEYS` names a file or FIFO of panel lines (above; `down Z`,
 
 - Native `.mpy` files (turbo): loading them needs executable memory.
 - On Windows: `audiomp3` (its decoder's inline assembly is for MSVC).
-- mDNS and BLE (`_bleio`); an AirLift (ESP32 co-processor) for boards that reach the network
-  through one.
+- mDNS; an AirLift (ESP32 co-processor) for boards that reach the network through one.
+- Bluetooth LE as a central (scanning and connecting from `code.py`), pairing, and an MTU over 23.
 - `pwmio`, `touchio`, `pulseio` and `rgbmatrix` on the virtual board only; `usb` (USB host),
   `alarm`, `sdcardio`, `picodvi` and `espcamera` not at all.
 - Builds and packages for handhelds: the port needs a cross compiler with the device's SDL2

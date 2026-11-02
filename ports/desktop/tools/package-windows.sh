@@ -1,7 +1,7 @@
 #!/bin/sh
 # Zip the Windows build for a user: the stripped program, SDL2.dll, libusb-1.0.dll (for
 # --board ft232h; LIBUSB_DLL names it, default MSYS2's), the debug adapter, the MCP server, the
-# board files, the examples, the port's README, the VS Code extension when one was packaged, and
+# board files, the examples, the port's README and AGENTS.md, the VS Code extension when one was packaged, and
 # any demo directories given; and circuitpython-windows-x64-debug.zip, the same with the program
 # unstripped. Usage:
 #   ports/desktop/tools/package-windows.sh OUT_DIR SDL_DIR [demo-dir ...]
@@ -17,7 +17,7 @@ for NAME in circuitpython-windows-x64 circuitpython-windows-x64-debug; do
         cp "$HERE/build-windows/circuitpython.exe" "$P/"
     fi
     cp "$SDL_DIR/bin/SDL2.dll" "$HERE/python/debugadapter.py" "$HERE/tools/cp_mcp.py" "$HERE/tools/cpapi.py" \
-        "$HERE/README.md" "$P/"
+        "$HERE/README.md" "$HERE/AGENTS.md" "$P/"
     mkdir -p "$P/boards" && cp -r "$HERE/boards/files" "$P/boards/files"
     cp -r "$HERE/examples" "$P/examples"
     cp "${LIBUSB_DLL:-/mnt/c/msys64/ucrt64/bin/libusb-1.0.dll}" "$P/libusb-1.0.dll"

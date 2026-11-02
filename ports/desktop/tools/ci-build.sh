@@ -25,7 +25,7 @@ pack() {
     else
         cp "$HERE/$BUILD_DIR/circuitpython" "$OUT/$NAME/"
     fi
-    cp "$HERE/python/debugadapter.py" "$HERE/tools/cp_mcp.py" "$HERE/tools/cpapi.py" "$HERE/README.md" "$OUT/$NAME/"
+    cp "$HERE/python/debugadapter.py" "$HERE/tools/cp_mcp.py" "$HERE/tools/cpapi.py" "$HERE/README.md" "$HERE/AGENTS.md" "$OUT/$NAME/"
     mkdir -p "$OUT/$NAME/boards" && cp -R "$HERE/boards/files" "$OUT/$NAME/boards/files"
     cp -R "$HERE/examples" "$OUT/$NAME/examples"
     for f in "$@"; do cp -R "$f" "$OUT/$NAME/"; done
