@@ -34,6 +34,11 @@ Open the CIRCUITPY folder in VS Code and add to `.vscode/launch.json`:
 Set breakpoints in `code.py` or in `lib/*.py` and press F5. The program starts in a terminal,
 waits for the editor and then runs `code.py` under the debugger. Its console is the terminal.
 
+**CircuitPython: Run this file** (the run button of a Python file's editor, or the file's menu in
+the explorer) runs that file of the drive in place of `code.py` (`--code`), with the rest of the
+launch configuration above, or the defaults without one. A program already running is stopped
+first. `"code": "games/snake.py"` in the configuration does the same for F5.
+
 ## The board
 
 `board` picks what the program runs as (`--board`):
@@ -121,7 +126,7 @@ the board logic, the file follower, the library installer (its PyPI part skips o
 against a fake `vscode` module.
 
 `node test/e2e/run.js PATH_TO_CIRCUITPYTHON` runs it in a real VS Code with a fresh profile: a
-breakpoint, a variable, the reconnect after a saved file, none after Stop. It uses the `code` on
+breakpoint, a variable, the reconnect after a saved file, none after Stop, Run this file. It uses the `code` on
 the PATH, or `$VSCODE`; VS Code refuses to run tests while another instance of the same build is
 open, so point `VSCODE` at a separate copy (an Insiders zip) to keep working in yours. With an
 MCP2221 plugged in, `CP_E2E_MCP2221=1` adds an I2C scan that has to reach the bus panel.

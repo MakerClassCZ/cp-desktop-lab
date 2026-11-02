@@ -2,7 +2,7 @@
   "name": "circuitpython-host-debug",
   "displayName": "CircuitPython host debugger",
   "description": "Debug CircuitPython code running in the Linux and Windows build of CircuitPython: breakpoints, stepping, variables.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "makerclass",
   "license": "MIT",
   "engines": {
@@ -18,6 +18,7 @@
     "onCommand:circuitpython.showBusTrace",
     "onCommand:circuitpython.installLibrary",
     "onCommand:circuitpython.installFromCode",
+    "onCommand:circuitpython.runFile",
     "workspaceContains:code.py"
   ],
   "main": "./extension.js",
@@ -79,6 +80,10 @@
               "boardFile": {
                 "type": "string",
                 "description": "A board file (--board-file): pin names such as NEOPIXEL, D5, LED added to the board, and NeoPixel layouts. Example: ${workspaceFolder}/feather.toml"
+              },
+              "code": {
+                "type": "string",
+                "description": "A file of the drive run in place of code.py, every run (--code). Example: games/snake.py"
               },
               "traceBus": {
                 "type": "boolean",
@@ -159,6 +164,12 @@
         "command": "circuitpython.installFromCode",
         "title": "Install libraries used by code.py",
         "category": "CircuitPython"
+      },
+      {
+        "command": "circuitpython.runFile",
+        "title": "Run this file",
+        "category": "CircuitPython",
+        "icon": "$(play)"
       }
     ],
     "configuration": {
@@ -175,6 +186,21 @@
           "description": "Reconnect the debugger when a saved file reloaded the program and it waits for the editor again. Stop in the editor never reconnects."
         }
       }
+    },
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "circuitpython.runFile",
+          "when": "resourceLangId == python"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "circuitpython.runFile",
+          "when": "resourceLangId == python",
+          "group": "navigation"
+        }
+      ]
     }
   }
 }

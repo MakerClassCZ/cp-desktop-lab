@@ -45,7 +45,7 @@ function hasBoardArg(args) {
     return (args || []).some((a) => a === '--board');
 }
 
-// The program's command line. A --board, --trace-bus or --board-file in args wins over the property.
+// The program's command line. A --board, --trace-bus, --board-file or --code in args wins over the property.
 function buildArgs(config, board, drive, port, tracePath) {
     const args = ['--drive', drive, '--debug', String(port)];
     const extra = config.args || [];
@@ -58,7 +58,20 @@ function buildArgs(config, board, drive, port, tracePath) {
     if (config.boardFile && !extra.includes('--board-file')) {
         args.push('--board-file', config.boardFile);
     }
+    if (config.code && !extra.includes('--code')) {
+        args.push('--code', config.code);
+    }
     return args.concat(extra);
+}
+
+// A file as --code names it: its path on the drive, with /, or null for a file outside the drive.
+// The drive's case is ignored where the system's paths ignore it (Windows).
+function codePath(drive, file, paths = require('path')) {
+    const rel = paths.relative(drive, file);
+    if (rel === '' || rel.startsWith('..') || paths.isAbsolute(rel)) {   // absolute: another drive letter
+        return null;
+    }
+    return rel.split(paths.sep).join('/');
 }
 
 // The bus trace panel: as the configuration says, else on for a board with real pins.
@@ -89,4 +102,4 @@ class SessionWatch {
     }
 }
 
-module.exports = { BOARDS, DESCRIPTIONS, parseListBoards, chooseAuto, configuredBoard, buildArgs, traceWanted, SessionWatch };
+module.exports = { BOARDS, DESCRIPTIONS, parseListBoards, chooseAuto, configuredBoard, buildArgs, codePath, traceWanted, SessionWatch };

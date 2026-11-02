@@ -37,6 +37,26 @@ function waitForPort(port, timeoutMs, cancelled) {
     });
 }
 
+// Until nothing answers on the port: a program ended with its terminal may hold it a moment longer.
+function waitForPortClosed(port, timeoutMs) {
+    return new Promise((resolve) => {
+        const started = Date.now();
+        const attempt = () => {
+            const socket = net.connect(port, '127.0.0.1');
+            socket.once('connect', () => {
+                socket.destroy();
+                if (Date.now() - started > timeoutMs) {
+                    resolve();
+                } else {
+                    setTimeout(attempt, 100);
+                }
+            });
+            socket.once('error', () => { socket.destroy(); resolve(); });
+        };
+        attempt();
+    });
+}
+
 // The program started by the last launch. After a reload (a file saved on the drive) it waits
 // for the editor again, so the next F5 connects to it instead of starting a second one.
 let running = null;
@@ -273,6 +293,53 @@ function currentDrive() {
     return folders && folders.length > 0 ? folders[0].uri.fsPath : null;
 }
 
+// The workspace's own CircuitPython launch, else one made from the settings: the base for Run
+// this file.
+function launchConfig(folder) {
+    const configs = vscode.workspace.getConfiguration('launch', folder.uri).get('configurations') || [];
+    const own = configs.find((c) => c.type === 'circuitpython' && c.request === 'launch');
+    return Object.assign({ program: programPath() || 'circuitpython', drive: folder.uri.fsPath, board: 'ask', port: 5678 },
+        own, { type: 'circuitpython', request: 'launch' });
+}
+
+// The editor's file (or the one clicked in the explorer) run in place of code.py (--code). A program
+// already running is stopped first: it keeps the file it was started with.
+async function runFile(uri) {
+    const file = uri || (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.uri);
+    const folder = file && vscode.workspace.getWorkspaceFolder(file);
+    if (!folder) {
+        vscode.window.showErrorMessage('CircuitPython: Run this file needs a file of the workspace open');
+        return;
+    }
+    const config = launchConfig(folder);
+    const drive = config.drive.replace('${workspaceFolder}', folder.uri.fsPath);
+    const code = boards.codePath(drive, file.fsPath);
+    if (code === null) {
+        vscode.window.showErrorMessage('CircuitPython: ' + file.fsPath + ' is not on the drive ' + drive);
+        return;
+    }
+    if (isRunning()) {
+        // As the Stop button: no reconnect to the old program. A session that has ended already is
+        // refused (Canceled), and there is nothing to stop then.
+        await vscode.debug.stopDebugging().catch(() => {});
+        const old = running;
+        const oldPort = (runningConfig && runningConfig.port) || 5678;
+        const closed = new Promise((resolve) => {
+            const watch = vscode.window.onDidCloseTerminal((t) => {
+                if (t === old) {
+                    watch.dispose();
+                    resolve();
+                }
+            });
+        });
+        old.dispose();
+        await closed;
+        await waitForPortClosed(oldPort, 10000);
+    }
+    await vscode.workspace.saveAll(false);
+    await vscode.debug.startDebugging(folder, Object.assign(config, { name: 'CircuitPython: ' + code, code }));
+}
+
 // Libraries from PyPI into the drive's lib/, with a notification while it runs and a summary.
 // typed: the names are the user's own, so their publisher need not be Adafruit.
 async function installInto(names, typed) {
@@ -407,6 +474,7 @@ function activate(context) {
         vscode.commands.registerCommand('circuitpython.showBusTrace', () => busChannel.show()),
         vscode.commands.registerCommand('circuitpython.installLibrary', installLibrary),
         vscode.commands.registerCommand('circuitpython.installFromCode', installFromCode),
+        vscode.commands.registerCommand('circuitpython.runFile', runFile),
         vscode.debug.registerDebugConfigurationProvider('circuitpython', new Provider()),
         vscode.debug.registerDebugAdapterDescriptorFactory('circuitpython', new Factory()),
         vscode.debug.registerDebugAdapterTrackerFactory('circuitpython', new TrackerFactory()),

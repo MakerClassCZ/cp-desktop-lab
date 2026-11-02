@@ -75,3 +75,22 @@ test('boardFile becomes --board-file, unless args has one', () => {
     assert.deepStrictEqual(b.buildArgs({ boardFile: '/w/a.toml', args: ['--board-file', '/w/b.toml'] }, 'virtual', '/w', 5678),
         ['--drive', '/w', '--debug', '5678', '--board', 'virtual', '--board-file', '/w/b.toml']);
 });
+
+test('code becomes --code, unless args has one', () => {
+    assert.deepStrictEqual(b.buildArgs({ code: 'games/snake.py' }, 'virtual', '/w', 5678),
+        ['--drive', '/w', '--debug', '5678', '--board', 'virtual', '--code', 'games/snake.py']);
+    assert.deepStrictEqual(b.buildArgs({ code: 'a.py', args: ['--code', 'b.py'] }, 'virtual', '/w', 5678),
+        ['--drive', '/w', '--debug', '5678', '--board', 'virtual', '--code', 'b.py']);
+});
+
+test('codePath: a file of the drive as --code takes it, or null outside the drive', () => {
+    const posix = require('path').posix;
+    const win32 = require('path').win32;
+    assert.strictEqual(b.codePath('/w', '/w/games/snake.py', posix), 'games/snake.py');
+    assert.strictEqual(b.codePath('/w/', '/w/code.py', posix), 'code.py');
+    assert.strictEqual(b.codePath('/w', '/other/x.py', posix), null);
+    assert.strictEqual(b.codePath('/w', '/w', posix), null);
+    assert.strictEqual(b.codePath('C:\\proj', 'C:\\proj\\games\\snake.py', win32), 'games/snake.py');
+    assert.strictEqual(b.codePath('C:\\proj', 'c:\\PROJ\\x.py', win32), 'x.py');
+    assert.strictEqual(b.codePath('C:\\proj', 'D:\\proj\\x.py', win32), null);
+});

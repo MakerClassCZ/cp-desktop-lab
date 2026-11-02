@@ -100,11 +100,29 @@ async function run() {
     assert.strictEqual(problem.range.start.line, 1);
     assert.match(problem.message, /ZeroDivisionError/);
 
+    // Run this file: the editor's file in place of code.py, the workspace's launch giving the rest.
+    fs.mkdirSync(path.join(drive, 'games'), { recursive: true });
+    fs.mkdirSync(path.join(drive, '.vscode'), { recursive: true });
+    fs.writeFileSync(path.join(drive, '.vscode', 'launch.json'), JSON.stringify({ configurations: [config] }));
+    // Read by VS Code a moment later; before that a launch has no board and asks for one.
+    await until('the launch configuration', () => (vscode.workspace.getConfiguration('launch', folder.uri).get('configurations') || []).length > 0, 15000);
+    const snake = vscode.Uri.file(path.join(drive, 'games', 'snake.py'));
+    fs.writeFileSync(snake.fsPath, 'print("e2e snake")\n');
+    await vscode.window.showTextDocument(snake);
+    await vscode.commands.executeCommand('circuitpython.runFile');
+    const running = await until('a session of the file', () => {
+        const s = vscode.debug.activeDebugSession;
+        return s && s.configuration.code === 'games/snake.py' ? s : undefined;
+    }, 30000);
+    await until('the file to end', () => events.find((e) => e[0] === running.id && e[1] === 'terminated'), 30000);
+    // code.py still raises ZeroDivisionError: had it run, Problems would have it again.
+    assert.strictEqual(vscode.languages.getDiagnostics(uri).length, 0, 'the file ran, not code.py');
+
     for (const terminal of vscode.window.terminals) {
         terminal.dispose();
     }
     await sleep(1000);
-    let checks = 7;
+    let checks = 9;
 
     // The libraries code.py imports, from PyPI into lib/ (skipped offline: CP_E2E_OFFLINE=1).
     if (process.env.CP_E2E_OFFLINE !== '1') {

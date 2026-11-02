@@ -20,7 +20,12 @@ function fakeVscode() {
             showWarningMessage: (m) => { (fake.warnings = fake.warnings || []).push(m); },
             showInputBox: async () => fake.input,
             withProgress: async (options, task) => task({ report() {} }),
-            onDidCloseTerminal: (f) => { registered.closeTerminal = f; return {}; },
+            onDidCloseTerminal: (f) => {
+                const listeners = registered.closeListeners = registered.closeListeners || [];
+                listeners.push(f);
+                registered.closeTerminal = (t) => listeners.slice().forEach((g) => g(t));
+                return { dispose: () => listeners.splice(listeners.indexOf(f), 1) };
+            },
             createOutputChannel: (name) => {
                 fake.channel = { name, text: '', shown: 0, append(t) { this.text += t; }, appendLine(t) { this.text += t + '\n'; }, show() { this.shown++; }, dispose() {} };
                 return fake.channel;
@@ -333,4 +338,60 @@ test('Install libraries used by code.py: its imports, and what PyPI does not hav
     assert.deepStrictEqual(calls, [['imports', '/w'], ['install', '/w', ['adafruit_bme280', 'adafruit_no_such'], { trustNames: false }]]);
     assert.match(fake.warnings[0], /adafruit-circuitpython-no-such/);
     assert.match(fake.warnings[1], /not published by Adafruit.*adafruit-circuitpython-squat/);
+});
+
+// Run this file: the workspace's file as --code, from the workspace's own launch or a default one.
+function withWorkspace(fake, launches) {
+    const folder = fake.workspace.workspaceFolders[0];
+    fake.workspace.getWorkspaceFolder = (uri) => (uri.fsPath.startsWith('/w') ? folder : undefined);
+    fake.workspace.getConfiguration = (section) => ({
+        get: (k, d) => (section === 'launch' && k === 'configurations' ? launches : k === 'program' ? '' : d),
+    });
+    fake.workspace.saveAll = async () => true;
+    fake.debug.stopDebugging = async () => { fake.stopped = true; throw new Error('Canceled'); };   // as VS Code once the session ended
+}
+
+test('Run this file: the file as --code on the workspace drive', async () => {
+    const fake = fakeVscode(); load(fake);
+    withWorkspace(fake, []);
+    await fake.registered['circuitpython.runFile']({ fsPath: '/w/games/snake.py' });
+    assert.strictEqual(fake.started.length, 1);
+    const config = fake.started[0];
+    assert.strictEqual(config.code, 'games/snake.py');
+    assert.strictEqual(config.drive, '/w');
+    assert.strictEqual(config.type, 'circuitpython');
+    assert.strictEqual(config.request, 'launch');
+});
+
+test('Run this file: the workspace launch configuration gives the program and the board', async () => {
+    const fake = fakeVscode(); load(fake);
+    withWorkspace(fake, [{ type: 'circuitpython', request: 'launch', program: '/p/cp', drive: '${workspaceFolder}', board: 'virtual', port: 5800 }]);
+    await fake.registered['circuitpython.runFile']({ fsPath: '/w/code.py' });
+    const config = fake.started[0];
+    assert.deepStrictEqual([config.program, config.board, config.port, config.code], ['/p/cp', 'virtual', 5800, 'code.py']);
+});
+
+test('Run this file: a file outside the drive is refused, nothing starts', async () => {
+    const fake = fakeVscode(); load(fake);
+    withWorkspace(fake, [{ type: 'circuitpython', request: 'launch', program: '/p/cp', drive: '/w/CIRCUITPY' }]);
+    await fake.registered['circuitpython.runFile']({ fsPath: '/w/tools/x.py' });
+    assert.strictEqual(fake.started.length, 0);
+    assert.match(fake.errors[0], /not on the drive/);
+});
+
+test('Run this file: a running program is stopped first', async () => {
+    const fake = fakeVscode(); load(fake);
+    withWorkspace(fake, []);
+    // A debug port that answers, as the program's does once it runs.
+    const server = require('net').createServer((c) => c.destroy()).listen(0, '127.0.0.1');
+    await new Promise((r) => server.once('listening', r));
+    const port = server.address().port;
+    await fake.registered.factory.createDebugAdapterDescriptor({ configuration: { type: 'circuitpython', request: 'launch', program: '/x/cp', board: 'virtual', port } });
+    server.close();
+    const terminal = fake.terminal;
+    terminal.dispose = () => { terminal.exitStatus = { code: 0 }; fake.registered.closeTerminal(terminal); };
+    await fake.registered['circuitpython.runFile']({ fsPath: '/w/code.py' });
+    assert.ok(fake.stopped, 'the session stopped');
+    assert.ok(terminal.exitStatus, 'the old program ended');
+    assert.strictEqual(fake.started[fake.started.length - 1].code, 'code.py');
 });
