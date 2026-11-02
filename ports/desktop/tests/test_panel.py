@@ -118,7 +118,9 @@ while len(got) < 6:
 print("midi", got.hex(" "))
 """
 with launch(MIDI, '[midi]\nKEYS = "keyboard"\n', env=dict(HEADLESS, CIRCUITPY_SDL_KEYS=KEYS)) as b:
-    check("the key script plays a key by its position", seen(b, "midi 90 30 64 80 30 00", timeout=10))
+    check(
+        "the key script plays a key by its position", seen(b, "midi 90 30 64 80 30 00", timeout=10)
+    )
 os.remove(KEYS)
 
 # One set of lines for the key script and the control API: a dump through the API
@@ -133,7 +135,11 @@ with launch('print("ready")\nwhile True:\n    pass\n', '[i2c]\nOLED = "ssd1306 1
     except Exception as e:
         answer = e
 check("the API takes a dump", answer is None, answer)
-check("the dump is the display as a PPM", (ppm(PPM) or (0, 0))[:2] == (128, 64), ppm(PPM) and ppm(PPM)[:2])
+check(
+    "the dump is the display as a PPM",
+    (ppm(PPM) or (0, 0))[:2] == (128, 64),
+    ppm(PPM) and ppm(PPM)[:2],
+)
 
 # pwmio: a lamp, a servo; touchio: a pad held on the panel
 out, trace = run(

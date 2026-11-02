@@ -89,28 +89,50 @@ static void _hex(char *out, size_t cap, const uint8_t *data, size_t len) {
 
 static const char *_att_name(uint8_t op) {
     switch (op) {
-        case 0x01: return "ERROR_RSP";
-        case 0x02: return "MTU_REQ";
-        case 0x03: return "MTU_RSP";
-        case 0x04: return "FIND_INFO_REQ";
-        case 0x05: return "FIND_INFO_RSP";
-        case 0x06: return "FIND_TYPE_REQ";
-        case 0x07: return "FIND_TYPE_RSP";
-        case 0x08: return "READ_TYPE_REQ";
-        case 0x09: return "READ_TYPE_RSP";
-        case 0x0a: return "READ_REQ";
-        case 0x0b: return "READ_RSP";
-        case 0x0c: return "READ_BLOB_REQ";
-        case 0x0d: return "READ_BLOB_RSP";
-        case 0x10: return "READ_GROUP_REQ";
-        case 0x11: return "READ_GROUP_RSP";
-        case 0x12: return "WRITE_REQ";
-        case 0x13: return "WRITE_RSP";
-        case 0x1b: return "NOTIFY";
-        case 0x1d: return "INDICATE";
-        case 0x1e: return "CONFIRM";
-        case 0x52: return "WRITE_CMD";
-        default: return NULL;
+        case 0x01:
+            return "ERROR_RSP";
+        case 0x02:
+            return "MTU_REQ";
+        case 0x03:
+            return "MTU_RSP";
+        case 0x04:
+            return "FIND_INFO_REQ";
+        case 0x05:
+            return "FIND_INFO_RSP";
+        case 0x06:
+            return "FIND_TYPE_REQ";
+        case 0x07:
+            return "FIND_TYPE_RSP";
+        case 0x08:
+            return "READ_TYPE_REQ";
+        case 0x09:
+            return "READ_TYPE_RSP";
+        case 0x0a:
+            return "READ_REQ";
+        case 0x0b:
+            return "READ_RSP";
+        case 0x0c:
+            return "READ_BLOB_REQ";
+        case 0x0d:
+            return "READ_BLOB_RSP";
+        case 0x10:
+            return "READ_GROUP_REQ";
+        case 0x11:
+            return "READ_GROUP_RSP";
+        case 0x12:
+            return "WRITE_REQ";
+        case 0x13:
+            return "WRITE_RSP";
+        case 0x1b:
+            return "NOTIFY";
+        case 0x1d:
+            return "INDICATE";
+        case 0x1e:
+            return "CONFIRM";
+        case 0x52:
+            return "WRITE_CMD";
+        default:
+            return NULL;
     }
 }
 
