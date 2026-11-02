@@ -317,6 +317,17 @@ check(
 )
 r = c.call("ble_services")
 check("ble_services lists the program's", not r.get("isError") and "00001235-" in text(r), r)
+mine = [
+    c
+    for s in json.loads(text(r))
+    for c in s["characteristics"]
+    if c["uuid"].startswith("00001235-")
+]
+check(
+    "ble_services: properties by name",
+    mine and mine[0]["properties"] == ["read", "write", "notify"],
+    mine,
+)
 r = c.call("ble_read", uuid="0x1235")
 check("ble_read: hex and text", not r.get("isError") and '68 69  "hi"' in text(r), r)
 r = c.call("ble_notifications", uuid="0x1235", timeout=0.2)

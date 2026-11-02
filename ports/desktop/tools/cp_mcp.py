@@ -549,7 +549,7 @@ class Server:
                 {
                     "uuid": s.uuid,
                     "characteristics": [
-                        {"uuid": c.uuid, "handle": c.handle, "properties": c.properties}
+                        {"uuid": c.uuid, "handle": c.handle, "properties": c.names()}
                         for c in s.characteristics
                     ],
                 }

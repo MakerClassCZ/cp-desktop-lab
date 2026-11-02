@@ -203,9 +203,11 @@ with launch(SERVICES) as b:
         p.read(NUS_RX)
         error = None
     except cpapi.AttError as e:
-        error = e.code
+        error = e
     check(
-        "a characteristic the program does not let be read: an ATT error", error is not None, error
+        "a characteristic the program does not let be read: an ATT error that names it",
+        error is not None and error.code == 0x02 and "read not permitted" in str(error),
+        str(error),
     )
     check(
         "a UUID without dashes, as nRF Connect copies it",

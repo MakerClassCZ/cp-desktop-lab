@@ -578,11 +578,28 @@ class Advertisement:
         return "Advertisement(name=%r, services=%r)" % (self.name, self.services)
 
 
+# A characteristic's property bits, named as _bleio.Characteristic's constants are.
+PROPERTIES = (
+    (0x01, "broadcast"),
+    (0x02, "read"),
+    (0x04, "write_no_response"),
+    (0x08, "write"),
+    (0x10, "notify"),
+    (0x20, "indicate"),
+    (0x40, "signed_write"),
+    (0x80, "extended"),
+)
+
+
 class Characteristic:
     def __init__(self, uuid, handle, properties):
         self.uuid, self.handle, self.properties = uuid, handle, properties
         self.cccd = None  # the handle of its Client Characteristic Configuration, if it has one
         self.subscribed = False
+
+    def names(self):
+        """Its properties by name, in the order of their bits: ["read", "write", "notify"]."""
+        return [name for bit, name in PROPERTIES if self.properties & bit]
 
     def __repr__(self):
         return "Characteristic(%s, 0x%04x)" % (self.uuid, self.handle)
@@ -596,11 +613,36 @@ class Service:
         return "Service(%s, 0x%04x-0x%04x)" % (self.uuid, self.start, self.end)
 
 
+# The ATT error codes (Bluetooth Core, Vol 3, Part F, 3.4.1.1).
+ATT_ERRORS = {
+    0x01: "invalid handle",
+    0x02: "read not permitted",
+    0x03: "write not permitted",
+    0x04: "invalid PDU",
+    0x05: "insufficient authentication",
+    0x06: "request not supported",
+    0x07: "invalid offset",
+    0x08: "insufficient authorization",
+    0x09: "prepare queue full",
+    0x0A: "attribute not found",
+    0x0B: "attribute not long",
+    0x0C: "insufficient encryption key size",
+    0x0D: "invalid attribute value length",
+    0x0E: "unlikely error",
+    0x0F: "insufficient encryption",
+    0x10: "unsupported group type",
+    0x11: "insufficient resources",
+}
+
+
 class AttError(Exception):
     """An ATT Error Response: the request's opcode, the handle, the error code."""
 
     def __init__(self, opcode, handle, code):
-        super().__init__("ATT error 0x%02x on 0x%02x at handle 0x%04x" % (code, opcode, handle))
+        super().__init__(
+            "ATT error 0x%02x (%s) on 0x%02x at handle 0x%04x"
+            % (code, ATT_ERRORS.get(code, "unknown"), opcode, handle)
+        )
         self.opcode, self.handle, self.code = opcode, handle, code
 
 
