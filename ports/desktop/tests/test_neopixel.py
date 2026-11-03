@@ -154,12 +154,11 @@ if files is None:
     print("SKIP no board files beside the tests")
 else:
     for name in sorted(os.listdir(files)):
-        # A file naming a NeoPixel and an LED has them on the board; one that only shows the gamepad loads.
-        names = "NEOPIXEL =" in open(os.path.join(files, name)).read()
-        src = (
-            'import board\nprint("loaded", board.NEOPIXEL is not None, board.LED is not None)\n'
-            if names
-            else 'print("loaded", True, True)\n'
+        # A file naming a NeoPixel or an LED has it on the board; every file loads.
+        text = open(os.path.join(files, name)).read()
+        src = 'import board\nprint("loaded", %s, %s)\n' % (
+            "board.NEOPIXEL is not None" if "NEOPIXEL =" in text else "True",
+            "board.LED is not None" if "\nLED =" in text else "True",
         )
         # A file with a display size has the display that size.
         size = re.search(r'^display = "(\d+)x(\d+)"', open(os.path.join(files, name)).read(), re.M)

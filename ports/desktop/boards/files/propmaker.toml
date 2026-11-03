@@ -1,0 +1,59 @@
+# A Feather RP2040 Prop-Maker's names on the virtual board: circuitpython --board-file boards/files/propmaker.toml
+# Its button is Z, the external button X (pressed = low); a strip of 30 NeoPixels on
+# EXTERNAL_NEOPIXELS, a servo on EXTERNAL_SERVO, the I2S amplifier on I2S_DATA and the LIS3DH
+# accelerometer on the virtual I2C bus. EXTERNAL_POWER is an output nothing reads.
+
+[pins]
+A0 = "GPIO0"
+A1 = "GPIO1"
+A2 = "GPIO2"
+A3 = "GPIO3"
+D24 = "GPIO4"
+D25 = "GPIO5"
+D5 = "GPIO6"
+D6 = "GPIO7"
+D9 = "GPIO8"
+D10 = "GPIO9"
+D11 = "GPIO10"
+D12 = "GPIO11"
+D0 = "RX"
+D1 = "TX"
+BUTTON = "GPIO12"
+BOOT = "GPIO12"
+D7 = "GPIO12"
+LED = "GPIO14"
+D13 = "GPIO14"
+NEOPIXEL = "GPIO15"
+D4 = "GPIO15"
+I2S_DATA = "GPIO16"
+I2S_BIT_CLOCK = "GPIO17"
+I2S_WORD_SELECT = "GPIO18"
+EXTERNAL_BUTTON = "GPIO19"
+EXTERNAL_SERVO = "GPIO20"
+EXTERNAL_NEOPIXELS = "GPIO21"
+ACCELEROMETER_INTERRUPT = "GPIO22"
+EXTERNAL_POWER = "GPIO23"
+
+[neopixel]
+NEOPIXEL = "1"
+EXTERNAL_NEOPIXELS = "30"
+
+[button]
+BUTTON = "key=Z"
+EXTERNAL_BUTTON = "key=X"
+
+[pwm]
+EXTERNAL_SERVO = "servo"
+
+[i2s]
+I2S_DATA = ""
+
+[led]
+LED = "red"
+
+[i2c]
+ACCEL = "lis3dh"     # 0x18
+
+[board]
+ble = "off"  # no Bluetooth on this board
+machine = "Adafruit Feather RP2040 Prop-Maker with rp2040"

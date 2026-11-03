@@ -22,13 +22,18 @@ A3 = "GPIO25"
 A4 = "GPIO26"
 A5 = "GPIO27"
 BUTTON = "GPIO4"
-# Outputs a program sets and leaves, on keys' pins (no free ones are left): an output wins
-# over the key.
 NEOPIXEL_POWER = "GPIO9" # ESP32-S2/S3 Feathers power their NeoPixel through it
 EXTERNAL_POWER = "GPIO10" # the RP2040 Prop-Maker Feather's
 D4 = "GPIO11"
-# The SPI pins as pins too, on the arrows: code that drives a NeoPixel or a servo on them, and
-# busio.SPI on them reaches the virtual bus all the same.
+# D0 and D1 are the UART's, as on a Feather; D2, D3, D7 and D8, which some Feathers have.
+D0 = "RX"
+D1 = "TX"
+D2 = "GPIO3"
+D3 = "GPIO5"
+D7 = "GPIO6"
+D8 = "GPIO7"
+# The SPI pins as pins too: code that drives a NeoPixel or a servo on them, and busio.SPI on them
+# reaches the virtual bus all the same.
 SCK = "GPIO0"
 MOSI = "GPIO1"
 MISO = "GPIO2"

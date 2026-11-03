@@ -1,0 +1,37 @@
+# A NeoTrellis M4's names on the virtual board: circuitpython --board-file boards/files/trellis_m4.toml
+# Its 32 NeoPixels as an 8x4 grid; the key matrix's COL0-COL7 and ROW0-ROW3 pins are there, the
+# keys themselves are not (nothing presses them). The accelerometer (an ADXL343) is not modelled.
+
+[pins]
+A0 = "GPIO0"
+A1 = "GPIO1"
+A2 = "GPIO2"
+MICOUT = "GPIO3"
+MICIN = "GPIO4"
+ACCELEROMETER_SDA = "GPIO5"
+ACCELEROMETER_SCL = "GPIO6"
+COL0 = "GPIO7"
+COL1 = "GPIO8"
+COL2 = "GPIO9"
+COL3 = "GPIO10"
+COL4 = "GPIO11"
+COL5 = "GPIO12"
+COL6 = "GPIO14"
+COL7 = "GPIO15"
+ROW0 = "GPIO16"
+ROW1 = "GPIO17"
+ROW2 = "GPIO18"
+ROW3 = "GPIO19"
+INT = "GPIO2"
+NEOPIXEL = "GPIO20"
+APA102_MOSI = "GPIO21"
+DOTSTAR_DATA = "GPIO21"
+APA102_SCK = "GPIO22"
+DOTSTAR_CLOCK = "GPIO22"
+
+[neopixel]
+NEOPIXEL = "8x4"
+
+[board]
+ble = "off"  # no Bluetooth on this board
+machine = "Adafruit Trellis M4 Express with samd51g19"

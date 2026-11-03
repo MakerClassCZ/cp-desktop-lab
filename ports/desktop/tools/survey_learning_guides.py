@@ -118,8 +118,61 @@ def _read(path):
 RAN = ("running", "finished")
 
 
-# The board file a program is written for, from its project's path and the board names it uses.
-def board_for(work, entry):
+# The names every board file has: the virtual board's own.
+BASE_NAMES = {"GPIO%d" % i for i in range(28)} | {
+    "TX",
+    "RX",
+    "UART",
+    "SCL",
+    "SDA",
+    "I2C",
+    "STEMMA_I2C",
+    "SCK",
+    "MOSI",
+    "MISO",
+    "SPI",
+    "DISPLAY",
+    "SPEAKER",
+    "board_id",
+}
+
+
+def board_names(path):
+    """The names a board file gives the board: its [pins] and the names of its parts."""
+    names = set(BASE_NAMES)
+    for line in open(path, encoding="utf-8"):
+        m = re.match(r'\s*"?([A-Za-z_][A-Za-z0-9_]*)"?\s*=', line)
+        if m:
+            names.add(m.group(1))
+    return names
+
+
+# The board file a program is written for: its library or its project's path first, then the board
+# file that has the most of the board names it uses, when that is not the first guess.
+def board_for(work, entry, board_dir=None):
+    guess = _board_by_library(work, entry)
+    if board_dir is None:
+        return guess
+    drive = os.path.join(work, "drives", "%03d" % entry["n"])
+    source = "".join(
+        open(os.path.join(drive, f), encoding="utf-8", errors="replace").read()
+        for f in os.listdir(drive)
+        if f.endswith(".py")
+    )
+    used = set(re.findall(r"\bboard\.([A-Za-z_][A-Za-z0-9_]*)", source)) - BASE_NAMES
+    if not used:
+        return guess
+    files = {
+        f[:-5]: board_names(os.path.join(board_dir, f))
+        for f in os.listdir(board_dir)
+        if f.endswith(".toml")
+    }
+    has = lambda b: len(used & files.get(b, set()))
+    best = max(sorted(files), key=has)
+    return best if has(best) > has(guess) else guess
+
+
+def _board_by_library(work, entry):
     drive = os.path.join(work, "drives", "%03d" % entry["n"])
     source = "".join(
         open(os.path.join(drive, f), encoding="utf-8", errors="replace").read()
@@ -146,6 +199,9 @@ def board_for(work, entry):
         or re.search(r"board\.(SLIDE_SWITCH|ACCELEROMETER_\w+)", source)
         or re.search(r"circuit_?playground|cpx|cpb|bluefruit", path)
     ):
+        # A Circuit Playground Bluefruit's program: its board has Bluetooth, the Express's not.
+        if re.search(r"cpb|bluefruit", path) or "adafruit_ble" in source or "_bleio" in source:
+            return "circuitplayground_bluefruit"
         return "circuitplayground"
     if re.search(r"board\.GP\d+", source) or "pico" in path:
         return "pico"
@@ -218,7 +274,7 @@ def run(work, binary, seconds=10.0, board="virtual", board_file=None):
             not os.path.exists(settings) or open(settings).read().startswith(SETTINGS)
         ):
             open(settings, "w").write(made_up_settings(drive))
-        chosen = board_for(work, entry) if auto else None
+        chosen = board_for(work, entry, board_file) if auto else None
         log_path = os.path.join(work, "log-%03d.txt" % entry["n"])
         with open(log_path, "wb") as log:
             extra = (

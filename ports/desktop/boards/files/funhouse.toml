@@ -1,0 +1,61 @@
+# A FunHouse's names on the virtual board: circuitpython --board-file boards/files/funhouse.toml
+# Its three buttons are Up, Down and Return (pressed = high, as on the FunHouse), the PIR sensor P;
+# CAP6-CAP13 are touch pads, the light sensor a slider, the 240x240 TFT board.DISPLAY. The five
+# DotStars are names only, and its AHT20 and DPS310 sensors are not modelled, so adafruit_funhouse
+# stops at them.
+
+[pins]
+TFT_BACKLIGHT = "GPIO0"
+TFT_CS = "GPIO1"
+TFT_DC = "GPIO2"
+TFT_MOSI = "GPIO3"
+TFT_RESET = "GPIO4"
+TFT_SCK = "GPIO5"
+BUTTON_DOWN = "GPIO6"
+BUTTON_SELECT = "GPIO7"
+BUTTON_UP = "GPIO8"
+CAP6 = "GPIO9"
+CAP7 = "GPIO10"
+CAP8 = "GPIO11"
+CAP9 = "GPIO12"
+CAP10 = "GPIO14"
+CAP11 = "GPIO15"
+CAP12 = "GPIO16"
+CAP13 = "GPIO17"
+DOTSTAR_DATA = "GPIO18"
+DOTSTAR_CLOCK = "GPIO19"
+PIR_SENSE = "GPIO20"
+LIGHT = "GPIO21"
+SPEAKER = "GPIO22"
+LED = "GPIO23"
+A0 = "GPIO24"
+A1 = "GPIO25"
+A2 = "GPIO26"
+DEBUG_TX = "GPIO27"
+
+[button]
+BUTTON_UP = "high key=Up"
+BUTTON_DOWN = "high key=Down"
+BUTTON_SELECT = "high key=Return"
+PIR_SENSE = "high key=P"
+
+[touch]
+CAP6 = ""
+CAP7 = ""
+CAP8 = ""
+CAP9 = ""
+CAP10 = ""
+CAP11 = ""
+CAP12 = ""
+CAP13 = ""
+
+[analog]
+LIGHT = ""
+
+[led]
+LED = "red"
+
+[board]
+ble = "off"  # no Bluetooth on this board
+display = "240x240"
+machine = "Adafruit FunHouse with ESP32S2"

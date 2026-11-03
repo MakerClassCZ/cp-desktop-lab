@@ -1,0 +1,35 @@
+# A QT Py's names on the virtual board: circuitpython --board-file boards/files/qtpy.toml
+# The QT Py RP2040's pads (A0-A3, D0-D10) and its STEMMA QT port's SDA1 and SCL1; its button is Z
+# (pressed = low).
+
+[pins]
+A0 = "GPIO0"
+D0 = "GPIO0"
+A1 = "GPIO1"
+D1 = "GPIO1"
+A2 = "GPIO2"
+D2 = "GPIO2"
+A3 = "GPIO3"
+D3 = "GPIO3"
+D4 = "SDA"
+D5 = "SCL"
+D6 = "TX"
+D7 = "RX"
+D8 = "SCK"
+D9 = "MISO"
+D10 = "MOSI"
+NEOPIXEL = "GPIO4"
+NEOPIXEL_POWER = "GPIO5"
+BUTTON = "GPIO6"
+SDA1 = "GPIO7"
+SCL1 = "GPIO8"
+
+[neopixel]
+NEOPIXEL = "1"
+
+[button]
+BUTTON = "key=Z"
+
+[board]
+ble = "off"  # no Bluetooth on this board
+machine = "Adafruit QT Py RP2040 with rp2040"
