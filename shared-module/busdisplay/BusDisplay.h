@@ -41,3 +41,6 @@ void busdisplay_busdisplay_background(busdisplay_busdisplay_obj_t *self);
 void release_busdisplay(busdisplay_busdisplay_obj_t *self);
 void reset_busdisplay(busdisplay_busdisplay_obj_t *self);
 void busdisplay_busdisplay_collect_ptrs(busdisplay_busdisplay_obj_t *self);
+
+// A port can show a window for a display it emulates; weak, does nothing by default.
+void busdisplay_port_attach(mp_obj_t bus, uint16_t width, uint16_t height, uint16_t rotation);

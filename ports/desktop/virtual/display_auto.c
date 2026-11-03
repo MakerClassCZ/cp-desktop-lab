@@ -17,6 +17,9 @@
 #include "shared-bindings/fourwire/FourWire.h"
 #include "shared-bindings/i2cdisplaybus/I2CDisplayBus.h"
 
+#include "shared-module/adafruit_bus_device/i2c_device/I2CDevice.h"
+#include "shared-module/busdisplay/BusDisplay.h"
+#include "shared-module/i2cdisplaybus/I2CDisplayBus.h"
 #include "i2c_virtual.h"
 #include "desktop_pins.h"
 #include "spi_virtual.h"

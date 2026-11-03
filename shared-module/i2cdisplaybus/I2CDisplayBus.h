@@ -16,3 +16,6 @@ typedef struct {
     digitalio_digitalinout_obj_t reset;
     uint16_t address;
 } i2cdisplaybus_i2cdisplaybus_obj_t;
+
+// A port can put a model of the display at its address (one it emulates); weak, does nothing by default.
+void i2cdisplaybus_port_attach(busio_i2c_obj_t *i2c, uint16_t device_address);
