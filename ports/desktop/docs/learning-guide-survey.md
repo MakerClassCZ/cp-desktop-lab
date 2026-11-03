@@ -255,3 +255,14 @@ run and not the next: they wait out the 10 seconds on hardware that is not there
 timing out, an SD card no one answered for before), so a single run's count moves by that much.
 What stops programs first now: an AirLift (`ESP_BUSY`, `ESP_CS`) 70, a file 60, USB host 23,
 `PIL` 18, `espcamera` 17, I2C devices with no model (0x30, 0x36, 0x70, 0x48, 0x5a, 0x29) about 60.
+
+## More I2C models, the chip a driver's library looks for (2026-11-03)
+
+The same run, after the models for SHT4x, SCD40/41, AHT20, MAX17048, DRV2605, PCA9685, the seesaw
+rotary encoder and soil sensor, HT16K33, IS31FL3741 and TSC2007, and with an automatic device the
+chip of the library that looks for it: **1071 of 1757 run (61 %)**, none that ran before stopped.
+Of the programs stopped at an empty address before: 0x30 15 of 17 run (LED Glasses), 0x70 11 of
+13 (HT16K33), 0x36 8 of 15 (rotary encoders; the rest meet a missing file or another part),
+0x62, 0x60 and 0x40 three each. Five MCP9808 programs still stop on the Feather's board file,
+which puts a LIS3DH at 0x18 and the MCP9808 at 0x19; most TSC2007 demos stop on the images they
+show, which are not in the repository.
