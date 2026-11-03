@@ -155,6 +155,12 @@ static void _command(uint16_t opcode, const uint8_t *p, uint8_t len) {
             _ok(opcode);
             break;
         case 0x200a:            // LE Set Advertising Enable
+            if (len >= 1 && p[0] == 0 && !_advertising && _connected) {
+                // Stopping what a connection already stopped: Command Disallowed, as a CYW43439
+                uint8_t status = 0x0c;
+                _complete(opcode, &status, 1);
+                break;
+            }
             _advertising = len >= 1 && p[0] != 0;
             _ok(opcode);
             break;

@@ -330,6 +330,51 @@ while True:
             b.console(since=0)["data"][-400:],
         )
 
+# Disabling reads the reset's reply: left unread, it waited out the response timeout, and the next
+# enable took it for the answer to its own reset (a CYW43 then dropped the commands that followed)
+CYCLE = """
+import _bleio, time
+a = _bleio.adapter
+worst = 0
+for i in range(5):
+    a.enabled = True
+    t = time.monotonic()
+    a.enabled = False
+    worst = max(worst, time.monotonic() - t)
+a.enabled = True
+print("cycled", a.enabled, "worst off %.3f" % worst)
+"""
+out, _ = run(CYCLE, "", "cycled")
+m = re.search(r"cycled True worst off ([0-9.]+)", out)
+check("disabling the adapter does not wait out the reset", m and float(m.group(1)) < 0.5, out[-300:])
+
+# A connection stops advertising in the controller; stop_advertising() then asks nothing (a CYW43
+# answers Command Disallowed, an ESP32 nothing at all)
+STOP = """
+import _bleio
+a = _bleio.adapter
+a.start_advertising(bytes([2, 1, 6]), connectable=True)
+print("ready")
+while not a.connected:
+    pass
+try:
+    a.stop_advertising()
+    print("stopped", a.advertising)
+except Exception as e:
+    print("stop raised", repr(e))
+while a.connected:
+    pass
+"""
+with launch(STOP) as b:
+    seen(b, "ready", 15)
+    try:
+        b.ble.connect()  # a program that raised has ended: then nothing answers the phone
+    except (TimeoutError, cpapi.ApiError):
+        pass
+    check(
+        "stop_advertising() after a connection", seen(b, "stopped False"), b.console(since=0)["data"][-300:]
+    )
+
 # Five runs of a program that makes a service: the adapter stays, the heap does not shrink
 MEMORY = """
 import _bleio, gc
