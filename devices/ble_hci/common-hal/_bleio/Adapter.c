@@ -329,16 +329,23 @@ static void bleio_adapter_hci_init(bleio_adapter_obj_t *self) {
     bleio_adapter_reset_name(self);
 }
 
-void common_hal_bleio_adapter_construct_hci_uart(bleio_adapter_obj_t *self, busio_uart_obj_t *uart, digitalio_digitalinout_obj_t *rts, digitalio_digitalinout_obj_t *cts) {
+void common_hal_bleio_adapter_construct_hci_transport(bleio_adapter_obj_t *self,
+    const bleio_hci_transport_t *transport, void *ctx) {
     self->allocated = true;
-    self->hci_uart = uart;
-    self->rts_digitalinout = rts;
-    self->cts_digitalinout = cts;
+    self->hci_transport = transport;
+    self->hci_transport_ctx = ctx;
 
     // Advertising-related fields are initialized by common_hal_bleio_adapter_set_enabled().
     self->enabled = false;
 
     common_hal_bleio_adapter_set_enabled(self, true);
+}
+
+void common_hal_bleio_adapter_construct_hci_uart(bleio_adapter_obj_t *self, busio_uart_obj_t *uart, digitalio_digitalinout_obj_t *rts, digitalio_digitalinout_obj_t *cts) {
+    self->hci_uart = uart;
+    self->rts_digitalinout = rts;
+    self->cts_digitalinout = cts;
+    common_hal_bleio_adapter_construct_hci_transport(self, &bleio_hci_uart_transport, self);
 }
 
 void common_hal_bleio_adapter_set_enabled(bleio_adapter_obj_t *self, bool enabled) {
@@ -354,6 +361,9 @@ void common_hal_bleio_adapter_set_enabled(bleio_adapter_obj_t *self, bool enable
     if (enabled) {
         self->enabled = true;
         supervisor_enable_tick();
+        if (self->hci_transport->enabled != NULL) {
+            self->hci_transport->enabled(self->hci_transport_ctx, true);
+        }
     }
 
     // Enabling or disabling: stop any current activity; reset to known state. While disabling
@@ -364,6 +374,9 @@ void common_hal_bleio_adapter_set_enabled(bleio_adapter_obj_t *self, bool enable
     if (!enabled) {
         self->enabled = false;
         supervisor_disable_tick();
+        if (self->hci_transport->enabled != NULL) {
+            self->hci_transport->enabled(self->hci_transport_ctx, false);
+        }
     }
     self->now_advertising = false;
     self->circuitpython_advertising = false;
@@ -386,6 +399,9 @@ void common_hal_bleio_adapter_set_enabled(bleio_adapter_obj_t *self, bool enable
             // A controller that does not answer leaves the adapter off, not on with no buffers.
             self->enabled = false;
             supervisor_disable_tick();
+            if (self->hci_transport->enabled != NULL) {
+                self->hci_transport->enabled(self->hci_transport_ctx, false);
+            }
             nlr_jump(nlr.ret_val);
         }
     }

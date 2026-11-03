@@ -50,7 +50,6 @@
 #define H4_SCO 0x03
 #define H4_EVT 0x04
 
-#define CTS_TIMEOUT_MSECS (1000)
 #define RESPONSE_TIMEOUT_MSECS (1000)
 
 // These are the headers of the full packets that are sent over the serial interface.
@@ -127,10 +126,14 @@ static volatile bool hci_poll_in_progress = false;
 #include "hci_debug.c"
 #endif // HCI_DEBUG
 
-// RTS to the controller; an adapter on USB has none (NULL), its link does the flow control.
-static void set_rts(bool value) {
-    if (common_hal_bleio_adapter_obj.rts_digitalinout != NULL) {
-        common_hal_digitalio_digitalinout_set_value(common_hal_bleio_adapter_obj.rts_digitalinout, value);
+// The link to the controller (hci_transport.h).
+#define TRANSPORT (common_hal_bleio_adapter_obj.hci_transport)
+#define TRANSPORT_CTX (common_hal_bleio_adapter_obj.hci_transport_ctx)
+
+// Whether the controller may send: a link with flow control holds it off while a packet is handled.
+static void set_ready(bool ready) {
+    if (TRANSPORT->ready != NULL) {
+        TRANSPORT->ready(TRANSPORT_CTX, ready);
     }
 }
 
@@ -319,31 +322,20 @@ hci_result_t hci_poll_for_incoming_pkt(void) {
     hci_poll_in_progress = true;
     common_hal_mcu_enable_interrupts();
 
-    // Assert RTS low to say we're ready to read data.
-    set_rts(false);
+    // Say we're ready to read data.
+    set_ready(true);
 
-    int errcode = 0;
     bool packet_is_complete = false;
 
     // Read bytes until we run out. There may be more than one packet in the input buffer.
-    while (!packet_is_complete &&
-           common_hal_busio_uart_rx_characters_available(common_hal_bleio_adapter_obj.hci_uart) > 0) {
+    while (!packet_is_complete && TRANSPORT->available(TRANSPORT_CTX) > 0) {
 
         // Read just one character a a time, so we don't accidentally get part of a second
         // packet.
-        size_t num_read =
-            common_hal_busio_uart_read(common_hal_bleio_adapter_obj.hci_uart, rx_buffer + rx_idx, 1, &errcode);
+        size_t num_read = TRANSPORT->read(TRANSPORT_CTX, rx_buffer + rx_idx, 1);
         if (num_read == 0) {
             hci_poll_in_progress = false;
             return HCI_OK;
-        }
-        if (errcode) {
-            if (errcode == EAGAIN) {
-                continue;
-            }
-            hci_poll_in_progress = false;
-            mp_printf(&mp_plat_print, "HCI_READ_ERROR, errcode: %x\n", errcode);
-            return HCI_READ_ERROR;
         }
         rx_idx++;
         if (rx_idx >= sizeof(rx_buffer)) {
@@ -393,7 +385,7 @@ hci_result_t hci_poll_for_incoming_pkt(void) {
 
     if (packet_is_complete) {
         // Stop incoming data while processing packet.
-        set_rts(true);
+        set_ready(false);
         size_t pkt_len = rx_idx;
 
         // Reset for next packet.
@@ -423,35 +415,16 @@ hci_result_t hci_poll_for_incoming_pkt(void) {
         }
 
         // Let incoming bytes flow again.
-        set_rts(false);
+        set_ready(true);
     }
 
-    // All done with this batch. Hold off receiving bytes until we're ready again.
-    ///common_hal_digitalio_digitalinout_set_value(common_hal_bleio_adapter_obj.rts_digitalinout, true);
     hci_poll_in_progress = false;
     return HCI_OK;
 }
 
 
 static hci_result_t write_pkt(uint8_t *buffer, size_t len) {
-    // Wait for CTS to go low before writing to HCI adapter.
-    uint64_t start = supervisor_ticks_ms64();
-
-    while (common_hal_bleio_adapter_obj.cts_digitalinout != NULL &&
-           common_hal_digitalio_digitalinout_get_value(common_hal_bleio_adapter_obj.cts_digitalinout)) {
-        RUN_BACKGROUND_TASKS;
-        if (supervisor_ticks_ms64() - start > CTS_TIMEOUT_MSECS) {
-            return HCI_WRITE_TIMEOUT;
-        }
-    }
-
-    int errcode = 0;
-    common_hal_busio_uart_write(common_hal_bleio_adapter_obj.hci_uart, buffer, len, &errcode);
-    if (errcode) {
-        return HCI_WRITE_ERROR;
-    }
-
-    return HCI_OK;
+    return TRANSPORT->write(TRANSPORT_CTX, buffer, len);
 }
 
 static hci_result_t send_command(uint16_t opcode, uint8_t params_len, void *params) {
@@ -532,14 +505,12 @@ hci_result_t hci_send_acl_pkt(uint16_t handle, uint8_t cid, uint16_t data_len, u
 
     pending_pkt++;
 
-    int errcode = 0;
-    common_hal_busio_uart_write(common_hal_bleio_adapter_obj.hci_uart, tx_buffer, buf_len, &errcode);
-    if (errcode) {
+    hci_result_t result = write_pkt(tx_buffer, buf_len);
+    if (result != HCI_OK) {
         // Not sent, so not to be completed: its credit is not spent.
         pending_pkt--;
-        return HCI_WRITE_ERROR;
     }
-    return HCI_OK;
+    return result;
 }
 
 hci_result_t hci_reset(void) {

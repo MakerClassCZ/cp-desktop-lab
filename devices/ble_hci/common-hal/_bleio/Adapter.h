@@ -17,6 +17,7 @@
 #include "shared-bindings/_bleio/ScanResults.h"
 #include "shared-bindings/busio/UART.h"
 #include "shared-bindings/digitalio/DigitalInOut.h"
+#include "common-hal/_bleio/hci_transport.h"
 
 #ifndef BLEIO_TOTAL_CONNECTION_COUNT
 #define BLEIO_TOTAL_CONNECTION_COUNT 5
@@ -29,6 +30,10 @@ typedef struct _bleio_adapter_obj_t {
     bleio_scanresults_obj_t *scan_results;
     mp_obj_t name;
     mp_obj_tuple_t *connection_objs;
+    // The link to the controller, and what its callbacks are given.
+    const bleio_hci_transport_t *hci_transport;
+    void *hci_transport_ctx;
+    // The UART transport's link (bleio_hci_uart_transport): unused by any other.
     busio_uart_obj_t *hci_uart;
     digitalio_digitalinout_obj_t *rts_digitalinout;
     digitalio_digitalinout_obj_t *cts_digitalinout;

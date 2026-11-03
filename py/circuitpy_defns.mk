@@ -659,6 +659,7 @@ ifeq ($(CIRCUITPY_BLEIO_HCI),1)
 SRC_DEVICES_HAL += \
 	_bleio/att.c \
 	_bleio/hci.c \
+	_bleio/hci_uart_transport.c \
     _bleio/Adapter.c \
 	_bleio/Attribute.c \
 	_bleio/Characteristic.c \
