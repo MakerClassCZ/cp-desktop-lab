@@ -15,6 +15,8 @@ void i2c_model_plain_write(i2c_virtual_device_t *dev, const uint8_t *data, size_
 // The same for ST's sensors: the pointer's bit 7 asks for auto-increment, and reset_bit of
 // reset_reg clears itself.
 void i2c_model_st_write(i2c_virtual_device_t *dev, const uint8_t *data, size_t len, uint8_t reset_reg, uint8_t reset_bit);
+// A Sensirion sensor's word as it reads: most significant byte first, then its CRC.
+void i2c_model_sensirion_word(uint8_t *out, uint16_t word);
 
 extern const i2c_virtual_model_t i2c_model_lis3dh;
 extern const i2c_virtual_model_t i2c_model_bme280;
@@ -28,3 +30,10 @@ extern const i2c_virtual_model_t i2c_model_mcp9808;
 extern const i2c_virtual_model_t i2c_model_ds3231;
 extern const i2c_virtual_model_t i2c_model_lc709203f;
 extern const i2c_virtual_model_t i2c_model_ssd1306;
+extern const i2c_virtual_model_t i2c_model_pca9685;
+extern const i2c_virtual_model_t i2c_model_drv2605;
+extern const i2c_virtual_model_t i2c_model_max17048;
+extern const i2c_virtual_model_t i2c_model_aht20;
+extern const i2c_virtual_model_t i2c_model_scd40;
+extern const i2c_virtual_model_t i2c_model_scd41;
+extern const i2c_virtual_model_t i2c_model_sht4x;

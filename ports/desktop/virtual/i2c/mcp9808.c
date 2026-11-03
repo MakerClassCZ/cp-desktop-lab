@@ -45,5 +45,5 @@ static void _mcp9808_read(i2c_virtual_device_t *dev, uint8_t *data, size_t len) 
 }
 
 const i2c_virtual_model_t i2c_model_mcp9808 = {
-    "mcp9808", 0x18, 1, { { "temp", "C", -40, 125, 22, 2 } }, _mcp9808_write, _mcp9808_read
+    "mcp9808", 0x18, 1, { { "temp", "C", -40, 125, 22, 2 } }, _mcp9808_write, _mcp9808_read, .driver = "adafruit_mcp9808"
 };

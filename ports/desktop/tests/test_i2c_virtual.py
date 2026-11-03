@@ -5,7 +5,7 @@ pins; their values are board panel sliders. The program reads the registers as e
 library does (the BME280's compensation is the library's); panel commands move the sliders.
 """
 
-from harness import check, run
+from harness import check, launch, run, seen
 
 REGS = """import board, busio, struct, time
 i2c = busio.I2C(board.SCL, board.SDA)
@@ -272,4 +272,136 @@ print("empty", i2c.scan(), board.STEMMA_I2C() is i2c)
     "",
 )
 check("board.I2C() with no devices: an empty scan", "empty [] True" in out, out)
+
+# SHT4x, SCD41 and SCD40, AHT20, MAX17048, DRV2605 and PCA9685, spoken to as their libraries do
+SENSIRION = """
+def crc(b):
+    c = 0xff
+    for x in b:
+        c ^= x
+        for _ in range(8):
+            c = ((c << 1) ^ 0x31) & 0xff if c & 0x80 else (c << 1) & 0xff
+    return c
+def words(addr, cmd, n, size=2):
+    i2c.writeto(addr, cmd.to_bytes(size, "big"))
+    b = bytearray(3 * n)
+    i2c.readfrom_into(addr, b)
+    return [b[3 * i] << 8 | b[3 * i + 1] if crc(b[3 * i:3 * i + 2]) == b[3 * i + 2] else "crc" for i in range(n)]
+"""
+out, trace = run(
+    REGS
+    + SENSIRION
+    + """t, h = words(0x44, 0xfd, 2, 1)
+print("sht4x %.1f %.1f" % (-45 + 175 * t / 65535, -6 + 125 * h / 65535), words(0x44, 0x89, 2, 1))
+i2c.writeto(0x62, bytes([0x3f, 0x86]))
+print("idle ready", words(0x62, 0xe4b8, 1)[0] & 0x7ff != 0)
+i2c.writeto(0x62, bytes([0x24, 0x1d, 0x0b, 0xb8, crc(b"\\x0b\\xb8")]))
+print("offset", words(0x62, 0x2318, 1), "variant", words(0x62, 0x202f, 1)[0] >> 12)
+i2c.writeto(0x62, bytes([0x21, 0xb1]))
+print("measuring ready", words(0x62, 0xe4b8, 1)[0] & 0x7ff != 0)
+c, t, h = words(0x62, 0xec05, 3)
+print("scd41 %d %.1f %.1f" % (c, -45 + 175 * t / 65535, 100 * h / 65535))
+try:
+    i2c.writeto(0x63, bytes([0x21, 0x9d]))
+    print("single shot taken")
+except OSError:
+    print("scd40 has no single shot", words(0x63, 0x202f, 1)[0] >> 12)
+i2c.writeto(0x38, bytes([0xac, 0x33, 0]))
+b = bytearray(6)
+i2c.readfrom_into(0x38, b)
+hum = (b[1] << 12 | b[2] << 4 | b[3] >> 4) * 100 / 0x100000
+tmp = ((b[3] & 0xf) << 16 | b[4] << 8 | b[5]) * 200 / 0x100000 - 50
+print("aht20 %s %.1f %.1f" % (hex(b[0]), tmp, hum))
+v = rd(0x36, 0x08, 2)
+cell = struct.unpack(">H", rd(0x36, 0x02, 2))[0] * 78.125 / 1e6
+soc = struct.unpack(">H", rd(0x36, 0x04, 2))[0] / 256
+try:
+    wr(0x36, 0xfe, 0x54, 0x00)
+    print("reset acknowledged")
+except OSError:
+    print("max17048 %s %.2f %.1f reset not acknowledged" % (v.hex(), cell, soc))
+print("drv2605", hex(rd(0x5a, 0x00, 1)[0]))
+wr(0x5a, 0x04, 47, 0)
+wr(0x5a, 0x0c, 1)
+print("go after", rd(0x5a, 0x0c, 1)[0])
+wr(0x40, 0xfe, 121)
+wr(0x40, 0x06, 0, 0, 0x33, 0x01)
+for i in range(100):
+    c = words(0x62, 0xec05, 3)[0]
+    if c != 600:
+        break
+    time.sleep(0.05)
+print("co2 now", c)
+""",
+    "wait go after\nset CO2.co2 1234\n",
+    "co2 now",
+    '[i2c]\nSHT = "sht4x"\nCO2 = "scd41"\nCO2B = "scd40 0x63"\nAHT = "aht20"\nBAT = "max17048"\n'
+    'HAPTIC = "drv2605"\nPWM = "pca9685"\n',
+)
+check(
+    "SHT4x: 22 C and 45 % on its own humidity scale, a serial number",
+    "sht4x 22.0 45.0 [4660, 22136]" in out,
+    out,
+)
+check(
+    "SCD41: not ready when idle, ready measuring; a setting read back; variant 1",
+    "idle ready False" in out
+    and "offset [3000] variant 1" in out
+    and "measuring ready True" in out,
+    out,
+)
+check("SCD41: 600 ppm, 22 C, 45 % with CRCs", "scd41 600 22.0 45.0" in out, out)
+check(
+    "SCD40: a single shot is not acknowledged; variant 0", "scd40 has no single shot 0" in out, out
+)
+check("SCD41: CO2 where the slider is", "co2 now 1234" in out, out)
+check("AHT20: calibrated, 22 C, 45 %", "aht20 0x18 22.0 45.0" in out, out)
+check(
+    "MAX17048: version 0x0012, 3.9 V, 80 %, its reset not acknowledged",
+    "max17048 0012 3.90 80.0 reset not acknowledged" in out,
+    out,
+)
+check(
+    "DRV2605: a DRV2605L's status; GO done at once",
+    "drv2605 0xe0" in out and "go after 0" in out,
+    out,
+)
+check("trace: the effect played", "HAPTIC plays 47" in trace, trace[-600:])
+check(
+    "trace: a PCA9685 output as a servo sees it",
+    "PWM 0 307/4096 at 50 Hz: 1.50 ms high" in trace,
+    trace[-600:],
+)
+
+# The automatic chip at an address is the one whose library the driver is, at the address its
+# address pins give it too: MCP9808 (not the LIS3DH) at 0x18, a PCA9685 at 0x60 for MotorKit.
+DRIVER = """from adafruit_bus_device.i2c_device import I2CDevice
+class Driver:
+    def __init__(self, i2c, address):
+        self.device = I2CDevice(i2c, address)
+"""
+with launch(
+    """import board, busio
+import adafruit_mcp9808, adafruit_pca9685
+i2c = busio.I2C(board.SCL, board.SDA)
+adafruit_mcp9808.Driver(i2c, 0x18)
+adafruit_pca9685.Driver(i2c, 0x60)
+print("attached", sorted(board.attached))
+""",
+    files={"lib/adafruit_mcp9808.py": DRIVER, "lib/adafruit_pca9685.py": DRIVER},
+) as b:
+    seen(b, "attached", 10)
+    out, said = b.console(since=0)["data"], "".join(b.stderr)
+check(
+    "the driver's chip: an MCP9808 at 0x18, a PCA9685 at 0x60",
+    "attached ['MCP9808', 'PCA9685']" in out,
+    out,
+)
+check(
+    "and that said on stderr, with the library that chose it",
+    'MCP9808 attached at I2C 0x18 (automatic, for adafruit_mcp9808; for another chip: [i2c] X = "lis3dh")'
+    in said
+    and "PCA9685 attached at I2C 0x60 (automatic, for adafruit_pca9685)" in said,
+    said,
+)
 print("DONE")

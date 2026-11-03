@@ -30,7 +30,8 @@ static const i2c_virtual_model_t *const _models[] = {
     // A driver's scan attaches the first model with the address: LIS3DH before MCP9808 (0x18).
     &i2c_model_lis3dh, &i2c_model_bme280, &i2c_model_bmp280, &i2c_model_mcp9808, &i2c_model_ds3231,
     &i2c_model_lc709203f, &i2c_model_lsm6ds33, &i2c_model_lis3mdl, &i2c_model_apds9960, &i2c_model_sht31d,
-    &i2c_model_crickit, &i2c_model_ssd1306,
+    &i2c_model_sht4x, &i2c_model_scd41, &i2c_model_scd40, &i2c_model_aht20, &i2c_model_max17048, &i2c_model_drv2605,
+    &i2c_model_pca9685, &i2c_model_crickit, &i2c_model_ssd1306,
     #endif
     NULL
 };
@@ -78,43 +79,62 @@ void i2c_virtual_detach(i2c_virtual_device_t *dev) {
     }
 }
 
-bool i2c_virtual_attach_default(uint8_t address) {
+// Whether the module (adafruit_lsm6ds.lsm6ds33) is the library or one of its submodules.
+static bool _drives(const i2c_virtual_model_t *m, const char *module) {
+    size_t n = m->driver != NULL ? strlen(m->driver) : 0;
+    return n > 0 && module != NULL && strncmp(module, m->driver, n) == 0 && (module[n] == '\0' || module[n] == '.');
+}
+
+bool i2c_virtual_attach_default(uint8_t address, const char *driver) {
     if (i2c_virtual_slot(address) != NULL) {
         return false;
     }
-    for (size_t i = 0; _models[i] != NULL; i++) {
-        const i2c_virtual_model_t *m = _models[i];
-        if (m->address == address && m->attach == NULL) {
-            char name[12];
-            const char *why;
-            size_t k = 0;
-            for (; m->name[k] != '\0' && k < sizeof(name) - 1; k++) {
-                name[k] = (char)toupper((unsigned char)m->name[k]);
+    // The driver's chip at its own address, else at the one its address pins give it; a driver
+    // of no model's chip gets the first model whose address it is.
+    const i2c_virtual_model_t *m = NULL;
+    for (int pass = 0; pass < 3 && m == NULL; pass++) {
+        for (size_t i = 0; _models[i] != NULL && m == NULL; i++) {
+            const i2c_virtual_model_t *c = _models[i];
+            bool here = c->address == address, drives = _drives(c, driver);
+            if (c->attach == NULL && (pass == 0 ? here && drives : pass == 1 ? drives : here)) {
+                m = c;
             }
-            name[k] = '\0';
-            for (int n = 2; i2c_virtual_by_name(name) != NULL && n < 10; n++) {
-                snprintf(name + k, sizeof(name) - k, "_%d", n);
-            }
-            char spec[32];
-            snprintf(spec, sizeof(spec), "%s 0x%02x", m->name, (unsigned)address);
-            if (!i2c_virtual_add(name, spec, &why)) {
-                return false;
-            }
-            i2c_virtual_slot(address)->automatic = true;
-            // The other models at the address, so a driver for one of them knows what to write.
-            char others[96] = "";
-            for (size_t j = i + 1; _models[j] != NULL; j++) {
-                if (_models[j]->address == address && _models[j]->attach == NULL) {
-                    size_t used = strlen(others);
-                    snprintf(others + used, sizeof(others) - used, "%s[i2c] X = \"%s\"", used ? " or " : "; for another chip: ",
-                        _models[j]->name);
-                }
-            }
-            fprintf(stderr, "virtual: %s attached at I2C 0x%02x (automatic%s)\r\n", name, (unsigned)address, others);
-            return true;
         }
     }
-    return false;
+    if (m == NULL) {
+        return false;
+    }
+    char name[12];
+    const char *why;
+    size_t k = 0;
+    for (; m->name[k] != '\0' && k < sizeof(name) - 1; k++) {
+        name[k] = (char)toupper((unsigned char)m->name[k]);
+    }
+    name[k] = '\0';
+    for (int n = 2; i2c_virtual_by_name(name) != NULL && n < 10; n++) {
+        snprintf(name + k, sizeof(name) - k, "_%d", n);
+    }
+    char spec[32];
+    snprintf(spec, sizeof(spec), "%s 0x%02x", m->name, (unsigned)address);
+    if (!i2c_virtual_add(name, spec, &why)) {
+        return false;
+    }
+    i2c_virtual_slot(address)->automatic = true;
+    // The library that chose it, and the other models at the address for a driver of another chip.
+    char said[160] = "";
+    size_t used = 0;
+    if (_drives(m, driver)) {
+        used = (size_t)snprintf(said, sizeof(said), ", for %s", m->driver);
+    }
+    const char *sep = "; for another chip: ";
+    for (size_t j = 0; _models[j] != NULL && used < sizeof(said); j++) {
+        if (_models[j] != m && _models[j]->address == address && _models[j]->attach == NULL) {
+            used += (size_t)snprintf(said + used, sizeof(said) - used, "%s[i2c] X = \"%s\"", sep, _models[j]->name);
+            sep = " or ";
+        }
+    }
+    fprintf(stderr, "virtual: %s attached at I2C 0x%02x (automatic%s)\r\n", name, (unsigned)address, said);
+    return true;
 }
 
 bool i2c_virtual_add(const char *name, const char *spec, const char **why) {
@@ -235,6 +255,10 @@ static int _write(uint16_t address, const uint8_t *data, size_t len, bool stop) 
     }
     if (len > 0) {
         dev->model->write(dev, data, len);
+    }
+    if (dev->nack) {
+        dev->nack = false;
+        return -MP_EIO;
     }
     return 0;
 }

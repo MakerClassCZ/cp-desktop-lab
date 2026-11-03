@@ -131,7 +131,7 @@ for bad, why in (
     ('[gamepad]\nZ = "z"\n', "no gamepad button Z"),
     (
         '[i2c]\nX = "bmp999"\n',
-        "unknown I2C device bmp999 (lis3dh, bme280, bmp280, mcp9808, ds3231, lc709203f, lsm6ds33, lis3mdl, apds9960, sht31d, crickit or ssd1306)",
+        "unknown I2C device bmp999 (lis3dh, bme280, bmp280, mcp9808",  # and the other models
     ),
 ):
     status, out = refused(board=bad)

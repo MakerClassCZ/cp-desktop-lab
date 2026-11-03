@@ -405,6 +405,12 @@ value is a slider on the board panel (`ACCEL.x`, `ENV.temp` ...), set from the k
 | `lis3mdl` | 0x1c | x, y, z in microtesla |
 | `apds9960` | 0x39 | prox, red, green, blue (clear their sum; no gestures) |
 | `sht31d` | 0x44 | temp (C), hum (%) |
+| `sht4x` | 0x44 | temp (C), hum (%): SHT40, SHT41, SHT45 |
+| `scd41`, `scd40` | 0x62 | co2 (ppm), temp (C), hum (%); a measurement is ready while the periodic one runs and after a single shot (the SCD41's; the SCD40 refuses it); settings read back |
+| `aht20` | 0x38 | temp (C), hum (%): AHT10, AHT20 |
+| `max17048` | 0x36 | percent, volt |
+| `drv2605` | 0x5a | an effect played goes to the bus trace (`HAPTIC plays 47`) |
+| `pca9685` | 0x40 | its 16 outputs go to the bus trace as a servo sees them (`PWM 0 307/4096 at 50 Hz: 1.50 ms high`); ServoKit, MotorKit (0x60) |
 | `crickit` | 0x49 | touch1-touch4 (raw, 300 untouched); a seesaw with the Crickit's pins: servos, motors and drives (PWM) and its NeoPixels go to the bus trace (`CRICKIT SERVO1 4915/65535 at 50 Hz: 1.50 ms high`), signals read their pull |
 
 ```
@@ -416,9 +422,11 @@ ENV = "bme280"
 `boards/files/feather.toml` has all five, `circuitplayground.toml` the Circuit Playground's
 LIS3DH for `adafruit_circuitplayground.express`. With no `[i2c]` the bus is empty, as a board
 with nothing on its connector, until a driver looks for a device: an `I2CDevice` at an empty
-address gets the first model above whose own address it is (0x6a an LSM6DS33, named LSM6DS33 on
-the panel), as if the breakout were plugged in, and a line on stderr says so: `virtual: LSM6DS33
-attached at I2C 0x6a (automatic)`. A scan does not add any.
+address gets the model of the chip whose library makes it (`adafruit_mcp9808` an MCP9808 at
+0x18, not the LIS3DH there; `adafruit_pca9685` a PCA9685 at MotorKit's 0x60 too), else the first
+model above whose own address it is (0x6a an LSM6DS33, named LSM6DS33 on the panel), as if the
+breakout were plugged in, and a line on stderr says so: `virtual: MCP9808 attached at I2C 0x18
+(automatic, for adafruit_mcp9808; for another chip: [i2c] X = "lis3dh")`. A scan does not add any.
 
 ### Displays on the buses
 

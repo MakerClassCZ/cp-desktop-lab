@@ -12,6 +12,7 @@
 #include <stdio.h>
 
 #include "py/obj.h"
+#include "py/runtime.h"
 #include "shared-bindings/digitalio/DigitalInOut.h"
 #include "shared-bindings/fourwire/FourWire.h"
 #include "shared-bindings/i2cdisplaybus/I2CDisplayBus.h"
@@ -40,7 +41,10 @@ static void _free_name(const char *base, char *name, size_t len) {
 void i2cdevice_port_attach(mp_obj_t i2c, uint8_t device_address) {
     (void)i2c;
     if (desktop_pin_backend == &desktop_virtual_backend) {
-        i2c_virtual_attach_default(device_address);
+        // The module of the code making the I2CDevice: a driver's, such as adafruit_mcp9808.
+        mp_map_elem_t *name = mp_map_lookup(&mp_globals_get()->map, MP_OBJ_NEW_QSTR(MP_QSTR___name__), MP_MAP_LOOKUP);
+        const char *driver = name != NULL && mp_obj_is_str(name->value) ? mp_obj_str_get_str(name->value) : NULL;
+        i2c_virtual_attach_default(device_address, driver);
     }
 }
 

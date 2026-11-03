@@ -39,6 +39,9 @@ typedef struct {
     // A display sets itself up at the board file's size (0 when none was given); a driver's
     // scan of an empty address never attaches one.
     bool (*attach)(struct i2c_virtual_device *dev, unsigned width, unsigned height, const char **why);
+    // The library that drives the chip (adafruit_mcp9808, its submodules too): of the models at
+    // an address, a driver's scan attaches the one whose library it is.
+    const char *driver;
 } i2c_virtual_model_t;
 
 typedef struct i2c_virtual_device {
@@ -48,6 +51,7 @@ typedef struct i2c_virtual_device {
     // Pulled out (board.detach, or replaced at its address): it answers nothing, the slot stays.
     bool present;
     bool automatic;             // added by i2c_virtual_attach_default
+    bool nack;                  // the write just made is not acknowledged (a chip resetting)
     uint8_t pointer;
     uint8_t regs[256];
     uint16_t words[256];        // a model with 16-bit registers
@@ -86,6 +90,7 @@ void i2c_virtual_set(i2c_virtual_device_t *dev, int channel, double value);
 const i2c_virtual_model_t *i2c_virtual_model(const char *name);
 // The attached device at the address, or NULL.
 i2c_virtual_device_t *i2c_virtual_at(uint16_t address);
-// A driver looks for a device at an empty address: the first model whose own address it is
-// appears there (named after it, BME280). False when none is, or something is or was there.
-bool i2c_virtual_attach_default(uint8_t address);
+// A driver looks for a device at an empty address: the model whose own address it is appears
+// there (named after it, BME280), the one the driver module (its __name__, or NULL) is the
+// library of, else the first. False when none is, or something is or was there.
+bool i2c_virtual_attach_default(uint8_t address, const char *driver);

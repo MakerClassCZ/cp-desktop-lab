@@ -134,5 +134,5 @@ const i2c_virtual_model_t i2c_model_crickit = {
         { "touch1", "", 0, 1023, 300, 0 }, { "touch2", "", 0, 1023, 300, 0 }, { "touch3", "", 0, 1023, 300, 0 },
         { "touch4", "", 0, 1023, 300, 0 }
     },
-    _crickit_write, _crickit_read
+    _crickit_write, _crickit_read, .driver = "adafruit_seesaw"
 };

@@ -59,5 +59,5 @@ static void _lc709203f_read(i2c_virtual_device_t *dev, uint8_t *data, size_t len
 
 const i2c_virtual_model_t i2c_model_lc709203f = {
     "lc709203f", 0x0b, 2, { { "percent", "%", 0, 100, 80, 1 }, { "volt", "V", 3, 4.2, 3.9, 2 } },
-    _lc709203f_write, _lc709203f_read
+    _lc709203f_write, _lc709203f_read, .driver = "adafruit_lc709203f"
 };

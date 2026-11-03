@@ -38,5 +38,5 @@ const i2c_virtual_model_t i2c_model_lis3dh = {
     "lis3dh", 0x18, 3, {
         { "x", "g", -4, 4, 0, 2 }, { "y", "g", -4, 4, 0, 2 }, { "z", "g", -4, 4, 1, 2 }
     },
-    _lis3dh_write, _lis3dh_read
+    _lis3dh_write, _lis3dh_read, .driver = "adafruit_lis3dh"
 };

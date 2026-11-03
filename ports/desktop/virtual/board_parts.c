@@ -79,6 +79,13 @@ I2C_KIND(LIS3MDL, "lis3mdl");
 I2C_KIND(LSM6DS33, "lsm6ds33");
 I2C_KIND(MCP9808, "mcp9808");
 I2C_KIND(SHT31D, "sht31d");
+I2C_KIND(SHT4X, "sht4x");
+I2C_KIND(SCD41, "scd41");
+I2C_KIND(SCD40, "scd40");
+I2C_KIND(AHT20, "aht20");
+I2C_KIND(MAX17048, "max17048");
+I2C_KIND(DRV2605, "drv2605");
+I2C_KIND(PCA9685, "pca9685");
 #endif
 
 static const mp_rom_map_elem_t _parts_globals_table[] = {
@@ -109,6 +116,13 @@ static const mp_rom_map_elem_t _parts_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_LSM6DS33), MP_ROM_PTR(&_kind_LSM6DS33) },
     { MP_ROM_QSTR(MP_QSTR_MCP9808), MP_ROM_PTR(&_kind_MCP9808) },
     { MP_ROM_QSTR(MP_QSTR_SHT31D), MP_ROM_PTR(&_kind_SHT31D) },
+    { MP_ROM_QSTR(MP_QSTR_SHT4X), MP_ROM_PTR(&_kind_SHT4X) },
+    { MP_ROM_QSTR(MP_QSTR_SCD41), MP_ROM_PTR(&_kind_SCD41) },
+    { MP_ROM_QSTR(MP_QSTR_SCD40), MP_ROM_PTR(&_kind_SCD40) },
+    { MP_ROM_QSTR(MP_QSTR_AHT20), MP_ROM_PTR(&_kind_AHT20) },
+    { MP_ROM_QSTR(MP_QSTR_MAX17048), MP_ROM_PTR(&_kind_MAX17048) },
+    { MP_ROM_QSTR(MP_QSTR_DRV2605), MP_ROM_PTR(&_kind_DRV2605) },
+    { MP_ROM_QSTR(MP_QSTR_PCA9685), MP_ROM_PTR(&_kind_PCA9685) },
     #endif
 };
 static MP_DEFINE_CONST_DICT(_parts_globals, _parts_globals_table);

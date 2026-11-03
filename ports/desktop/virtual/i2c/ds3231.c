@@ -67,5 +67,5 @@ static void _ds3231_read(i2c_virtual_device_t *dev, uint8_t *data, size_t len) {
 }
 
 const i2c_virtual_model_t i2c_model_ds3231 = {
-    "ds3231", 0x68, 0, { { NULL } }, _ds3231_write, _ds3231_read
+    "ds3231", 0x68, 0, { { NULL } }, _ds3231_write, _ds3231_read, .driver = "adafruit_ds3231"
 };

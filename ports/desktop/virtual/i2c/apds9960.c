@@ -35,5 +35,5 @@ const i2c_virtual_model_t i2c_model_apds9960 = {
         { "prox", "", 0, 255, 0, 0 }, { "red", "", 0, 4096, 300, 0 }, { "green", "", 0, 4096, 300, 0 },
         { "blue", "", 0, 4096, 300, 0 }
     },
-    i2c_model_plain_write, _apds9960_read
+    i2c_model_plain_write, _apds9960_read, .driver = "adafruit_apds9960"
 };

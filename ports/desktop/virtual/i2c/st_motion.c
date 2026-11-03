@@ -66,12 +66,12 @@ const i2c_virtual_model_t i2c_model_lsm6ds33 = {
     "lsm6ds33", 0x6a, 3, {
         { "x", "g", -4, 4, 0, 2 }, { "y", "g", -4, 4, 0, 2 }, { "z", "g", -4, 4, 1, 2 }
     },
-    _lsm6ds33_write, _lsm6ds33_read
+    _lsm6ds33_write, _lsm6ds33_read, .driver = "adafruit_lsm6ds"
 };
 
 const i2c_virtual_model_t i2c_model_lis3mdl = {
     "lis3mdl", 0x1c, 3, {
         { "x", "uT", -400, 400, 20, 1 }, { "y", "uT", -400, 400, 0, 1 }, { "z", "uT", -400, 400, -40, 1 }
     },
-    _lis3mdl_write, _lis3mdl_read
+    _lis3mdl_write, _lis3mdl_read, .driver = "adafruit_lis3mdl"
 };
