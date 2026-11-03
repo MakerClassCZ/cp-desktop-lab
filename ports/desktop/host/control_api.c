@@ -84,14 +84,32 @@ static char _status[64] = "starting";
 
 // ---- the console's output ----
 
-// The title escape, ESC ] 0 ; ... ESC \, its middle field (between " | ") the status.
+// The title escape, ESC ] 0 ; ... ESC \, is "🐍<ip> | <BLE:name> | <status> | <version>", or the
+// same with single spaces (adafruit/circuitpython#11717). The ip and BLE fields are optional; the
+// status is the field before the version and may hold spaces ("12@code.py ValueError").
 static void _title(const char *title) {
-    const char *a = strstr(title, " | ");
-    const char *b = a ? strstr(a + 3, " | ") : NULL;
+    static const char snake[] = "\xf0\x9f\x90\x8d";
+    const char *a = strncmp(title, snake, 4) == 0 ? title + 4 : title;
+    const char *b = strstr(a, " | ");
     if (b != NULL) {
+        for (const char *c; (c = strstr(b + 3, " | ")) != NULL; a = b + 3, b = c) {
+        }
+    } else {
+        b = strrchr(a, ' ');
+        a += strspn(a, " ");
+        size_t ip = strspn(a, "0123456789.:");
+        if (ip > 0 && a[ip] == ' ') {
+            a += ip + 1;
+        }
+        const char *ble = strncmp(a, "BLE:", 4) == 0 ? strchr(a, ' ') : NULL;
+        if (ble != NULL && ble < b) {
+            a = ble + 1;
+        }
+    }
+    if (b != NULL && b > a) {
         pthread_mutex_lock(&_lock);
-        size_t n = (size_t)(b - a - 3) < sizeof(_status) - 1 ? (size_t)(b - a - 3) : sizeof(_status) - 1;
-        memcpy(_status, a + 3, n);
+        size_t n = (size_t)(b - a) < sizeof(_status) - 1 ? (size_t)(b - a) : sizeof(_status) - 1;
+        memcpy(_status, a, n);
         _status[n] = '\0';
         pthread_mutex_unlock(&_lock);
     }
