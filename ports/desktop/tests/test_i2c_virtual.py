@@ -404,4 +404,91 @@ check(
     and "PCA9685 attached at I2C 0x60 (automatic, for adafruit_pca9685)" in said,
     said,
 )
+
+# The rotary encoder and soil seesaws, HT16K33, IS31FL3741 and TSC2007
+out, trace = run(
+    REGS
+    + """def ss(a, *cmd, n=0):
+    i2c.writeto(a, bytes(cmd))
+    if n:
+        b = bytearray(n)
+        i2c.readfrom_into(a, b)
+        return b
+print("rotary", hex(ss(0x36, 0, 1, n=1)[0]), struct.unpack(">I", ss(0x36, 0, 2, n=4))[0] >> 16)
+ss(0x36, 1, 3, 1, 0, 0, 0)       # pin 24 an input
+ss(0x36, 1, 0x0b, 1, 0, 0, 0)    # pulled
+ss(0x36, 1, 5, 1, 0, 0, 0)       # up
+up = struct.unpack(">I", ss(0x36, 1, 4, n=4))[0] >> 24 & 1
+ss(0x36, 0x11, 0x30, 0, 0, 0, 7)
+print("button up", up, "position set", struct.unpack(">i", ss(0x36, 0x11, 0x30, n=4))[0])
+for i in range(100):
+    p = struct.unpack(">i", ss(0x36, 0x11, 0x30, n=4))[0]
+    down = struct.unpack(">I", ss(0x36, 1, 4, n=4))[0] >> 24 & 1
+    if p == -3 and down == 0:
+        break
+    time.sleep(0.05)
+print("turned", p, "pressed", down)
+print("soil", struct.unpack(">H", ss(0x37, 0x0f, 0x10, n=2))[0], struct.unpack(">i", ss(0x37, 0, 4, n=4))[0] / 65536)
+i2c.writeto(0x70, bytes([0x21]))
+i2c.writeto(0x70, bytes([0x00]) + bytes(range(16)))
+print("ht16k33", rd(0x70, 0x04, 3).hex())
+print("is31 id", hex(rd(0x30, 0xfc, 1)[0]))
+wr(0x30, 0xfe, 0xc5)
+wr(0x30, 0xfd, 1)
+wr(0x30, 0x05, 0x99)
+wr(0x30, 0xfd, 0)
+print("is31 pages", hex(rd(0x30, 0x05, 1)[0]), hex(rd(0x30, 0xfd, 1)[0]))
+wr(0x30, 0xfd, 1)
+print("is31 page 1", hex(rd(0x30, 0x05, 1)[0]))
+def tsc(fn):
+    b = bytearray(2)
+    i2c.writeto_then_readfrom(0x48, bytes([fn << 4 | 0x04]), b)
+    return b[0] << 4 | b[1] >> 4
+print("untouched", tsc(14))
+for i in range(100):
+    if tsc(14) > 100:
+        break
+    time.sleep(0.05)
+print("touch", tsc(12), tsc(13), tsc(14))
+""",
+    "wait position set\nset ROT.position -3\nset ROT.button 1\n"
+    "wait untouched\nset TS.x 1000\nset TS.y 3000\nset TS.pressure 500\n",
+    "touch ",
+    '[i2c]\nROT = "rotary"\nSOIL = "soil 0x37"\nLEDS = "ht16k33"\nGLASSES = "is31fl3741"\nTS = "tsc2007"\n',
+)
+check("rotary: an ATtiny817, product 4991", "rotary 0x87 4991" in out, out)
+check(
+    "rotary: the button pulled up reads high; a position written reads back",
+    "button up 1 position set 7" in out,
+    out,
+)
+check(
+    "rotary: the slider turns it, the button pressed reads low", "turned -3 pressed 0" in out, out
+)
+check("soil: moisture 500, 22 C", "soil 500 22.0" in out, out)
+check("HT16K33: its display memory as written", "ht16k33 040506" in out, out)
+check("IS31FL3741: its id the address doubled", "is31 id 0x60" in out, out)
+check(
+    "IS31FL3741: each page its own registers",
+    "is31 pages 0x0 0x0" in out and "is31 page 1 0x99" in out,
+    out,
+)
+check(
+    "TSC2007: untouched no pressure; x, y and the pressure from the sliders",
+    "untouched 0" in out and "touch 1000 3000 500" in out,
+    out,
+)
+
+# A seesaw at an address no model has is a rotary encoder, as most seesaws are
+with launch(
+    """import board, busio
+import adafruit_seesaw.seesaw
+adafruit_seesaw.seesaw.Driver(busio.I2C(board.SCL, board.SDA), 0x4a)
+print("attached", sorted(board.attached))
+""",
+    files={"lib/adafruit_seesaw/__init__.py": "", "lib/adafruit_seesaw/seesaw.py": DRIVER},
+) as b:
+    seen(b, "attached", 10)
+    out = b.console(since=0)["data"]
+check("a seesaw library at 0x4a gets the rotary encoder", "attached ['ROTARY']" in out, out)
 print("DONE")

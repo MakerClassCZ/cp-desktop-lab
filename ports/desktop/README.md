@@ -411,6 +411,11 @@ value is a slider on the board panel (`ACCEL.x`, `ENV.temp` ...), set from the k
 | `max17048` | 0x36 | percent, volt |
 | `drv2605` | 0x5a | an effect played goes to the bus trace (`HAPTIC plays 47`) |
 | `pca9685` | 0x40 | its 16 outputs go to the bus trace as a servo sees them (`PWM 0 307/4096 at 50 Hz: 1.50 ms high`); ServoKit, MotorKit (0x60) |
+| `rotary` | 0x36 | position, button (1 pressed): the seesaw rotary encoder (4991), its NeoPixel to the bus trace; a seesaw library at an address no model has gets one too (the ANO and quad encoders) |
+| `soil` | 0x36 | moisture (about 200 dry to 2000 wet), temp (C): the seesaw soil sensor |
+| `ht16k33` | 0x70 | none: the matrix and segment backpacks take what is written (the bus trace has it) |
+| `is31fl3741` | 0x30 | none: the LED Glasses and the 13x9 RGB matrix take what is written, page by page |
+| `tsc2007` | 0x48 | x, y (0-4095), pressure (0 untouched, over 100 touched) |
 | `crickit` | 0x49 | touch1-touch4 (raw, 300 untouched); a seesaw with the Crickit's pins: servos, motors and drives (PWM) and its NeoPixels go to the bus trace (`CRICKIT SERVO1 4915/65535 at 50 Hz: 1.50 ms high`), signals read their pull |
 
 ```

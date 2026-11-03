@@ -59,6 +59,7 @@ typedef struct i2c_virtual_device {
     long long clock_offset;     // a real-time clock: seconds from the computer's time
     int weekday_shift;          // and days from the weekday its date has
     // a display: what it shows, its memory a byte per eight pixels in a column, and the cursor
+    // (page: also an IS31FL3741's register page, gram its LEDs)
     vdisplay_t *display;
     uint8_t gram[128 * 64 / 8];
     uint8_t command, params_left, params[6];
@@ -68,6 +69,7 @@ typedef struct i2c_virtual_device {
     uint8_t seesaw_base, seesaw_function;
     uint64_t gpio_output, gpio_level, gpio_pull;
     uint16_t pwm[16], pwm_hz[16];
+    int32_t encoder_read;       // a seesaw encoder's position when last read
 } i2c_virtual_device_t;
 
 extern const desktop_i2c_ops_t i2c_virtual_ops;

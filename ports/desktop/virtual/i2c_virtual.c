@@ -31,7 +31,9 @@ static const i2c_virtual_model_t *const _models[] = {
     &i2c_model_lis3dh, &i2c_model_bme280, &i2c_model_bmp280, &i2c_model_mcp9808, &i2c_model_ds3231,
     &i2c_model_lc709203f, &i2c_model_lsm6ds33, &i2c_model_lis3mdl, &i2c_model_apds9960, &i2c_model_sht31d,
     &i2c_model_sht4x, &i2c_model_scd41, &i2c_model_scd40, &i2c_model_aht20, &i2c_model_max17048, &i2c_model_drv2605,
-    &i2c_model_pca9685, &i2c_model_crickit, &i2c_model_ssd1306,
+    &i2c_model_pca9685, &i2c_model_ht16k33, &i2c_model_is31fl3741, &i2c_model_tsc2007,
+    // A seesaw library at an address no model has gets the rotary encoder, a seesaw like most.
+    &i2c_model_rotary, &i2c_model_soil, &i2c_model_crickit, &i2c_model_ssd1306,
     #endif
     NULL
 };
