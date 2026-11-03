@@ -88,6 +88,9 @@
 // boot_out.txt is written at once: a computer's power does not fail as a battery's may.
 #define CIRCUITPY_BOOT_OUTPUT_DELAY_MS          (0)
 
+// A deep sleep starts at once: there is no USB to enumerate before it (main.c waits for that).
+#define CIRCUITPY_WORKFLOW_CONNECTION_SLEEP_DELAY 0
+
 // Also includes mpconfigboard.h
 #include "py/circuitpy_mpconfig.h"
 

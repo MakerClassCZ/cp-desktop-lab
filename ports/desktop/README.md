@@ -329,7 +329,11 @@ command line. On the virtual board pin 13 is also the speaker. `boards/files/` h
 Playground, a Trinket or Gemma M0, a Pico (`GP0`-`GP27`, the Pico's own numbers), a MagTag (its buttons the
 Z X A S keys), a CLUE (its five sensors on the virtual
 I2C bus), a PyBadge and a PyGamer (their buttons the gamepad's, through a shift register), a
-MatrixPortal (its HUB75 matrix on the panel) and a PicoPad (its gamepad). A board file's `[board]` section names the real board where libraries
+MatrixPortal (its HUB75 matrix on the panel), a PicoPad (its gamepad), a Metro and a Metro RP2350,
+a MacroPad (its keys, encoder and OLED), a NeoTrellis M4, a FunHouse, a Feather RP2040
+Prop-Maker, a QT Py, a Circuit Playground Bluefruit and a Fruit Jam. Most of their `[pins]` come
+from the real boards' `pins.c`; where a board has more pins than the virtual board's 28, its file
+says which names it leaves out. A board file's `[board]` section names the real board where libraries
 ask: `platform = "Atmel SAMD21"` is `sys.platform` (adafruit_circuitplayground picks by it),
 `machine = "Adafruit Pybadge with samd51j19"` is `os.uname().machine` (adafruit_pybadger,
 the MagTag and PyPortal libraries pick by it), and `display = "240x240"` is the size of the
@@ -448,6 +452,18 @@ program's `rotation` is turned back, so the panel shows the picture upright, as 
 panels have no controller to model: what the program refreshes is what the panel shows, dark
 while `brightness` is 0). `adafruit_matrixportal` builds it as on a MatrixPortal with
 `boards/files/matrixportal.toml`. Tiled and serpentine chains show as the program lays them out.
+
+`picodvi.Framebuffer`, an RP2040's or an RP2350's DVI output, shows on the panel as the display
+`DVI`, in the colour depth the program asks for (1 and 2 bits grey, 4 bits RGBI, 8 bits RGB332,
+16 bits RGB565, 32 bits RGB888). `fruitjam.toml` and `metro_rp2350.toml` have its pins, `CKP` to
+`D2N`.
+
+An SD card on the virtual SPI bus answers as a card does in SPI mode, so `sdcardio.SDCard` and
+`adafruit_sdcard` read and write it and `storage.VfsFat` mounts it at `/sd`, the folder a new
+drive has. `[spi] SD = "sdcard cs=SD_CS"` puts one on a pin (the Metro, Metro RP2350 and Fruit
+Jam files have it); a card reset sent on any other single chip select puts one there, said on
+stderr. Its blocks are `CIRCUITPY-SD.img` beside the drive, 16 MB, made and formatted at its
+first use and kept from one run to the next, as a card is.
 
 ### Plugging parts in from Python
 
@@ -726,6 +742,19 @@ console ring.
 Real hardware runs in real time: `--fast-time` is refused on the `ft232h`, `mcp2221` and `gpiochip`
 boards, with `--uart` and with the computer's microphone (`[mic]` `"mic"`).
 
+## Sleep and the watchdog
+
+`alarm` sleeps as a board does. `alarm.light_sleep_until_alarms()` waits in the program for a
+`TimeAlarm` or a `PinAlarm` (a button on the panel, a key, a pin of a USB adapter) and returns the
+one that fired. `alarm.exit_and_deep_sleep_until_alarms()` ends the program; the process waits,
+and when an alarm fires starts again from `boot.py`, `alarm.wake_alarm` telling which,
+`alarm.sleep_memory` kept and `microcontroller.cpu.reset_reason` `DEEP_SLEEP_ALARM`. A key on the
+console during a deep sleep is the reset button: the board starts again with no wake alarm. With
+`--fast-time` a sleep with only time alarms is over at once.
+
+`microcontroller.watchdog` counts on the program's clock: in `WatchDogMode.RAISE` a program that
+stops feeding it gets `watchdog.WatchDogTimeout`, in `RESET` the board resets.
+
 ## Without a screen
 
 `SDL_VIDEODRIVER=dummy` runs without a display and `SDL_AUDIODRIVER=disk` writes the sound to a
@@ -738,7 +767,7 @@ file. `CIRCUITPY_SDL_KEYS` names a file or FIFO of panel lines (above; `down Z`,
 - On Windows: `audiomp3` (its decoder's inline assembly is for MSVC).
 - mDNS; an AirLift (ESP32 co-processor) for boards that reach the network through one.
 - Bluetooth LE as a central (scanning and connecting from `code.py`), pairing, and an MTU over 23.
-- `pwmio`, `touchio`, `pulseio` and `rgbmatrix` on the virtual board only; `usb` (USB host),
-  `alarm`, `sdcardio`, `picodvi` and `espcamera` not at all.
+- `pwmio`, `touchio`, `pulseio`, `rgbmatrix`, `picodvi` and the SD card on the virtual board
+  only; `usb` (USB host) and `espcamera` not at all; `alarm` without touch alarms.
 - Builds and packages for handhelds: the port needs a cross compiler with the device's SDL2
   (PortMaster for Anbernic and others, the OnionOS toolchain for the Miyoo Mini).

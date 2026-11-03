@@ -11,6 +11,9 @@
 #if CIRCUITPY_SDL
 #include "sdl_host.h"
 #endif
+#if CIRCUITPY_WATCHDOG
+#include "common-hal/watchdog/WatchDogTimer.h"
+#endif
 #if CIRCUITPY_AUDIOIO
 #include "common-hal/audioio/AudioOut.h"
 #endif
@@ -28,6 +31,9 @@ void port_background_tick(void) {
 
 void port_background_task(void) {
     control_api_vm_task();
+    #if CIRCUITPY_WATCHDOG
+    desktop_watchdog_check();
+    #endif
 }
 
 void port_start_background_tick(void) {

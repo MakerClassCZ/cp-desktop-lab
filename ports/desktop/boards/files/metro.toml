@@ -1,0 +1,59 @@
+# A Metro's names on the virtual board: circuitpython --board-file boards/files/metro.toml
+# The Metro RP2040's pins (D0-D13, A0-A3, the SD card's), from its pins.c; a Metro M0 or M4 names
+# its header the same. GPIO13 is the speaker. The board panel shows the NeoPixel, the LED and the
+# analog pins as sliders.
+
+[pins]
+A0 = "GPIO0"
+A1 = "GPIO1"
+A2 = "GPIO2"
+A3 = "GPIO3"
+D24 = "GPIO4"
+D25 = "GPIO5"
+D0 = "GPIO6"
+RX_D0_SWITCH_LEFT = "GPIO6"
+TX_D0_SWITCH_RIGHT = "GPIO6"
+D1 = "GPIO7"
+TX_D1_SWITCH_LEFT = "GPIO7"
+RX_D1_SWITCH_RIGHT = "GPIO7"
+D2 = "GPIO8"
+D3 = "GPIO9"
+D4 = "GPIO10"
+D5 = "GPIO11"
+D6 = "GPIO12"
+D7 = "GPIO14"
+D8 = "GPIO15"
+D9 = "GPIO16"
+D10 = "GPIO17"
+D11 = "GPIO18"
+D12 = "GPIO19"
+LED = "GPIO20"
+D13 = "GPIO20"
+NEOPIXEL = "GPIO21"
+SD_CD = "GPIO22"
+SDIO_CLOCK = "SCK"
+SDIO_COMMAND = "MOSI"
+SDIO_DATA0 = "MISO"
+SDIO_DATA1 = "GPIO23"
+SDIO_DATA2 = "GPIO24"
+SD_CS = "GPIO25"
+SDIO_DATA3 = "GPIO25"
+
+[neopixel]
+NEOPIXEL = "1"
+
+[led]
+LED = "red"
+
+[analog]
+A0 = ""
+A1 = ""
+A2 = ""
+A3 = ""
+
+[spi]
+SD = "sdcard cs=SD_CS"   # its microSD slot: CIRCUITPY-SD.img beside the drive
+
+[board]
+ble = "off"  # no Bluetooth on this board
+machine = "Adafruit Metro RP2040 with rp2040"

@@ -10,6 +10,7 @@
 #include <string.h>
 #include <strings.h>
 
+#include "sdcard_virtual.h"
 #include "vdisplay.h"
 
 #define DEVICES_MAX 4
@@ -48,6 +49,14 @@ bool spi_virtual_add(const char *name, const char *spec, int cs, int dc, const c
     char model[16] = "";
     unsigned w = 0, h = 0;
     sscanf(spec, "%15s %ux%u", model, &w, &h);
+    // An SD card: only its chip select.
+    if (strcasecmp(model, "sdcard") == 0) {
+        if (cs < 0) {
+            *why = "an SD card needs its cs= pin";
+            return false;
+        }
+        return sdcard_virtual_add(cs, why);
+    }
     bool known = false;
     int n = snprintf(message, sizeof(message), "unknown SPI display %s (", model);
     for (size_t i = 0; _models[i] != NULL; i++) {
@@ -88,6 +97,15 @@ bool spi_virtual_add(const char *name, const char *spec, int cs, int dc, const c
     t->offset_x = t->offset_y = 0xffff;
     _count++;
     return true;
+}
+
+bool spi_virtual_uses_pin(int pin) {
+    for (int i = 0; i < _count; i++) {
+        if (_devices[i].cs == pin || _devices[i].dc == pin) {
+            return true;
+        }
+    }
+    return false;
 }
 
 vdisplay_t *spi_virtual_display(int cs) {
@@ -214,6 +232,15 @@ static desktop_spi_result_t _configure(uint32_t hz, uint8_t polarity, uint8_t ph
 }
 
 static bool _transfer(const uint8_t *out, uint8_t fill, uint8_t *in, size_t len) {
+    // An SD card answers on MISO; a reset sent to no card puts one on its chip select.
+    int card = sdcard_virtual_selected();
+    if (card < 0 && sdcard_virtual_attach_default(out, len)) {
+        card = sdcard_virtual_selected();
+    }
+    if (card >= 0) {
+        sdcard_virtual_transfer(card, out, fill, in, len);
+        return true;
+    }
     for (int i = 0; i < _count; i++) {
         tft_t *t = &_devices[i];
         if (!_low(t->cs)) {

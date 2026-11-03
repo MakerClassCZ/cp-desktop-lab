@@ -509,6 +509,11 @@ static bool posix_filesystem_init(const char *root, bool create_allowed) {
         #endif
         MAKE_FILE_WITH_OPTIONAL_CONTENTS(&_circuitpy_mount, "/code.py", "print(\"Hello World!\")\n");
         supervisor_vfs_mkdir(&_circuitpy_mount, "/lib", 0);
+        #if CIRCUITPY_SDCARDIO || CIRCUITPY_SDIOIO
+        supervisor_vfs_mkdir(&_circuitpy_mount, "/sd", 0);
+        MAKE_FILE_WITH_OPTIONAL_CONTENTS(&_circuitpy_mount, "/sd/placeholder.txt",
+            "SD cards mounted at /sd will hide this file from Python.\n");
+        #endif
     } else if (!S_ISDIR(st.st_mode)) {
         return false;
     }

@@ -78,6 +78,7 @@ SRC_C += \
 	virtual/neopixel_emu.c \
 	virtual/parts.c \
 	virtual/rgbmatrix_virtual.c \
+	virtual/sdcard_virtual.c \
 	virtual/spi_virtual.c \
 	virtual/vdisplay.c \
 	boards/$(BOARD)/board.c \
@@ -143,6 +144,14 @@ SRC_C += \
 	common-hal/sdl/Framebuffer.c \
 	host/sdl_host.c
 INC += $(SDL_CFLAGS)
+endif
+
+# picodvi, the raspberrypi port's: a DVI output as a display of the board panel.
+ifeq ($(CIRCUITPY_PICODVI),1)
+SRC_C += \
+	bindings/picodvi/__init__.c \
+	bindings/picodvi/Framebuffer.c \
+	common-hal/picodvi/Framebuffer.c
 endif
 
 ifeq ($(DEBUG),1)

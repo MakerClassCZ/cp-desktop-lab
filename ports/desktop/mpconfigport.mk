@@ -35,7 +35,18 @@ CIRCUITPY_I2CTARGET = 0
 CIRCUITPY_NVM = 0
 CIRCUITPY_PULSEIO = 1
 CIRCUITPY_RGBMATRIX = 1
-CIRCUITPY_SDCARDIO = 0
+# sdcardio talks to the virtual bus's SD card (virtual/sdcard_virtual.c), as to a real one.
+CIRCUITPY_SDCARDIO = 1
+
+# The watchdog on the program's clock (common-hal/watchdog).
+CIRCUITPY_WATCHDOG = 1
+
+# alarm: light sleep in the VM, deep sleep as a restart (common-hal/alarm); no touch pads to wake on.
+CIRCUITPY_ALARM = 1
+CIRCUITPY_ALARM_TOUCH = 0
+
+# picodvi.Framebuffer as a display of the board panel (common-hal/picodvi).
+CIRCUITPY_PICODVI = 1
 CIRCUITPY_PARALLELDISPLAYBUS = 0
 
 # NeoPixels: neopixel_write shows them on the board panel (panel.c), and the core

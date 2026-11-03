@@ -61,6 +61,15 @@ void common_hal_mcu_processor_get_uid(uint8_t raw_id[]) {
     fclose(f);
 }
 
+#if CIRCUITPY_ALARM
+extern bool desktop_alarm_woke;
+#endif
+
 mcu_reset_reason_t common_hal_mcu_processor_get_reset_reason(void) {
+    #if CIRCUITPY_ALARM
+    if (desktop_alarm_woke) {
+        return MCU_RESET_REASON_DEEP_SLEEP_ALARM;
+    }
+    #endif
     return desktop_was_reset ? MCU_RESET_REASON_SOFTWARE : MCU_RESET_REASON_POWER_ON;
 }

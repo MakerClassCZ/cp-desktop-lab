@@ -5,8 +5,8 @@ drives it), its [i2c] an SSD1306 (i2cdisplaybus, as adafruit_displayio_ssd1306 d
 test reads what each display shows, upright, through the control API.
 """
 
-import time
-from harness import check, launch, shown
+import os, time
+from harness import T, check, launch, shown
 
 
 # A 240x240 ST7789 on SPI, as adafruit_st7789's 240x240 example sets it up
@@ -136,4 +136,48 @@ check(
     oled[:2] == (128, 32),
     (out, oled[:2]),
 )
+
+# picodvi: a DVI output, as a Fruit Jam's or a Metro RP2350's, is the panel's display DVI, in the
+# colour depth the program asks for.
+DVI = """import board, displayio, framebufferio, picodvi
+displayio.release_displays()
+fb = picodvi.Framebuffer(320, 240, clk_dp=board.CKP, clk_dn=board.CKN, red_dp=board.D0P, red_dn=board.D0N,
+    green_dp=board.D1P, green_dn=board.D1N, blue_dp=board.D2P, blue_dn=board.D2N, color_depth=%d)
+display = framebufferio.FramebufferDisplay(fb)
+group = displayio.Group()
+bitmap = displayio.Bitmap(320, 240, 2)
+bitmap.fill(1)
+for y in range(20):
+    for x in range(20):
+        bitmap[x, y] = 0
+palette = displayio.Palette(2)
+palette[0] = 0xFF0000
+palette[1] = 0x0000FF
+group.append(displayio.TileGrid(bitmap, pixel_shader=palette))
+display.root_group = group
+display.refresh()
+print("drawn")
+while True:
+    pass    # running: a display the program made goes when it ends
+"""
+FRUIT_JAM = next(
+    p
+    for p in (
+        os.path.join(T, "board_files", "fruitjam.toml"),
+        os.path.join(T, "..", "boards", "files", "fruitjam.toml"),
+    )
+    if os.path.exists(p)
+)
+for depth in (16, 8):
+    out, (img,) = shown(DVI % depth, open(FRUIT_JAM).read(), ["DVI"])
+    check("picodvi %d bits: the program draws" % depth, "drawn" in out, out)
+    ok = img is not None and img[:2] == (320, 240)
+    check("picodvi %d bits: the DVI display is 320x240" % depth, ok, img and img[:2])
+    if ok:
+        w, h, px = img
+        check(
+            "picodvi %d bits: red at the top left, blue elsewhere" % depth,
+            px(5, 5)[0] > 200 and px(5, 5)[2] < 50 and px(200, 200)[2] > 200,
+            (px(5, 5), px(200, 200)),
+        )
 print("DONE")

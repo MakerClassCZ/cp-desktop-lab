@@ -33,6 +33,9 @@
 #include "common-hal/audioio/AudioOut.h"
 #endif
 #include "common-hal/microcontroller/Pin.h"
+#if CIRCUITPY_ALARM
+#include "common-hal/alarm/__init__.h"
+#endif
 
 #include "control_api.h"
 #include "desktop_pins.h"
@@ -83,6 +86,9 @@ safe_mode_t port_init(void) {
         _restarted_after_fault = true;
         platform_set_env(FAULTED_ENV, NULL);
     }
+    #if CIRCUITPY_ALARM
+    desktop_alarm_init();
+    #endif
 
     // A crash is the host's hard fault: a backtrace on stderr, then a restart into safe mode.
     platform_catch_faults(_fault_restart);

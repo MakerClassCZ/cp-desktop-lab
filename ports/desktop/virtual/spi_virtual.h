@@ -20,6 +20,8 @@ extern const desktop_spi_ops_t spi_virtual_ops;
 
 // A board file line, the pins already looked up: false with *why set when it is wrong.
 bool spi_virtual_add(const char *name, const char *spec, int cs, int dc, const char **why);
+// A display listens on the pin (its cs or dc).
+bool spi_virtual_uses_pin(int pin);
 // The display selected by the cs pin, or NULL.
 vdisplay_t *spi_virtual_display(int cs);
 // The rotation the program gives its display (0, 90, 180, 270): the panel shows it undone.

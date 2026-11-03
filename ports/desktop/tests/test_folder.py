@@ -11,8 +11,8 @@ end = time.time() + 5
 while time.time() < end and not os.path.exists(os.path.join(D, "boot_out.txt")):
     time.sleep(0.05)
 check(
-    "default files created",
-    sorted(os.listdir(D)) == ["boot_out.txt", "code.py", "lib", "settings.toml"],
+    "default files created, the SD card's mount point too",
+    sorted(os.listdir(D)) == ["boot_out.txt", "code.py", "lib", "sd", "settings.toml"],
     str(sorted(os.listdir(D))),
 )
 # 3: a host edit reloads
@@ -70,7 +70,7 @@ r.wait_for("statvfs ", 6)
 t = r.text()
 check(
     "os.getcwd and listdir",
-    "cwd / | listdir ['.hidden', 'boot_out.txt', 'code.py', 'lib', 'settings.toml']" in t,
+    "cwd / | listdir ['.hidden', 'boot_out.txt', 'code.py', 'lib', 'sd', 'settings.toml']" in t,
     t,
 )
 check("os.stat / statvfs", "stat code.py size" in t and "statvfs ok True" in t, t)

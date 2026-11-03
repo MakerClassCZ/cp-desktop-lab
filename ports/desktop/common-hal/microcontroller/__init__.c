@@ -16,6 +16,9 @@
 #include "shared-bindings/microcontroller/Pin.h"
 #include "shared-bindings/microcontroller/Processor.h"
 #include "supervisor/port.h"
+#if CIRCUITPY_WATCHDOG
+#include "common-hal/watchdog/WatchDogTimer.h"
+#endif
 #include "supervisor/shared/safe_mode.h"
 
 #include "desktop_port.h"
@@ -88,3 +91,14 @@ static const mp_rom_map_elem_t mcu_pin_global_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_GPIO27), MP_ROM_PTR(&pin_GPIO27) },
 };
 MP_DEFINE_CONST_DICT(mcu_pin_globals, mcu_pin_global_dict_table);
+
+#if CIRCUITPY_WATCHDOG
+// The singleton watchdog.WatchDogTimer object.
+watchdog_watchdogtimer_obj_t common_hal_mcu_watchdogtimer_obj = {
+    .base = {
+        .type = &watchdog_watchdogtimer_type,
+    },
+    .timeout = 0.0f,
+    .mode = WATCHDOGMODE_NONE,
+};
+#endif
