@@ -15,8 +15,9 @@
 #include <string.h>
 
 #include "common-hal/_bleio/Adapter.h"
+#include "common-hal/_bleio/hci.h"
+#include "common-hal/_bleio/hci_transport.h"
 #include "shared-bindings/_bleio/__init__.h"
-#include "shared-bindings/busio/UART.h"
 
 #include "ble_controller.h"
 #include "desktop_port.h"
@@ -26,7 +27,6 @@ static bool _board_off;         // a board file's [board] ble = "off"
 static bool _on;                // a controller is there
 static bool _real;              // ... on a serial port
 static serial_host_t _serial;
-static busio_uart_obj_t _uart;  // the adapter's hci_uart
 
 // The controller's bytes gathered into whole H4 packets: the host reads them a byte at a time.
 // What the host writes is a whole packet each time.
@@ -74,6 +74,31 @@ int ble_host_write(const uint8_t *data, size_t len) {
     return n;
 }
 
+// The link as ble_hci's transport (hci_transport.h): what is there now, never a wait.
+static size_t _transport_available(void *ctx) {
+    (void)ctx;
+    int n = ble_host_available();
+    return n > 0 ? (size_t)n : 0;
+}
+
+static size_t _transport_read(void *ctx, uint8_t *data, size_t len) {
+    (void)ctx;
+    int n = ble_host_read(data, len);
+    return n > 0 ? (size_t)n : 0;
+}
+
+static int _transport_write(void *ctx, const uint8_t *h4, size_t len) {
+    (void)ctx;
+    int n = ble_host_write(h4, len);
+    return n < 0 ? HCI_WRITE_ERROR : (size_t)n < len ? HCI_WRITE_TIMEOUT : HCI_OK;
+}
+
+static const bleio_hci_transport_t _transport = {
+    .available = _transport_available,
+    .read = _transport_read,
+    .write = _transport_write,
+};
+
 bool ble_host_board_setting(const char *value) {
     if (strcmp(value, "on") == 0 || strcmp(value, "off") == 0) {
         _board_off = strcmp(value, "off") == 0;
@@ -110,9 +135,6 @@ bool ble_host_init(void) {
     if (desktop_options.ble_log != NULL && !ble_host_open_log(desktop_options.ble_log)) {
         return false;
     }
-    _uart.base.type = &busio_uart_type;
-    _uart.open = true;
-    _uart.hci_link = true;
     _on = true;
     return true;
 }
@@ -124,9 +146,8 @@ void ble_host_attach_adapter(void) {
     bleio_adapter_obj_t *adapter = &common_hal_bleio_adapter_obj;
     adapter->allocated = true;
     adapter->persistent = true;
-    adapter->hci_uart = &_uart;
-    adapter->rts_digitalinout = NULL;
-    adapter->cts_digitalinout = NULL;
+    adapter->hci_transport = &_transport;
+    adapter->hci_transport_ctx = NULL;
     adapter->enabled = false;
     bleio_set_adapter(MP_OBJ_FROM_PTR(adapter));
 }

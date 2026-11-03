@@ -10,9 +10,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// The HCI link of _bleio (devices/ble_hci), H4 bytes both ways, for the port's busio.UART:
-// read and write never wait, they move what there is, 0 when nothing, -1 when the link is gone;
-// a write is one whole packet.
+// The HCI link of _bleio (devices/ble_hci), H4 bytes both ways, behind the adapter's transport
+// (hci_transport.h): read and write never wait, they move what there is, 0 when nothing, -1 when
+// the link is gone; a write is one whole packet.
 int ble_host_available(void);
 int ble_host_read(uint8_t *data, size_t len);
 int ble_host_write(const uint8_t *data, size_t len);

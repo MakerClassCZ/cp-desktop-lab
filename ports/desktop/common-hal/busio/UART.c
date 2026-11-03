@@ -23,7 +23,6 @@
 #include "shared-bindings/busio/UART.h"
 #include "shared-bindings/microcontroller/Pin.h"
 
-#include "ble_host.h"
 #include "bus_trace.h"
 #include "desktop_pins.h"
 #include "desktop_port.h"
@@ -120,15 +119,6 @@ void common_hal_busio_uart_never_reset(busio_uart_obj_t *self) {
 
 // Up to len bytes: until they are all there, or timeout passes with no new byte.
 size_t common_hal_busio_uart_read(busio_uart_obj_t *self, uint8_t *data, size_t len, int *errcode) {
-    if (self->hci_link) {
-        // The HCI link: what is there now, never a wait.
-        int n = ble_host_read(data, len);
-        if (n <= 0) {
-            *errcode = n < 0 ? MP_EIO : MP_EAGAIN;
-            return MP_STREAM_ERROR;
-        }
-        return n;
-    }
     if (self->rx == NULL) {
         mp_raise_ValueError_varg(MP_ERROR_TEXT("No %q pin"), MP_QSTR_rx);
     }
@@ -174,14 +164,6 @@ size_t common_hal_busio_uart_read(busio_uart_obj_t *self, uint8_t *data, size_t 
 }
 
 size_t common_hal_busio_uart_write(busio_uart_obj_t *self, const uint8_t *data, size_t len, int *errcode) {
-    if (self->hci_link) {
-        int n = ble_host_write(data, len);
-        if (n < 0) {
-            *errcode = MP_EIO;
-            return MP_STREAM_ERROR;
-        }
-        return n;
-    }
     if (self->tx == NULL) {
         mp_raise_ValueError_varg(MP_ERROR_TEXT("No %q pin"), MP_QSTR_tx);
     }
@@ -222,13 +204,12 @@ void common_hal_busio_uart_set_timeout(busio_uart_obj_t *self, mp_float_t timeou
 }
 
 uint32_t common_hal_busio_uart_rx_characters_available(busio_uart_obj_t *self) {
-    int n = self->hci_link ? ble_host_available()
-        : self->virtual_port ? 0 : serial_host_available(&self->port);
+    int n = self->virtual_port ? 0 : serial_host_available(&self->port);
     return n > 0 ? (uint32_t)n : 0;
 }
 
 void common_hal_busio_uart_clear_rx_buffer(busio_uart_obj_t *self) {
-    if (!self->hci_link && !self->virtual_port) {
+    if (!self->virtual_port) {
         serial_host_flush_input(&self->port);
     }
 }
