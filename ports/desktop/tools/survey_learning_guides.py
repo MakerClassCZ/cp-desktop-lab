@@ -268,6 +268,8 @@ def run(work, binary, seconds=10.0, board="virtual", board_file=None):
         drive = os.path.join(work, "drives", "%03d" % entry["n"])
         if os.path.isdir(lib) and not os.path.exists(os.path.join(drive, "lib")):
             os.symlink(lib, os.path.join(drive, "lib"))
+        # The SD card's mount point, as a new drive has it.
+        os.makedirs(os.path.join(drive, "sd"), exist_ok=True)
         settings = os.path.join(drive, "settings.toml")
         # Made up where the project brings none, or the made-up ones of an earlier run.
         if os.environ.get("SETTINGS") == "1" and (

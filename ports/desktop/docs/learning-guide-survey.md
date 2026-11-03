@@ -236,3 +236,22 @@ board has no Bluetooth (`RuntimeError: No adapter available`), 4 meet what the H
 do (`NotImplementedError`), and the rest stop at their board's pins. What stops programs first
 now: an AirLift (`ESP_BUSY`, `ESP_CS`) 67, a file 44, Gemma and Trinket pins on other boards
 (`D0`-`D8`) about 150, `picodvi` 29, `alarm` 20, `usb` 19, `PIL` 18, `espcamera` 17.
+
+## More board files, watchdog, alarm, picodvi, an SD card (2026-11-03)
+
+One run of every program, as above, the board file chosen by the names a program uses where that
+beats its library's or its path's guess, each drive with the `/sd` a new drive has:
+
+| | ran |
+|---|---|
+| before (the neutral virtual board) | 762 |
+| seven more board files, the Feather's D0-D3, D7, D8, the choice by names | 985 |
+| `watchdog`, `alarm`, `picodvi`, the SD card, Metro, Metro RP2350 and Fruit Jam files | 1012 (58 %) |
+
+Of the programs that stopped at a module before: `watchdog` 4 of 4 run, `picodvi` 10 of 29 (the
+rest meet the Fruit Jam's TLV320 DAC, USB host or its ESP32-C6), `alarm` 6 of 20, `sdcardio` most
+reach their next part (sensors, other boards' pins). About 30 programs counted as running in one
+run and not the next: they wait out the 10 seconds on hardware that is not there (an AirLift
+timing out, an SD card no one answered for before), so a single run's count moves by that much.
+What stops programs first now: an AirLift (`ESP_BUSY`, `ESP_CS`) 70, a file 60, USB host 23,
+`PIL` 18, `espcamera` 17, I2C devices with no model (0x30, 0x36, 0x70, 0x48, 0x5a, 0x29) about 60.
