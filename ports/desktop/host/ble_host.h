@@ -43,10 +43,12 @@ typedef struct {
     bool advertising;
     bool connectable;
     bool connected;
-    bool public;                // address is the controller's public one, else the random one
+    bool scanning;
+    bool public;              // address is the controller's public one, else the random one
     uint8_t address[6];         // the address advertising uses, least significant byte first
     uint8_t peer[6];            // the one connected
     char name[32];              // the advertised local name
+    char central_name[32];      // the peer of the last connection the program made, by name
     uint8_t data[31];
     uint8_t data_len;
     uint8_t scan_response[31];

@@ -690,7 +690,9 @@ class Peer:
 
     def _take(self, timeout):
         """The PDUs the program sent that are not notifications, waiting up to timeout for one.
-        Notifications are kept for notifications(); an indication is confirmed."""
+        Notifications are kept for notifications(); an indication is confirmed. A request of the
+        program's own is answered as a phone with no services it asks for would: an MTU Exchange
+        with 23, anything else with Attribute Not Found."""
         pdus = self.board.request("GET", "/api/ble/att?wait=%d" % int(timeout * 1000))["pdus"]
         answers = []
         for hexed in pdus:
@@ -700,9 +702,20 @@ class Peer:
                 self._notified.setdefault(handle, []).append(pdu[3:])
                 if pdu[0] == 0x1D:
                     self._send(b"\x1e")
+            elif pdu[:1] == b"\x02":
+                self._send(b"\x03" + struct.pack("<H", 23))
+            elif pdu and not pdu[0] & 0x40 and pdu[0] not in ATT_ANSWERS:
+                handle = struct.unpack("<H", pdu[1:3])[0] if len(pdu) >= 3 else 0
+                self._send(bytes([0x01, pdu[0]]) + struct.pack("<HB", handle, 0x0A))
             else:
                 answers.append(pdu)
         return answers
+
+    def serve(self, seconds):
+        """Answers the program's requests for seconds (a phone's stack answers them on its own)."""
+        end = time.time() + seconds
+        while time.time() < end:
+            self._take(min(max(end - time.time(), 0), 0.5))
 
     def _request(self, pdu, answer, timeout=5):
         """pdu sent; the program's answer of opcode answer, or AttError. ATT has one request at a
@@ -868,6 +881,617 @@ class Ble:
                 if "advertises nothing" not in e.message or time.time() > end:
                     raise
                 time.sleep(0.05)
+
+
+# ---- Bluetooth LE: the air around the program, the devices it scans for and connects to ----
+
+
+def _uuid_le(u):
+    """A UUID as ATT carries it, little-endian: 2 bytes for one on the Bluetooth base, else 16."""
+    full = uuid(u)
+    if full.endswith(BASE_UUID) and full.startswith("0000"):
+        return struct.pack("<H", int(full[4:8], 16))
+    return bytes(reversed(bytes.fromhex(full.replace("-", ""))))
+
+
+class GattCharacteristic:
+    """A characteristic of a Peripheral's GATT server: its UUID, its properties by name (as
+    Characteristic.names() gives them), its value. error: the ATT error code every read and write
+    of it gets (0x02 read not permitted, 0x03 write not permitted, 0x05 insufficient
+    authentication ...)."""
+
+    def __init__(self, u, properties=("read",), value=b"", error=None):
+        self.uuid = uuid(u)
+        self.properties = sum(bit for bit, name in PROPERTIES if name in properties)
+        self.value = bytes(value)
+        self.error = error
+        self.decl = self.handle = self.cccd = None  # its handles, which the Peripheral gives
+        self.cccd_value = 0  # what the program wrote to its CCCD
+        self.writes = []  # the values the program wrote, oldest first
+
+    def __repr__(self):
+        return "GattCharacteristic(%s, 0x%04x)" % (self.uuid, self.handle or 0)
+
+
+class GattService:
+    def __init__(self, u, characteristics=()):
+        self.uuid = uuid(u)
+        self.characteristics = list(characteristics)
+        self.start = self.end = None
+
+
+_next_address = [0]
+
+
+class Peripheral:
+    """A device in the air around the program: it advertises and, when the program connects, it
+    serves GATT as a sensor does: MTU Exchange, discovery (Read By Group Type, Find By Type Value,
+    Read By Type, Find Information), Read, Read Blob, Write Request and Command. It notifies and
+    indicates once the program has turned that on. The mirror of Peer, which is a client. It
+    lives in an Air (air.add(device)), whose threads feed it the program's frames.
+
+    data, scan_response: raw advertising bytes; by default the flags, the services' UUIDs and the
+    name (in the scan response when it does not fit)."""
+
+    MTU = 247  # its own receive MTU, answered to an exchange; the link uses the smaller one
+
+    def __init__(
+        self,
+        name=None,
+        services=(),
+        address=None,
+        random=True,
+        data=None,
+        scan_response=None,
+        connectable=True,
+        rssi=-60,
+    ):
+        if address is None:
+            _next_address[0] += 1
+            address = "c0:00:00:00:%02x:%02x" % divmod(_next_address[0], 256)
+        self.name, self.address, self.random = name, address.lower(), random
+        self.connectable, self.rssi = connectable, rssi
+        self.services = [
+            GattService(
+                0x1800,
+                [
+                    GattCharacteristic(0x2A00, ("read",), (name or "").encode()),
+                    GattCharacteristic(0x2A01, ("read",), b"\x00\x00"),
+                ],
+            ),
+            GattService(0x1801, [GattCharacteristic(0x2A05, ("indicate",), b"")]),
+        ] + list(services)
+        h = 1
+        for s in self.services:
+            s.start, h = h, h + 1
+            for c in s.characteristics:
+                c.decl, c.handle, h = h, h + 1, h + 2
+                if c.properties & 0x30:  # notify or indicate: a CCCD after the value
+                    c.cccd, h = h, h + 1
+            s.end = h - 1
+        self.data, self.scan_response = self._advertisement(services, data, scan_response)
+        self.air = None
+        self.board = None  # the index in its Air of the board connected to it, or None
+        self.advertising = True
+        self.mtu = 23
+        self.confirmations = 0  # indications the program confirmed
+
+    def _advertisement(self, services, data, scan_response):
+        if data is not None:
+            return bytes(data), bytes(scan_response or b"")
+        ad = bytes([2, 1, 6])
+        for size, kind in ((2, 0x03), (16, 0x07)):
+            ids = [_uuid_le(s.uuid) for s in services if len(_uuid_le(s.uuid)) == size]
+            if ids:
+                ad += bytes([1 + size * len(ids), kind]) + b"".join(ids)
+        sr = bytes(scan_response or b"")
+        if self.name:
+            name = self.name.encode()
+            field = bytes([1 + len(name), 0x09]) + name
+            if len(ad) + len(field) <= 31:
+                ad += field
+            elif not sr:
+                sr = field[:31]
+        return ad, sr
+
+    def __repr__(self):
+        return "Peripheral(%r, %s)" % (self.name, self.address)
+
+    # ---- what the program sees ----
+
+    def _peer(self):
+        """Its entry in a controller's air: POST /api/ble/peer."""
+        if not self.advertising:
+            return {"address": self.address, "advertising": False}
+        return {
+            "address": self.address,
+            "random": self.random,
+            "data": self.data.hex(),
+            "scan_response": self.scan_response.hex(),
+            "connectable": self.connectable,
+            "rssi": self.rssi,
+        }
+
+    def _characteristics(self):
+        return [c for s in self.services for c in s.characteristics]
+
+    def characteristic(self, u):
+        u = uuid(u)
+        for c in self._characteristics():
+            if c.uuid == u:
+                return c
+        raise KeyError("no characteristic %s" % u)
+
+    def _attributes(self):
+        """(handle, type, its value) of every attribute, in handle order."""
+        out = []
+        for s in self.services:
+            out.append((s.start, uuid(0x2800), _uuid_le(s.uuid), None))
+            for c in s.characteristics:
+                decl = bytes([c.properties]) + struct.pack("<H", c.handle) + _uuid_le(c.uuid)
+                out.append((c.decl, uuid(0x2803), decl, None))
+                out.append((c.handle, c.uuid, c.value, c))
+                if c.cccd:
+                    out.append((c.cccd, uuid(0x2902), struct.pack("<H", c.cccd_value), None))
+        return out
+
+    def _att(self, pdu):
+        """The answer to an ATT PDU from the program, or None."""
+        op = pdu[0]
+
+        def error(code, handle=0):
+            return bytes([0x01, op]) + struct.pack("<HB", handle, code)
+
+        def packed(answer, entries):
+            """A response of entries of the first one's length, as many as the MTU takes."""
+            if not entries:
+                return None
+            size = len(entries[0])
+            out = bytes([answer, size])
+            for e in entries:
+                if len(e) != size or len(out) + size > self.mtu:
+                    break
+                out += e
+            return out
+
+        if op == 0x02 and len(pdu) == 3:  # MTU Exchange
+            self.mtu = max(23, min(self.MTU, struct.unpack("<H", pdu[1:3])[0]))
+            return b"\x03" + struct.pack("<H", self.MTU)
+        if op in (0x04, 0x06, 0x08, 0x10) and len(pdu) >= 5:
+            start, end = struct.unpack("<HH", pdu[1:5])
+            if start == 0 or start > end:
+                return error(0x01, start)
+            if op == 0x10:  # Read By Group Type: the primary services
+                if _uuid_from_le(pdu[5:]) != uuid(0x2800):
+                    return error(0x10, start)
+                found = [
+                    struct.pack("<HH", s.start, s.end) + _uuid_le(s.uuid)
+                    for s in self.services
+                    if start <= s.start <= end
+                ]
+                return packed(0x11, found) or error(0x0A, start)
+            if op == 0x06:  # Find By Type Value: the services of a UUID
+                kind, value = struct.unpack("<H", pdu[5:7])[0], pdu[7:]
+                found = [
+                    struct.pack("<HH", s.start, s.end)
+                    for s in self.services
+                    if kind == 0x2800 and start <= s.start <= end and _uuid_le(s.uuid) == value
+                ]
+                found = found[: (self.mtu - 1) // 4]
+                return b"\x07" + b"".join(found) if found else error(0x0A, start)
+            attributes = [a for a in self._attributes() if start <= a[0] <= end]
+            if op == 0x04:  # Find Information: handles and types
+                found = [struct.pack("<H", h) + _uuid_le(t) for h, t, _, _ in attributes]
+                if not found:
+                    return error(0x0A, start)
+                rsp = packed(0x05, found)
+                return bytes([0x05, 1 if len(found[0]) == 4 else 2]) + rsp[2:]
+            # Read By Type: characteristic declarations, or the first value of a type
+            kind = _uuid_from_le(pdu[5:])
+            if kind == uuid(0x2803):
+                found = [struct.pack("<H", h) + v for h, t, v, _ in attributes if t == kind]
+                return packed(0x09, found) or error(0x0A, start)
+            for h, t, v, c in attributes:
+                if t == kind:
+                    code = self._refused(c, read=True)
+                    if code:
+                        return error(code, h)
+                    v = v[: self.mtu - 4]
+                    return bytes([0x09, 2 + len(v)]) + struct.pack("<H", h) + v
+            return error(0x0A, start)
+        if op in (0x0A, 0x0C) and len(pdu) >= 3:  # Read, Read Blob
+            handle = struct.unpack("<H", pdu[1:3])[0]
+            offset = struct.unpack("<H", pdu[3:5])[0] if op == 0x0C and len(pdu) >= 5 else 0
+            for h, _, v, c in self._attributes():
+                if h == handle:
+                    code = self._refused(c, read=True)
+                    if code:
+                        return error(code, h)
+                    if offset > len(v):
+                        return error(0x07, h)
+                    return bytes([op + 1]) + v[offset : offset + self.mtu - 1]
+            return error(0x01, handle)
+        if op in (0x12, 0x52) and len(pdu) >= 3:  # Write Request, Write Command
+            handle, value = struct.unpack("<H", pdu[1:3])[0], pdu[3:]
+            for c in self._characteristics():
+                if handle == c.cccd:
+                    c.cccd_value = struct.unpack("<H", (value + b"\0\0")[:2])[0]
+                    break
+                if handle == c.handle:
+                    code = self._refused(c, read=False, command=op == 0x52)
+                    if code:
+                        return error(code, handle) if op == 0x12 else None
+                    c.value = bytes(value)
+                    c.writes.append(bytes(value))
+                    break
+            else:
+                return error(0x03 if handle else 0x01, handle) if op == 0x12 else None
+            if self.air is not None:
+                self.air.lock.notify_all()
+            return b"\x13" if op == 0x12 else None
+        if op == 0x1E:  # Handle Value Confirmation
+            self.confirmations += 1
+            if self.air is not None:
+                self.air.lock.notify_all()
+            return None
+        if op & 0x40 or op in ATT_ANSWERS:
+            return None  # commands and answers get none
+        return error(0x06)
+
+    @staticmethod
+    def _refused(c, read, command=False):
+        """The ATT error a read or a write of a characteristic's value gets, or 0."""
+        if c is None:
+            return 0 if read else 0x03
+        if c.error:
+            return c.error
+        if read:
+            return 0 if c.properties & 0x02 else 0x02
+        return 0 if c.properties & (0x04 if command else 0x08) else 0x03
+
+    # ---- what it does ----
+
+    def _send(self, pdu):
+        if self.board is None:
+            return False
+        self.air.boards[self.board].request(
+            "POST", "/api/ble/l2cap", {"address": self.address, "cid": 4, "data": pdu.hex()}
+        )
+        return True
+
+    def _value_pdu(self, opcode, c, value):
+        c.value = bytes(value)
+        return bytes([opcode]) + struct.pack("<H", c.handle) + c.value[: self.mtu - 3]
+
+    def notify(self, u, value):
+        """A characteristic's new value, notified when the program turned notifications on; True
+        when it went out."""
+        with self.air.lock:
+            c = self.characteristic(u)
+            pdu = self._value_pdu(0x1B, c, value)
+            return bool(c.cccd_value & 1) and self._send(pdu)
+
+    def indicate(self, u, value):
+        """As notify(), as an indication: confirmations counts the program's answers."""
+        with self.air.lock:
+            c = self.characteristic(u)
+            pdu = self._value_pdu(0x1D, c, value)
+            return bool(c.cccd_value & 2) and self._send(pdu)
+
+    def written(self, u):
+        """The values the program wrote to a characteristic since the last call."""
+        with self.air.lock:
+            c = self.characteristic(u)
+            got, c.writes = c.writes, []
+            return got
+
+    def wait_written(self, u, timeout=5):
+        """written(), waiting up to timeout for a first value."""
+        end = time.time() + timeout
+        with self.air.lock:
+            c = self.characteristic(u)
+            while not c.writes and time.time() < end:
+                self.air.lock.wait(max(0.01, end - time.time()))
+            return self.written(u)
+
+    def wait_connected(self, connected=True, timeout=5):
+        """Whether a program is connected to it (or not, connected=False) within timeout."""
+        end = time.time() + timeout
+        with self.air.lock:
+            while (self.board is not None) != connected and time.time() < end:
+                self.air.lock.wait(max(0.01, end - time.time()))
+            return (self.board is not None) == connected
+
+    @property
+    def connected(self):
+        return self.board is not None
+
+    def disconnect(self):
+        """It ends its link to the program (0x13, the remote user ended it)."""
+        with self.air.lock:
+            board = self.board
+        if board is not None:
+            self.air.boards[board].request(
+                "POST", "/api/ble/disconnect", {"address": self.address}
+            )
+
+    # ---- what its Air tells it ----
+
+    def _connected(self, board, event):
+        self.board, self.mtu, self.advertising = board, 23, False
+        self.air._post_device(self, skip=board)
+
+    def _disconnected(self):
+        self.board, self.mtu = None, 23
+        for c in self._characteristics():
+            c.cccd_value = 0
+        self.advertising = True
+        self.air._post_device(self)
+
+    def _frame(self, cid, data):
+        if cid == 4 and data:
+            answer = self._att(data)
+            if answer:
+                self._send(answer)
+
+
+# Responses, notifications, indications and the confirmation: what nobody answers.
+ATT_ANSWERS = {0x01, 0x03, 0x05, 0x07, 0x09, 0x0B, 0x0D, 0x0F, 0x11, 0x13, 0x17, 0x19}
+ATT_ANSWERS |= {0x1B, 0x1D, 0x1E, 0x21, 0x23}
+
+
+class devices:
+    """Ready Peripherals."""
+
+    HEART_RATE = 0x180D
+    MEASUREMENT = 0x2A37
+    BODY_SENSOR_LOCATION = 0x2A38
+
+    @staticmethod
+    def heart_rate(bpm=72, name="HRM", **kw):
+        """A heart rate sensor (0x180D): measurement notified (beat(bpm)), body sensor location
+        read (1, the chest)."""
+        d = Peripheral(
+            name,
+            [
+                GattService(
+                    devices.HEART_RATE,
+                    [
+                        GattCharacteristic(devices.MEASUREMENT, ("notify",), bytes([0, bpm])),
+                        GattCharacteristic(devices.BODY_SENSOR_LOCATION, ("read",), b"\x01"),
+                    ],
+                )
+            ],
+            **kw,
+        )
+
+        def beat(bpm):
+            """A measurement of bpm notified; True when it went out."""
+            return d.notify(devices.MEASUREMENT, bytes([0, bpm]))
+
+        d.beat = beat
+        return d
+
+    @staticmethod
+    def uart(name="UART", **kw):
+        """A Nordic UART device: send(text) notifies on TX, received() is what the program wrote
+        to RX."""
+        d = Peripheral(
+            name,
+            [
+                GattService(
+                    NUS_SERVICE,
+                    [
+                        GattCharacteristic(NUS_RX, ("write", "write_no_response")),
+                        GattCharacteristic(NUS_TX, ("notify",)),
+                    ],
+                )
+            ],
+            **kw,
+        )
+
+        def send(text):
+            data = text.encode() if isinstance(text, str) else bytes(text)
+            sent = True
+            for k in range(0, len(data), d.mtu - 3):
+                sent = d.notify(NUS_TX, data[k : k + d.mtu - 3]) and sent
+            return sent
+
+        def received(timeout=0):
+            got = d.wait_written(NUS_RX, timeout) if timeout else d.written(NUS_RX)
+            return b"".join(got).decode(errors="replace")
+
+        d.send, d.received = send, received
+        return d
+
+    @staticmethod
+    def beacon(data, rssi=-60, **kw):
+        """A beacon: raw advertising data (an iBeacon or Eddystone frame), not connectable."""
+        return Peripheral(None, (), data=data, connectable=False, rssi=rssi, **kw)
+
+
+class Air:
+    """The air around programs: the Peripherals in it, and between two programs, what one
+    advertises reaches the others and a connection one makes to another runs both ways (CLUE to
+    CLUE). A thread per board reads its events in order; the devices' answers and the relay run
+    under one lock. Devices are posted again every repeat seconds while a program scans, as a
+    real one advertises on. Use it with `with`."""
+
+    def __init__(self, *boards, repeat=0.25):
+        import threading
+
+        self.boards = list(boards)
+        self.devices = []
+        self.repeat = repeat
+        self.lock = threading.Condition(threading.RLock())
+        self.events = [[] for _ in boards]  # every event of each board, for a test to read
+        self._stop = threading.Event()
+        self._scanning = [False] * len(boards)
+        self._adv = [None] * len(boards)  # each board's advertising, while it advertises
+        self._links = {}  # (board, peer address there) -> (other board, address there)
+        self._threads = [
+            threading.Thread(target=self._read, args=(i,), daemon=True) for i in range(len(boards))
+        ]
+        if repeat:
+            self._threads.append(threading.Thread(target=self._repeat, daemon=True))
+        for t in self._threads:
+            t.start()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def close(self):
+        self._stop.set()
+        for t in self._threads:
+            t.join(3)
+
+    def add(self, device):
+        """A device into the air: every program sees it advertise. Returns it."""
+        with self.lock:
+            device.air = self
+            self.devices.append(device)
+            self._post_device(device)
+        return device
+
+    def remove(self, device):
+        """The device leaves the air: gone from every program, its link ended (0x13)."""
+        with self.lock:
+            if device in self.devices:
+                self.devices.remove(device)
+            for b in self.boards:
+                self._post(b, {"address": device.address, "gone": True})
+            device.board = None
+
+    def wait(self, test, timeout=5):
+        """Waits up to timeout for test() (called under the lock) to be true; its last value."""
+        end = time.time() + timeout
+        with self.lock:
+            while not test() and time.time() < end:
+                self.lock.wait(min(0.1, max(0.01, end - time.time())))
+            return test()
+
+    # ---- under the lock ----
+
+    @staticmethod
+    def _post(board, body, path="/api/ble/peer"):
+        try:
+            board.request("POST", path, body)
+            return True
+        except (ApiError, OSError, http.client.HTTPException):
+            return False
+
+    def _post_device(self, device, skip=None):
+        for i, b in enumerate(self.boards):
+            if i != skip:
+                self._post(b, device._peer())
+
+    def _post_lab(self, i, j):
+        """Board i's advertising as a peer in board j's air."""
+        adv = self._adv[i]
+        if adv is None:
+            return
+        if not adv["on"]:
+            body = {"address": adv["address"], "advertising": False}
+        else:
+            body = {
+                "address": adv["address"],
+                "random": adv["random"],
+                "data": adv["data"],
+                "scan_response": adv["scan_response"],
+                "connectable": adv["connectable"],
+                "rssi": -50,
+            }
+        self._post(self.boards[j], body)
+
+    def _device(self, address):
+        for d in self.devices:
+            if d.address == address:
+                return d
+        return None
+
+    def _lab(self, address):
+        for i, adv in enumerate(self._adv):
+            if adv is not None and adv["address"] == address:
+                return i
+        return None
+
+    def _event(self, i, e):
+        kind = e["kind"]
+        b = self.boards[i]
+        if kind == "adv":
+            self._adv[i] = e
+            for j in range(len(self.boards)):
+                if j != i:
+                    self._post_lab(i, j)
+        elif kind == "scan":
+            self._scanning[i] = e["on"]
+        elif kind == "connected":
+            d = self._device(e["peer"])
+            if d is not None:
+                d._connected(i, e)
+            elif e["role"] == "central":
+                j = self._lab(e["peer"])
+                if j is not None and j != i:
+                    self._links[(i, e["peer"])] = (j, e["local"])
+                    self._links[(j, e["local"])] = (i, e["peer"])
+                    body = {"address": e["local"], "random": e["local_random"]}
+                    if not self._post(self.boards[j], body, "/api/ble/connect"):
+                        self._links.pop((i, e["peer"]), None)
+                        self._links.pop((j, e["local"]), None)
+                        self._post(b, {"address": e["peer"]}, "/api/ble/disconnect")
+        elif kind == "disconnected":
+            d = self._device(e["peer"])
+            if d is not None and d.board == i:
+                d._disconnected()
+            link = self._links.pop((i, e["peer"]), None)
+            if link is not None:
+                j, address = link
+                self._links.pop((j, address), None)
+                self._post(self.boards[j], {"address": address}, "/api/ble/disconnect")
+        elif kind == "l2cap":
+            d = self._device(e["peer"])
+            if d is not None and d.board == i:
+                d._frame(e["cid"], bytes.fromhex(e["data"]))
+            link = self._links.get((i, e["peer"]))
+            if link is not None:
+                j, address = link
+                body = {"address": address, "cid": e["cid"], "data": e["data"]}
+                self._post(self.boards[j], body, "/api/ble/l2cap")
+        self.lock.notify_all()
+
+    # ---- the threads ----
+
+    def _read(self, i):
+        b, since = self.boards[i], 0
+        while not self._stop.is_set():
+            try:
+                r = b.request("GET", "/api/ble/events?since=%d&wait=300" % since, timeout=30)
+            except (ApiError, OSError, http.client.HTTPException):
+                if b.process is not None and b.process.poll() is not None:
+                    return
+                self._stop.wait(0.2)
+                continue
+            since = r["next"]
+            for e in r["events"]:
+                with self.lock:
+                    self.events[i].append(e)
+                    self._event(i, e)
+
+    def _repeat(self):
+        while not self._stop.wait(self.repeat):
+            with self.lock:
+                for j, scanning in enumerate(self._scanning):
+                    if not scanning:
+                        continue
+                    for d in self.devices:
+                        if d.advertising:
+                            self._post(self.boards[j], d._peer())
+                    for i, adv in enumerate(self._adv):
+                        if i != j and adv is not None and adv["on"]:
+                            self._post_lab(i, j)
 
 
 class bluefruit:

@@ -871,7 +871,7 @@ static void _quit(request_t *r) {
     desktop_power_off(0);
 }
 
-// ---- Bluetooth LE: the phone ----
+// ---- Bluetooth LE: the phone and the air ----
 
 static void _buf_hex(api_buf_t *b, const uint8_t *data, size_t len) {
     static const char digits[] = "0123456789abcdef";
@@ -918,10 +918,10 @@ static void _ble_state(request_t *r) {
         char address[18];
         snprintf(address, sizeof(address), "%02x:%02x:%02x:%02x:%02x:%02x",
             s.address[5], s.address[4], s.address[3], s.address[2], s.address[1], s.address[0]);
-        api_buf_printf(&b, ", \"advertising\": %s, \"connectable\": %s, \"connected\": %s, \"public\": %s, "
-            "\"address\": \"%s\", \"name\": ", s.advertising ? "true" : "false",
-            s.connectable ? "true" : "false", s.connected ? "true" : "false", s.public ? "true" : "false",
-            address);
+        api_buf_printf(&b, ", \"advertising\": %s, \"connectable\": %s, \"connected\": %s, \"scanning\": %s, "
+            "\"public\": %s, \"address\": \"%s\", \"name\": ", s.advertising ? "true" : "false",
+            s.connectable ? "true" : "false", s.connected ? "true" : "false", s.scanning ? "true" : "false",
+            s.public ? "true" : "false", address);
         api_buf_json_string(&b, s.name, strlen(s.name));
         api_buf_add(&b, ", \"data\": \"", 11);
         _buf_hex(&b, s.data, s.data_len);
@@ -942,7 +942,8 @@ static void _ble_state(request_t *r) {
     api_buf_free(&b);
 }
 
-// The phone's endpoints play the virtual controller's peer; with a real one the phone is real.
+// The phone's and the air's endpoints play the virtual controller's peers; with a real one
+// they are real.
 static bool _phone(request_t *r) {
     if (strcmp(ble_host_controller(), "virtual") == 0) {
         return true;
@@ -992,23 +993,213 @@ static void _ble_att_take(request_t *r) {
     api_buf_free(&b);
 }
 
+// "aa:bb:cc:dd:ee:ff" to bytes, least significant first; false when it is not an address.
+static bool _address(const char *text, uint8_t out[6]) {
+    unsigned v[6];
+    char end;
+    if (text == NULL || sscanf(text, "%2x:%2x:%2x:%2x:%2x:%2x%c", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &end) != 6) {
+        return false;
+    }
+    for (int i = 0; i < 6; i++) {
+        out[5 - i] = (uint8_t)v[i];
+    }
+    return true;
+}
+
+static void _buf_address(api_buf_t *b, const char *key, const uint8_t a[6]) {
+    api_buf_printf(b, ", \"%s\": \"%02x:%02x:%02x:%02x:%02x:%02x\"", key, a[5], a[4], a[3], a[2], a[1], a[0]);
+}
+
+// The body's "address" (and "random"), as bytes; false (and 400 answered) when there is none.
+static bool _body_address(request_t *r, uint8_t address[6], bool *random) {
+    char *text = NULL;
+    double num = 0;
+    bool ok = r->body != NULL && _json_field(r->body, "address", &text, NULL) && _address(text, address);
+    free(text);
+    if (!ok) {
+        _error(r, 400, "the body needs \"address\": \"aa:bb:cc:dd:ee:ff\"");
+        return false;
+    }
+    if (random != NULL) {
+        *random = !_json_field(r->body, "random", NULL, &num) || num > (double)0.5;
+    }
+    return true;
+}
+
+// A hex field of the body into out, up to cap bytes: its length, 0 when absent, -1 when bad.
+static int _body_hex(request_t *r, const char *key, uint8_t *out, size_t cap) {
+    char *text = NULL;
+    if (!_json_field(r->body, key, &text, NULL)) {
+        return 0;
+    }
+    int n = _unhex(text, strlen(text), out, cap);
+    free(text);
+    return n;
+}
+
+static bool _body_flag(request_t *r, const char *key, bool fallback) {
+    double num;
+    return _json_field(r->body, key, NULL, &num) ? num > (double)0.5 : fallback;
+}
+
+static void _ble_peer(request_t *r) {
+    ble_peer_t p = { .advertising = true, .connectable = true, .random = true, .rssi = -60 };
+    if (!_body_address(r, p.address, &p.random)) {
+        return;
+    }
+    double num;
+    int data = _body_hex(r, "data", p.data, sizeof(p.data));
+    int scan_response = _body_hex(r, "scan_response", p.scan_response, sizeof(p.scan_response));
+    if (data < 0 || scan_response < 0) {
+        _error(r, 400, "data and scan_response are hex, 31 bytes at most");
+        return;
+    }
+    p.data_len = (uint8_t)data;
+    p.scan_response_len = (uint8_t)scan_response;
+    p.connectable = _body_flag(r, "connectable", true);
+    p.advertising = _body_flag(r, "advertising", true);
+    p.gone = _body_flag(r, "gone", false);
+    if (_json_field(r->body, "rssi", NULL, &num)) {
+        p.rssi = (int8_t)(num < -127 ? -127 : num > 20 ? 20 : num);
+    }
+    if (ble_controller_peer(&p) != 0) {
+        _error(r, 409, "the air is full: 16 peers at most");
+    } else {
+        _ok(r);
+    }
+}
+
+static void _ble_l2cap(request_t *r) {
+    uint8_t address[6];
+    if (!_body_address(r, address, NULL)) {
+        return;
+    }
+    uint8_t data[512];
+    double cid = 0;
+    int n = _body_hex(r, "data", data, sizeof(data));
+    if (n <= 0 || !_json_field(r->body, "cid", NULL, &cid) || cid < 1 || cid > 0xffff) {
+        _error(r, 400, "the body needs \"cid\" and \"data\", an L2CAP frame's payload in hex");
+    } else if (ble_controller_l2cap(address, (uint16_t)cid, data, (size_t)n) != 0) {
+        _error(r, 409, "no link to that address");
+    } else {
+        _ok(r);
+    }
+}
+
+static const char *const _event_kinds[] = { "adv", "scan", "connected", "disconnected", "l2cap" };
+
+// The air's events from since; with wait=MS, the first one waited for.
+static void _ble_events(request_t *r) {
+    long long since = _param_int(r, "since", 0);
+    long long wait = _param_int(r, "wait", 0);
+    wait = wait < 0 ? 0 : wait > WAIT_MAX_MS ? WAIT_MAX_MS : wait;
+    ble_event_t *events = malloc(64 * sizeof(ble_event_t));
+    if (events == NULL) {
+        _error(r, 503, "out of memory");
+        return;
+    }
+    uint64_t next;
+    bool lost;
+    size_t n = ble_controller_events(since < 0 ? 0 : (uint64_t)since, (int)wait, events, 64, &next, &lost);
+    api_buf_t b = {0};
+    char num[24];
+    api_buf_printf(&b, "{\"next\": %s, \"lost\": %s, \"events\": [", _u64(num, next), lost ? "true" : "false");
+    for (size_t i = 0; i < n; i++) {
+        const ble_event_t *e = &events[i];
+        api_buf_printf(&b, "%s{\"seq\": %s, \"kind\": \"%s\"", i ? ", " : "", _u64(num, e->seq), _event_kinds[e->kind]);
+        switch (e->kind) {
+            case BLE_EVENT_ADV:
+                api_buf_printf(&b, ", \"on\": %s, \"connectable\": %s, \"random\": %s", e->on ? "true" : "false",
+                    e->connectable ? "true" : "false", e->address_random ? "true" : "false");
+                _buf_address(&b, "address", e->address);
+                api_buf_add(&b, ", \"data\": \"", 11);
+                _buf_hex(&b, e->data, e->len);
+                api_buf_add(&b, "\", \"scan_response\": \"", 21);
+                _buf_hex(&b, e->data + 31, e->scan_response_len);
+                api_buf_add(&b, "\"", 1);
+                break;
+            case BLE_EVENT_SCAN:
+                api_buf_printf(&b, ", \"on\": %s, \"active\": %s", e->on ? "true" : "false", e->active ? "true" : "false");
+                break;
+            default:
+                _buf_address(&b, "peer", e->address);
+                api_buf_printf(&b, ", \"peer_random\": %s, \"role\": \"%s\", \"handle\": %u", e->address_random ? "true" : "false",
+                    e->role == 0 ? "central" : "peripheral", e->handle);
+                if (e->kind == BLE_EVENT_CONNECTED) {
+                    _buf_address(&b, "local", e->local);
+                    api_buf_printf(&b, ", \"local_random\": %s, \"encrypted\": %s", e->local_random ? "true" : "false",
+                        e->encrypted ? "true" : "false");
+                } else if (e->kind == BLE_EVENT_DISCONNECTED) {
+                    api_buf_printf(&b, ", \"reason\": %u", e->reason);
+                } else {
+                    api_buf_printf(&b, ", \"cid\": %u, \"data\": \"", e->cid);
+                    _buf_hex(&b, e->data, e->len);
+                    api_buf_add(&b, "\"", 1);
+                }
+                break;
+        }
+        api_buf_add(&b, "}", 1);
+    }
+    api_buf_add(&b, "]}", 2);
+    free(events);
+    _answer_json(r, 200, &b);
+    api_buf_free(&b);
+}
+
 static void _ble(request_t *r, bool get, bool post) {
     if (strcmp(r->path, "/api/ble") == 0 && get) {
         _ble_state(r);
     } else if (strcmp(r->path, "/api/ble/connect") == 0 && post) {
+        uint8_t address[6];
+        bool random;
         if (!_phone(r)) {
             return;
         }
-        if (ble_controller_connect() != 0) {
+        if (r->body != NULL && strstr(r->body, "\"address\"") != NULL) {
+            // A peer of that address connects, as a central.
+            if (!_body_address(r, address, &random)) {
+                return;
+            }
+            if (ble_controller_peer_connect(address, random) != 0) {
+                _error(r, 409, "the program advertises nothing connectable, or all links are in use");
+            } else {
+                _ok(r);
+            }
+        } else if (ble_controller_connect() != 0) {
             _error(r, 409, "the program advertises nothing connectable, or a phone is connected");
         } else {
             _ok(r);
         }
     } else if (strcmp(r->path, "/api/ble/disconnect") == 0 && post) {
-        if (_phone(r)) {
-            // 0x13: the remote user ended it, as a phone that leaves does.
+        uint8_t address[6];
+        if (!_phone(r)) {
+            return;
+        }
+        // 0x13: the remote user ended it, as a phone that leaves does.
+        if (r->body != NULL && strstr(r->body, "\"address\"") != NULL) {
+            if (!_body_address(r, address, NULL)) {
+                return;
+            }
+            if (ble_controller_peer_disconnect(address, 0x13) != 0) {
+                _error(r, 409, "no link to that address");
+            } else {
+                _ok(r);
+            }
+        } else {
             ble_controller_disconnect(0x13);
             _ok(r);
+        }
+    } else if (strcmp(r->path, "/api/ble/peer") == 0 && post) {
+        if (_phone(r)) {
+            _ble_peer(r);
+        }
+    } else if (strcmp(r->path, "/api/ble/l2cap") == 0 && post) {
+        if (_phone(r)) {
+            _ble_l2cap(r);
+        }
+    } else if (strcmp(r->path, "/api/ble/events") == 0 && get) {
+        if (_phone(r)) {
+            _ble_events(r);
         }
     } else if (strcmp(r->path, "/api/ble/att") == 0 && post) {
         if (_phone(r)) {

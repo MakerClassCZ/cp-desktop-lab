@@ -5,9 +5,9 @@
 // SPDX-License-Identifier: MIT
 
 // What the port sees of the HCI between _bleio and its controller, the same for the virtual one
-// and a real one: the state (advertising, the name, the connection) for the API and the panel,
-// a line in the bus trace for what matters (BLE ADV, CONNECT, ATT, DISCONNECT), and every packet
-// in a btsnoop file with --ble-log, which Wireshark opens.
+// and a real one: the state (advertising, scanning, the name, the connections) for the API and
+// the panel, a line in the bus trace for what matters (BLE ADV, SCAN, REPORT, CONNECT, ATT,
+// DISCONNECT), and every packet in a btsnoop file with --ble-log, which Wireshark opens.
 
 #include <pthread.h>
 #include <stdio.h>
@@ -84,6 +84,126 @@ static void _hex(char *out, size_t cap, const uint8_t *data, size_t len) {
     out[0] = '\0';
     for (size_t i = 0; i < len && n + 4 < cap; i++) {
         n += (size_t)snprintf(out + n, cap - n, i ? " %02x" : "%02x", data[i]);
+    }
+}
+
+static bool _scan_active;
+
+// What a scan reported, so the trace has each address and data once per scan.
+#define SEEN_COUNT 32
+static struct {
+    uint8_t address[6];
+    uint32_t hash;
+} _seen[SEEN_COUNT];
+static size_t _seen_count;
+
+// The names scans found, by address: a central's connection shows its peer by name.
+#define NAMES_COUNT 16
+static struct {
+    uint8_t address[6];
+    char name[32];
+} _names[NAMES_COUNT];
+static size_t _names_next;
+
+static const char *_name_of(const uint8_t address[6]) {
+    for (size_t i = 0; i < NAMES_COUNT; i++) {
+        if (_names[i].name[0] != '\0' && memcmp(_names[i].address, address, 6) == 0) {
+            return _names[i].name;
+        }
+    }
+    return NULL;
+}
+
+static void _remember_name(const uint8_t address[6], const char *name) {
+    if (name[0] == '\0') {
+        return;
+    }
+    for (size_t i = 0; i < NAMES_COUNT; i++) {
+        if (_names[i].name[0] != '\0' && memcmp(_names[i].address, address, 6) == 0) {
+            snprintf(_names[i].name, sizeof(_names[i].name), "%s", name);
+            return;
+        }
+    }
+    memcpy(_names[_names_next].address, address, 6);
+    snprintf(_names[_names_next].name, sizeof(_names[_names_next].name), "%s", name);
+    _names_next = (_names_next + 1) % NAMES_COUNT;
+}
+
+static void _scan(bool on) {
+    if (on == _state.scanning) {
+        return;
+    }
+    _state.scanning = on;
+    _seen_count = 0;
+    if (on) {
+        bus_trace_text("BLE SCAN on %s", _scan_active ? "active" : "passive");
+    } else {
+        bus_trace_text("BLE SCAN off");
+    }
+}
+
+static const char *_report_kind(uint8_t type) {
+    static const char *const kinds[] = { "ADV_IND", "ADV_DIRECT_IND", "ADV_SCAN_IND", "ADV_NONCONN_IND", "SCAN_RSP" };
+    return type < 5 ? kinds[type] : "ADV";
+}
+
+// One advertising report: its line in the trace, once per address and data in a scan.
+static void _report(const char *kind, const uint8_t address[6], int8_t rssi, const uint8_t *data, size_t len) {
+    char name[32];
+    _name(data, len, name, sizeof(name));
+    _remember_name(address, name);
+    uint32_t hash = 2166136261u;
+    for (size_t i = 0; i < len; i++) {
+        hash = (hash ^ data[i]) * 16777619u;
+    }
+    hash ^= (uint32_t)kind[0] << 24 | (uint32_t)strlen(kind);
+    for (size_t i = 0; i < _seen_count; i++) {
+        if (_seen[i].hash == hash && memcmp(_seen[i].address, address, 6) == 0) {
+            return;
+        }
+    }
+    if (_seen_count < SEEN_COUNT) {
+        memcpy(_seen[_seen_count].address, address, 6);
+        _seen[_seen_count++].hash = hash;
+    }
+    char hex[31 * 3 + 1];
+    _hex(hex, sizeof(hex), data, len > 31 ? 31 : len);
+    bus_trace_text("BLE REPORT %02x:%02x:%02x:%02x:%02x:%02x %s %d \"%s\" %s", address[5], address[4], address[3],
+        address[2], address[1], address[0], kind, rssi, name, hex);
+}
+
+// LE Advertising Report: the number of reports, each its type, address, data and RSSI.
+static void _reports(const uint8_t *p, size_t n) {
+    size_t at = 2;
+    for (uint8_t i = 0; i < p[1] && at + 9 <= n; i++) {
+        const uint8_t *r = p + at;
+        size_t len = r[8];
+        if (at + 10 + len > n) {
+            return;
+        }
+        _report(_report_kind(r[0]), r + 2, (int8_t)r[9 + len], r + 9, len);
+        at += 10 + len;
+    }
+}
+
+// LE Extended Advertising Report: each its event type bits, address, PHYs, SID, power, RSSI,
+// interval, direct address, data.
+static void _extended_reports(const uint8_t *p, size_t n) {
+    size_t at = 2;
+    for (uint8_t i = 0; i < p[1] && at + 24 <= n; i++) {
+        const uint8_t *r = p + at;
+        size_t len = r[23];
+        if (at + 24 + len > n) {
+            return;
+        }
+        uint16_t type = (uint16_t)(r[0] | r[1] << 8);
+        const char *kind = !(type & 0x10) ? "EXT_ADV"
+            : type & 0x08 ? "SCAN_RSP"
+            : type & 0x04 ? "ADV_DIRECT_IND"
+            : (type & 0x03) == 0x03 ? "ADV_IND"
+            : type & 0x02 ? "ADV_SCAN_IND" : "ADV_NONCONN_IND";
+        _report(kind, r + 3, (int8_t)r[13], r + 24, len);
+        at += 24 + len;
     }
 }
 
@@ -181,6 +301,24 @@ static void _command(const uint8_t *h4, size_t len) {
         case 0x0c03:            // Reset
             _state.advertising = _state.connected = false;
             _state.link_count = 0;
+            _scan(false);
+            break;
+        case 0x200b:            // LE Set Scan Parameters: active or passive
+            if (n >= 1) {
+                _scan_active = p[0] == 0x01;
+            }
+            break;
+        case 0x2041:            // LE Set Extended Scan Parameters: the first PHY's type
+            if (n >= 4) {
+                _scan_active = p[3] == 0x01;
+            }
+            break;
+        case 0x200c:            // LE Set Scan Enable
+        case 0x2042:            // LE Set Extended Scan Enable
+            _scan(n >= 1 && p[0] != 0);
+            break;
+        case 0x200e:            // LE Create Connection Cancel
+            bus_trace_text("BLE CONNECT cancel");
             break;
         case 0x2005:            // LE Set Random Address
             if (n >= 6) {
@@ -237,19 +375,43 @@ static void _event(const uint8_t *h4, size_t len) {
     if (h4[1] == 0x0e && n >= 10 && (p[1] | p[2] << 8) == 0x1009 && p[3] == 0) {
         // Command Complete of Read BD_ADDR: the public address.
         memcpy(_public_address, p + 4, 6);
-    } else if (h4[1] == 0x3e && n >= 12 && p[0] == 0x01 && p[1] == 0) {
-        // LE Connection Complete: the advertising stops, the peer is connected.
+    } else if (h4[1] == 0x3e && n >= 12 && (p[0] == 0x01 || p[0] == 0x0a)) {
+        // LE (Enhanced) Connection Complete: the peer is connected; a central's connection leaves
+        // the advertising on, a peripheral's stops it.
+        bool central = p[4] == 0x00;
+        if (p[1] != 0) {
+            bus_trace_text("BLE CONNECT %02x:%02x:%02x:%02x:%02x:%02x failed 0x%02x", p[11], p[10], p[9], p[8],
+                p[7], p[6], p[1]);
+            return;
+        }
         _state.connected = true;
-        _state.advertising = false;
+        if (!central) {
+            _state.advertising = false;
+        }
         memcpy(_state.peer, p + 6, 6);
+        if (central) {
+            // Its name, as a scan found it, or its address.
+            const char *name = _name_of(p + 6);
+            if (name != NULL) {
+                snprintf(_state.central_name, sizeof(_state.central_name), "%s", name);
+            } else {
+                snprintf(_state.central_name, sizeof(_state.central_name), "%02x:%02x:%02x:%02x:%02x:%02x",
+                    p[11], p[10], p[9], p[8], p[7], p[6]);
+            }
+        }
         if (_state.link_count < BLE_HOST_LINKS) {
             ble_host_link_t *link = &_state.links[_state.link_count++];
             link->handle = (uint16_t)(p[2] | p[3] << 8) & 0x0fff;
-            link->central = p[4] == 0x00;
+            link->central = central;
             link->encrypted = false;
             memcpy(link->peer, p + 6, 6);
         }
-        bus_trace_text("BLE CONNECT %02x:%02x:%02x:%02x:%02x:%02x", p[11], p[10], p[9], p[8], p[7], p[6]);
+        bus_trace_text("BLE CONNECT %02x:%02x:%02x:%02x:%02x:%02x%s", p[11], p[10], p[9], p[8], p[7], p[6],
+            central ? " central" : "");
+    } else if (h4[1] == 0x3e && n >= 2 && p[0] == 0x02) {
+        _reports(p, n);
+    } else if (h4[1] == 0x3e && n >= 2 && p[0] == 0x0d) {
+        _extended_reports(p, n);
     } else if (h4[1] == 0x05 && n >= 4 && p[0] == 0) {
         ble_host_link_t *link = _link((uint16_t)(p[1] | p[2] << 8) & 0x0fff);
         if (link != NULL) {

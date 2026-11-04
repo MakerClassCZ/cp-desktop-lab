@@ -168,6 +168,27 @@ def fetch_libs(lib, packages):
                         z.extract(n, lib)
 
 
+def lib_files(*names):
+    """Libraries from CIRCUITPY_LIB (a folder or a .py file each) as files for a drive's lib/;
+    None when the variable is not set or a library is not there."""
+    lib = os.environ.get("CIRCUITPY_LIB")
+    if not lib:
+        return None
+    files = {}
+    for name in names:
+        path = os.path.join(lib, name)
+        if os.path.isfile(path + ".py"):
+            files["lib/%s.py" % name] = open(path + ".py", "rb").read()
+            continue
+        if not os.path.isdir(path):
+            return None
+        for root, _, found in os.walk(path):
+            for n in found:
+                p = os.path.join(root, n)
+                files["lib/" + os.path.relpath(p, lib).replace(os.sep, "/")] = open(p, "rb").read()
+    return files
+
+
 def drive(code, files=None, name="CIRCUITPY"):
     """A fresh drive beside the tests with code.py and files ({name: str or bytes})."""
     d = os.path.join(T, name)
