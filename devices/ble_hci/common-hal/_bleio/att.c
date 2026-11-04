@@ -203,6 +203,9 @@ void bleio_att_reset(void) {
         memset(bleio_connections[i].addr.a.val, 0, sizeof_field(bt_addr_t, val));
         bleio_connections[i].mtu = BT_ATT_DEFAULT_LE_MTU;
         bleio_connections[i].remote_service_list = NULL;
+        bleio_connections[i].is_central = false;
+        bleio_connections[i].encrypted = false;
+        bleio_connections[i].key_size = 0;
     }
 }
 
@@ -520,6 +523,10 @@ void att_add_connection(uint16_t handle, uint8_t role, bt_addr_le_t *peer_addr, 
     // adapter.connections is built again with this one.
     common_hal_bleio_adapter_obj.connection_objs = NULL;
     bleio_connections[peer_index].role = role;
+    bleio_connections[peer_index].is_central = role == BT_HCI_ROLE_MASTER;
+    // Encryption starts later, with pairing or a bond's key.
+    bleio_connections[peer_index].encrypted = false;
+    bleio_connections[peer_index].key_size = 0;
     bleio_connections[peer_index].mtu = BT_ATT_DEFAULT_LE_MTU;
     memcpy(&bleio_connections[peer_index].addr, peer_addr, sizeof(bleio_connections[peer_index].addr));
     // Made by discover_remote_services(), on the program's heap.
@@ -576,6 +583,9 @@ void att_remove_connection(uint16_t conn_handle, uint8_t reason) {
 
     bleio_connections[peer_index].conn_handle = 0xffff;
     bleio_connections[peer_index].role = 0x00;
+    bleio_connections[peer_index].is_central = false;
+    bleio_connections[peer_index].encrypted = false;
+    bleio_connections[peer_index].key_size = 0;
     memset(&bleio_connections[peer_index].addr, 0x00, sizeof(bleio_connections[peer_index].addr));
     bleio_connections[peer_index].mtu = BT_ATT_DEFAULT_LE_MTU;
     bleio_connections[peer_index].remote_service_list = NULL;

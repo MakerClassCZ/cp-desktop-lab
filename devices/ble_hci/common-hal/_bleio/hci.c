@@ -297,14 +297,17 @@ static void process_evt_pkt(size_t pkt_len, uint8_t pkt_data[]) {
             uint8_t *le_evt = pkt->params + sizeof (struct bt_hci_evt_le_meta_event);
 
             if (meta_evt->subevent == BT_HCI_EVT_LE_CONN_COMPLETE) {
-                // Advertising stops when connection occurs.
+                struct bt_hci_evt_le_conn_complete *le_conn_complete =
+                    (struct bt_hci_evt_le_conn_complete *)le_evt;
+
+                // Advertising stops when a central connects to it; a connection we make as the
+                // central leaves it on.
                 // We don't tell the adapter to stop, because stopping advertising
                 // when it's already stopped seems to exercise a bug in the ESP32 HCI code:
                 // It doesn't return a response.
-                bleio_adapter_advertising_was_stopped(&common_hal_bleio_adapter_obj);
-
-                struct bt_hci_evt_le_conn_complete *le_conn_complete =
-                    (struct bt_hci_evt_le_conn_complete *)le_evt;
+                if (le_conn_complete->role == BT_HCI_ROLE_SLAVE) {
+                    bleio_adapter_advertising_was_stopped(&common_hal_bleio_adapter_obj);
+                }
 
                 if (le_conn_complete->status == BT_HCI_ERR_SUCCESS) {
                     att_add_connection(

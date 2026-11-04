@@ -27,13 +27,14 @@ typedef enum {
 // reused.
 typedef struct {
     uint16_t conn_handle;
+    // Our role on the link: central (we connected) or peripheral (a central connected to us).
     bool is_central;
+    // The link is encrypted, with a key of key_size bytes. Attributes whose security mode needs
+    // encryption are refused on a link that is not.
+    bool encrypted;
+    uint8_t key_size;
     // Remote services discovered when this peripheral is acting as a client.
     mp_obj_list_t *remote_service_list;
-    // The advertising data and scan response buffers are held by us, not by the SD, so we must
-    // maintain them and not change it. If we need to change the contents during advertising,
-    // there are tricks to get the SD to notice (see DevZone - TBS).
-    bonding_keys_t bonding_keys;
     // EDIV: Encrypted Diversifier: Identifies LTK during legacy pairing.
     uint16_t ediv;
     volatile pair_status_t pair_status;
