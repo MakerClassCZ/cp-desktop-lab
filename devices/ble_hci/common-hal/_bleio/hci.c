@@ -118,6 +118,8 @@ static size_t cmd_response_len;
 static uint8_t *cmd_response_data;
 
 static volatile bool hci_poll_in_progress = false;
+// Commands (and ACL credits) being waited for: SMP's background work waits until there are none.
+static volatile uint8_t hci_waits;
 
 
 //////////////////////////////////////////////////////////////////////
@@ -481,21 +483,31 @@ static hci_result_t send_command(uint16_t opcode, uint8_t params_len, void *para
 
     // Wait for a response. Note that other packets may be received that are not
     // command responses.
+    result = HCI_RESPONSE_TIMEOUT;
+    hci_waits++;
     uint64_t start = supervisor_ticks_ms64();
     while (supervisor_ticks_ms64() - start < RESPONSE_TIMEOUT_MSECS) {
-        // RUN_BACKGROUND_TASKS includes hci_poll_for_incoming_pkt();
         RUN_BACKGROUND_TASKS;
+        // Polled here too: from a background task (the advertising timeout's stop, SMP) the
+        // background tasks do not run again, and nothing else would read the answer.
+        hci_poll_for_incoming_pkt();
         if (cmd_response_received && cmd_response_opcode == opcode) {
             // If this is definitely a response to the command that was sent,
             // return the status value, which will will be
             // BT_HCI_ERR_SUCCESS (0x00) if the command succeeded,
             // or a BT_HCI_ERR_x value (> 0x00) if there was a problem.
-            return cmd_response_status;
+            result = cmd_response_status;
+            break;
         }
     }
+    hci_waits--;
 
-    // No I/O error, but no response sent back in time.
-    return HCI_RESPONSE_TIMEOUT;
+    // HCI_RESPONSE_TIMEOUT: no I/O error, but no response sent back in time.
+    return result;
+}
+
+bool hci_busy(void) {
+    return hci_waits > 0 || hci_poll_in_progress;
 }
 
 hci_result_t hci_send_acl_pkt(uint16_t handle, uint8_t cid, uint16_t data_len, uint8_t *data) {
@@ -503,8 +515,11 @@ hci_result_t hci_send_acl_pkt(uint16_t handle, uint8_t cid, uint16_t data_len, u
     // controller that keeps the credit (gone, or never set up) fails the send, never hangs it.
     uint64_t start = supervisor_ticks_ms64();
     while (pending_pkt >= common_hal_bleio_adapter_obj.max_acl_num_buffers) {
-        // RUN_BACKGROUND_TASKS includes hci_poll_for_incoming_pkt();
+        hci_waits++;
         RUN_BACKGROUND_TASKS;
+        // As in send_command(): the credits come back in packets read here.
+        hci_poll_for_incoming_pkt();
+        hci_waits--;
         if (supervisor_ticks_ms64() - start > RESPONSE_TIMEOUT_MSECS) {
             return HCI_WRITE_TIMEOUT;
         }
