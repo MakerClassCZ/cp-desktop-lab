@@ -505,6 +505,7 @@ with launch(ATT) as b:
         b.request("POST", "/api/ble/att", pdu)
         quiet[pdu] = b.request("GET", "/api/ble/att?wait=300")["pdus"]
     unsupported = att(b, "2003000500")  # a Read Multiple Variable Request
+    by_type = att(b, "080100ffff3512")  # Read By Type of the 0x1235 value
 check("an MTU request under 23: the server's 23", mtu == "031700", mtu)
 check(
     "... and a Read Response still carries 22 bytes",
@@ -517,5 +518,10 @@ check(
     quiet,
 )
 check("a request not supported: Error 0x06", unsupported == "0120000006", unsupported)
+check(
+    "Read By Type of a value: the entry's length is handle plus value",
+    by_type is not None and by_type[:4] == "0905" and by_type.endswith("616263"),
+    by_type,
+)
 
 print("DONE")
