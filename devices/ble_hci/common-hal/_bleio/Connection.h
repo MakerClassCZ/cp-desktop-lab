@@ -40,7 +40,8 @@ typedef struct {
     volatile pair_status_t pair_status;
     uint8_t sec_status; // Internal security status.
     mp_obj_t connection_obj;
-    // REMOVE ble_gap_conn_params_t conn_params;
+    // The connection interval, in units of 1.25 ms, as LE Connection Complete gave it.
+    uint16_t conn_interval;
     volatile bool conn_params_updating;
     uint16_t mtu;
     // Request that CCCD values for this connection be saved, using sys_attr values.

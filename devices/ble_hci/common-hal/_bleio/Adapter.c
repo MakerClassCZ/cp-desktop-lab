@@ -11,10 +11,12 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "att.h"
 #include "bonding.h"
 #include "hci.h"
 
 #include "py/gc.h"
+#include "shared/runtime/interrupt_char.h"
 #include "py/mphal.h"
 #include "py/objstr.h"
 #include "py/runtime.h"
@@ -310,7 +312,13 @@ static void bleio_adapter_hci_init(bleio_adapter_obj_t *self) {
     // BT_EVT_MASK_LE_CONN_COMPLETE,  BT_EVT_MASK_LE_ADVERTISING_REPORT,
     // BT_EVT_MASK_LE_CONN_UPDATE_COMPLETE, BT_EVT_MASK_LE_REMOTE_FEAT_COMPLETE
     // BT_EVT_MASK_LE_LTK_REQUEST.
-    // That's all we need right now, so we don't bother to set the LE event mask.
+    // A controller with extended advertising is scanned and connected with the extended
+    // commands, whose events (LE Enhanced Connection Complete, LE Extended Advertising Report) it
+    // sends only when they are unmasked.
+    if (adapter_uses_extended_advertising(self) &&
+        hci_le_set_event_mask(0x1f | 1u << 9 | 1u << 12) != HCI_OK) {
+        mp_raise_bleio_BluetoothError(MP_ERROR_TEXT("Could not set event mask"));
+    }
 
     // Get ACL buffer info.
     uint16_t le_max_len;
@@ -388,6 +396,12 @@ void common_hal_bleio_adapter_set_enabled(bleio_adapter_obj_t *self, bool enable
     self->now_advertising = false;
     self->circuitpython_advertising = false;
     self->advertising_timeout_msecs = 0;
+    // The reset stopped any scan too.
+    if (self->scan_results != NULL) {
+        shared_module_bleio_scanresults_set_done(self->scan_results, true);
+        self->scan_results = NULL;
+    }
+    self->scan_timeout_msecs = 0;
 
     if (enabled) {
         nlr_buf_t nlr;
@@ -460,198 +474,147 @@ void common_hal_bleio_adapter_set_name(bleio_adapter_obj_t *self, const char *na
 }
 
 
-// static bool scan_on_ble_evt(ble_evt_t *ble_evt, void *scan_results_in) {
-//     bleio_scanresults_obj_t *scan_results = (bleio_scanresults_obj_t*)scan_results_in;
+// The controller's own random address set again before it is used (scanning actively,
+// connecting): an anonymous advertisement may have left another one there. Not while advertising,
+// when a controller refuses it (Command Disallowed).
+static void set_own_random_address(bleio_adapter_obj_t *self) {
+    if (self->own_addr_type == BT_ADDR_LE_RANDOM && !self->now_advertising) {
+        hci_check_error(hci_le_set_random_address(self->random_address.val));
+    }
+}
 
-//     if (ble_evt->header.evt_id == BLE_GAP_EVT_TIMEOUT &&
-//         ble_evt->evt.gap_evt.params.timeout.src == BLE_GAP_TIMEOUT_SRC_SCAN) {
-//         shared_module_bleio_scanresults_set_done(scan_results, true);
-//         ble_drv_remove_event_handler(scan_on_ble_evt, scan_results);
-//         return true;
-//     }
-
-//     if (ble_evt->header.evt_id != BLE_GAP_EVT_ADV_REPORT) {
-//         return false;
-//     }
-//     ble_gap_evt_adv_report_t *report = &ble_evt->evt.gap_evt.params.adv_report;
-
-//     shared_module_bleio_scanresults_append(scan_results,
-//                                            supervisor_ticks_ms64(),
-//                                            report->type.connectable,
-//                                            report->type.scan_response,
-//                                            report->rssi,
-//                                            report->peer_addr.addr,
-//                                            report->peer_addr.addr_type,
-//                                            report->data.p_data,
-//                                            report->data.len);
-
-//     const uint32_t err_code = sd_ble_gap_scan_start(NULL, scan_results->common_hal_data);
-//     if (err_code != NRF_SUCCESS) {
-//         // TODO: Pass the error into the scan results so it can throw an exception.
-//         scan_results->done = true;
-//     }
-//     return true;
-// }
+static bool scanning(bleio_adapter_obj_t *self) {
+    return self->scan_results != NULL && !shared_module_bleio_scanresults_get_done(self->scan_results);
+}
 
 mp_obj_t common_hal_bleio_adapter_start_scan(bleio_adapter_obj_t *self, uint8_t *prefixes, size_t prefix_length, bool extended, mp_int_t buffer_size, mp_float_t timeout, mp_float_t interval, mp_float_t window, mp_int_t minimum_rssi, bool active) {
-    // TODO
-    mp_raise_NotImplementedError(NULL);
     check_enabled(self);
 
-    if (self->scan_results != NULL) {
-        if (!shared_module_bleio_scanresults_get_done(self->scan_results)) {
-            mp_raise_bleio_BluetoothError(MP_ERROR_TEXT("Scan already in progress. Stop with stop_scan."));
-        }
-        self->scan_results = NULL;
+    if (scanning(self)) {
+        mp_raise_bleio_BluetoothError(MP_ERROR_TEXT("Scan already in progress. Stop with stop_scan."));
     }
     self->scan_results = shared_module_bleio_new_scanresults(buffer_size, prefixes, prefix_length, minimum_rssi);
-
-    // size_t max_packet_size = extended ? BLE_GAP_SCAN_BUFFER_EXTENDED_MAX_SUPPORTED : BLE_GAP_SCAN_BUFFER_MAX;
-    // uint8_t *raw_data = m_malloc(sizeof(ble_data_t) + max_packet_size);
-    // ble_data_t * sd_data = (ble_data_t *) raw_data;
-    // self->scan_results->common_hal_data = sd_data;
-    // sd_data->len = max_packet_size;
-    // sd_data->p_data = raw_data + sizeof(ble_data_t);
-
-    // ble_drv_add_event_handler(scan_on_ble_evt, self->scan_results);
-
-    // uint32_t nrf_timeout = SEC_TO_UNITS(timeout, UNIT_10_MS);
-    // if (timeout <= 0.0001) {
-    //     nrf_timeout = BLE_GAP_SCAN_TIMEOUT_UNLIMITED;
-    // }
-
-    // ble_gap_scan_params_t scan_params = {
-    //     .extended = extended,
-    //     .interval = SEC_TO_UNITS(interval, UNIT_0_625_MS),
-    //     .timeout = nrf_timeout,
-    //     .window = SEC_TO_UNITS(window, UNIT_0_625_MS),
-    //     .scan_phys = BLE_GAP_PHY_1MBPS,
-    //     .active = active
-    // };
-    // uint32_t err_code;
-    // vm_used_ble = true;
-    // err_code = sd_ble_gap_scan_start(&scan_params, sd_data);
-
-    // if (err_code != NRF_SUCCESS) {
-    //     self->scan_results = NULL;
-    //     ble_drv_remove_event_handler(scan_on_ble_evt, self->scan_results);
-    //     check_nrf_error(err_code);
-    // }
-
+    // The controller reports what it hears; the results take it from the event (hci.c).
+    const uint16_t interval_units = SEC_TO_UNITS(interval, UNIT_0_625_MS);
+    const uint16_t window_units = SEC_TO_UNITS(window, UNIT_0_625_MS);
+    const uint8_t scan_type = active ? BT_HCI_LE_SCAN_ACTIVE : BT_HCI_LE_SCAN_PASSIVE;
+    if (active) {
+        set_own_random_address(self);
+    }
+    int result;
+    if (adapter_uses_extended_advertising(self)) {
+        // The extended commands only, on a controller that has them (as for advertising). The
+        // `extended` argument (longer advertisements) is what the reports may carry either way.
+        result = hci_le_set_extended_scan_parameters(self->own_addr_type, scan_type, interval_units, window_units);
+        if (result == HCI_OK) {
+            result = hci_le_set_extended_scan_enable(BT_HCI_LE_SCAN_ENABLE, BT_HCI_LE_SCAN_FILTER_DUP_DISABLE);
+        }
+    } else {
+        result = hci_le_set_scan_parameters(scan_type, interval_units, window_units, self->own_addr_type, 0x00);
+        if (result == HCI_OK) {
+            // Every report, duplicates too, as the nRF's SoftDevice gives them: adafruit_ble
+            // tracks what it has seen itself.
+            result = hci_le_set_scan_enable(BT_HCI_LE_SCAN_ENABLE, BT_HCI_LE_SCAN_FILTER_DUP_DISABLE);
+        }
+    }
+    if (result != HCI_OK) {
+        shared_module_bleio_scanresults_set_done(self->scan_results, true);
+        self->scan_results = NULL;
+        hci_check_error(result);
+    }
+    // Ended by bleio_adapter_background() after timeout seconds; 0: scans until stop_scan().
+    self->scan_timeout_msecs = (uint64_t)(timeout * 1000);
+    self->scan_start_ticks = supervisor_ticks_ms64();
+    vm_used_ble = true;
     return MP_OBJ_FROM_PTR(self->scan_results);
 }
 
 void common_hal_bleio_adapter_stop_scan(bleio_adapter_obj_t *self) {
-    // TODO
-    mp_raise_NotImplementedError(NULL);
     check_enabled(self);
-
-    // If not already scanning, no problem.
-    if (hci_le_set_scan_enable(BT_HCI_LE_SCAN_DISABLE, BT_HCI_LE_SCAN_FILTER_DUP_DISABLE) == HCI_OK) {
-        shared_module_bleio_scanresults_set_done(self->scan_results, true);
-        self->scan_results = NULL;
+    if (!scanning(self)) {
+        return;
+    }
+    shared_module_bleio_scanresults_set_done(self->scan_results, true);
+    self->scan_results = NULL;
+    self->scan_timeout_msecs = 0;
+    if (adapter_uses_extended_advertising(self)) {
+        hci_check_error(hci_le_set_extended_scan_enable(BT_HCI_LE_SCAN_DISABLE, BT_HCI_LE_SCAN_FILTER_DUP_DISABLE));
+    } else {
+        hci_check_error(hci_le_set_scan_enable(BT_HCI_LE_SCAN_DISABLE, BT_HCI_LE_SCAN_FILTER_DUP_DISABLE));
     }
 }
 
-// typedef struct {
-//     uint16_t conn_handle;
-//     volatile bool done;
-// } connect_info_t;
-
-// static bool connect_on_ble_evt(ble_evt_t *ble_evt, void *info_in) {
-//     connect_info_t *info = (connect_info_t*)info_in;
-
-//     switch (ble_evt->header.evt_id) {
-//         case BLE_GAP_EVT_CONNECTED:
-//             info->conn_handle = ble_evt->evt.gap_evt.conn_handle;
-//             info->done = true;
-
-//             break;
-
-//         case BLE_GAP_EVT_TIMEOUT:
-//             // Handle will be invalid.
-//             info->done = true;
-//             break;
-//         default:
-//             // For debugging.
-//             // mp_printf(&mp_plat_print, "Unhandled central event: 0x%04x\n", ble_evt->header.evt_id);
-//             return false;
-//             break;
-//     }
-//     return true;
-// }
+void bleio_adapter_scan_report(bleio_adapter_obj_t *self, bool connectable, bool scan_response,
+    int8_t rssi, const bt_addr_le_t *addr, const uint8_t *data, uint8_t len) {
+    if (!scanning(self)) {
+        return;
+    }
+    // A random address's two top bits tell its kind: 11 static, 01 resolvable, 00 not.
+    uint8_t type = BLEIO_ADDRESS_TYPE_PUBLIC;
+    if (addr->type == BT_ADDR_LE_RANDOM) {
+        const uint8_t top = addr->a.val[5] >> 6;
+        type = top == 0x3 ? BLEIO_ADDRESS_TYPE_RANDOM_STATIC
+            : top == 0x1 ? BLEIO_ADDRESS_TYPE_RANDOM_PRIVATE_RESOLVABLE
+            : BLEIO_ADDRESS_TYPE_RANDOM_PRIVATE_NON_RESOLVABLE;
+    } else if (addr->type == BT_ADDR_LE_RANDOM_ID) {
+        type = BLEIO_ADDRESS_TYPE_RANDOM_STATIC;
+    }
+    shared_module_bleio_scanresults_append(self->scan_results, supervisor_ticks_ms64(), connectable,
+        scan_response, rssi, addr->a.val, type, data, len);
+}
 
 mp_obj_t common_hal_bleio_adapter_connect(bleio_adapter_obj_t *self, bleio_address_obj_t *address, mp_float_t timeout) {
-    // TODO
-    mp_raise_NotImplementedError(NULL);
-
     check_enabled(self);
 
-    // ble_gap_addr_t addr;
+    // A controller that scans may refuse to initiate; the scan has done its work.
+    common_hal_bleio_adapter_stop_scan(self);
+    set_own_random_address(self);
 
-    // addr.addr_type = address->type;
-    // mp_buffer_info_t address_buf_info;
-    // mp_get_buffer_raise(address->bytes, &address_buf_info, MP_BUFFER_READ);
-    // memcpy(addr.addr, (uint8_t *) address_buf_info.buf, NUM_BLEIO_ADDRESS_BYTES);
-
-    // ble_gap_scan_params_t scan_params = {
-    //     .interval = MSEC_TO_UNITS(100, UNIT_0_625_MS),
-    //     .window = MSEC_TO_UNITS(100, UNIT_0_625_MS),
-    //     .scan_phys = BLE_GAP_PHY_1MBPS,
-    //     // timeout of 0 means no timeout
-    //     .timeout = SEC_TO_UNITS(timeout, UNIT_10_MS),
-    // };
-
-    // ble_gap_conn_params_t conn_params = {
-    //     .conn_sup_timeout = MSEC_TO_UNITS(4000, UNIT_10_MS),
-    //     .min_conn_interval = MSEC_TO_UNITS(15, UNIT_1_25_MS),
-    //     .max_conn_interval = MSEC_TO_UNITS(300, UNIT_1_25_MS),
-    //     .slave_latency = 0,          // number of conn events
-    // };
-
-    // connect_info_t event_info;
-    // ble_drv_add_event_handler(connect_on_ble_evt, &event_info);
-    // event_info.done = false;
+    bt_addr_le_t peer = {
+        .type = address->type == BLEIO_ADDRESS_TYPE_PUBLIC ? BT_ADDR_LE_PUBLIC : BT_ADDR_LE_RANDOM,
+    };
+    memcpy(peer.a.val, address->bytes, sizeof(peer.a.val));
 
     vm_used_ble = true;
-    // uint32_t err_code = sd_ble_gap_connect(&addr, &scan_params, &conn_params, BLE_CONN_CFG_TAG_CUSTOM);
+    self->connect_status = -1;
+    // Scan at 60 ms in 30 ms windows; a connection interval of 7.5 to 15 ms, no latency, a 2 s
+    // supervision timeout, as ArduinoBLE asks.
+    if (adapter_uses_extended_advertising(self)) {
+        hci_check_error(hci_le_extended_create_conn(0x00, self->own_addr_type, &peer, 0x0060, 0x0030,
+            0x0006, 0x000c, 0x0000, 0x00c8, 0x0004, 0x0006));
+    } else {
+        hci_check_error(hci_le_create_conn(0x0060, 0x0030, 0x00, &peer, self->own_addr_type,
+            0x0006, 0x000c, 0x0000, 0x00c8, 0x0004, 0x0006));
+    }
 
-    // if (err_code != NRF_SUCCESS) {
-    //     ble_drv_remove_event_handler(connect_on_ble_evt, &event_info);
-    //     check_nrf_error(err_code);
-    // }
-
-    // while (!event_info.done) {
-    //     RUN_BACKGROUND_TASKS;
-    // }
-
-    // ble_drv_remove_event_handler(connect_on_ble_evt, &event_info);
-
-    // uint16_t conn_handle = event_info.conn_handle;
-    // if (conn_handle == BLE_CONN_HANDLE_INVALID) {
-    //     mp_raise_bleio_BluetoothError(MP_ERROR_TEXT("Failed to connect: timeout"));
-    // }
-
-    // // Negotiate for better PHY, larger MTU and data lengths since we are the central. These are
-    // // nice-to-haves so ignore any errors.
-    // ble_gap_phys_t const phys = {
-    //     .rx_phys = BLE_GAP_PHY_AUTO,
-    //     .tx_phys = BLE_GAP_PHY_AUTO,
-    // };
-    // sd_ble_gap_phy_update(conn_handle, &phys);
-    // sd_ble_gattc_exchange_mtu_request(conn_handle, BLE_GATTS_VAR_ATTR_LEN_MAX);
-    // sd_ble_gap_data_length_update(conn_handle, NULL, NULL);
-
-    // Make the connection object and return it.
-    // for (size_t i = 0; i < BLEIO_TOTAL_CONNECTION_COUNT; i++) {
-    //     bleio_connection_internal_t *connection = &bleio_connections[i];
-    //     if (connection->conn_handle == conn_handle) {
-    //         return bleio_connection_new_from_internal(connection);
-    //     }
-    // }
-
-    mp_raise_bleio_BluetoothError(MP_ERROR_TEXT("Failed to connect: internal error"));
-
+    // LE Connection Complete sets connect_status: 0 connected, else the controller's error.
+    const uint64_t start = supervisor_ticks_ms64();
+    const uint64_t timeout_ms = (uint64_t)(timeout * 1000);
+    while (self->connect_status < 0 && !mp_hal_is_interrupted() &&
+           (timeout_ms == 0 || supervisor_ticks_ms64() - start < timeout_ms)) {
+        RUN_BACKGROUND_TASKS;
+    }
+    if (self->connect_status < 0) {
+        // Not in time (or Ctrl-C): the controller stops trying, and says so with a Connection
+        // Complete of status Unknown Connection Identifier, or of a connection that came first.
+        if (hci_le_cancel_conn() == HCI_OK) {
+            const uint64_t cancelled = supervisor_ticks_ms64();
+            while (self->connect_status < 0 && supervisor_ticks_ms64() - cancelled < 1000) {
+                RUN_BACKGROUND_TASKS;
+            }
+        }
+    }
+    const uint16_t conn_handle = self->connect_status == 0 ? att_conn_handle(&peer) : BLE_CONN_HANDLE_INVALID;
+    for (size_t i = 0; i < BLEIO_TOTAL_CONNECTION_COUNT; i++) {
+        bleio_connection_internal_t *connection = &bleio_connections[i];
+        if (conn_handle != BLE_CONN_HANDLE_INVALID && connection->conn_handle == conn_handle) {
+            return bleio_connection_new_from_internal(connection);
+        }
+    }
+    if (self->connect_status <= 0 || self->connect_status == BT_HCI_ERR_UNKNOWN_CONN_ID) {
+        mp_raise_bleio_BluetoothError(MP_ERROR_TEXT("Failed to connect: timeout"));
+    }
+    mp_raise_bleio_BluetoothError(MP_ERROR_TEXT("HCI status error: %02x"), self->connect_status);
     return mp_const_none;
 }
 
@@ -1058,10 +1021,21 @@ void bleio_adapter_background(bleio_adapter_obj_t *adapter) {
         return;
     }
 
-    if (adapter->advertising_timeout_msecs > 0 &&
-        supervisor_ticks_ms64() - adapter->advertising_start_ticks > adapter->advertising_timeout_msecs) {
-        adapter->advertising_timeout_msecs = 0;
-        common_hal_bleio_adapter_stop_advertising(adapter);
+    // Timeouts send commands: not from inside another command's wait for its answer, and not
+    // waiting for their own (it would never come: background tasks do not nest).
+    if (!hci_command_in_progress()) {
+        hci_commands_unanswered(true);
+        if (adapter->advertising_timeout_msecs > 0 &&
+            supervisor_ticks_ms64() - adapter->advertising_start_ticks > adapter->advertising_timeout_msecs) {
+            adapter->advertising_timeout_msecs = 0;
+            common_hal_bleio_adapter_stop_advertising(adapter);
+        }
+        if (adapter->scan_timeout_msecs > 0 &&
+            supervisor_ticks_ms64() - adapter->scan_start_ticks > adapter->scan_timeout_msecs) {
+            adapter->scan_timeout_msecs = 0;
+            common_hal_bleio_adapter_stop_scan(adapter);
+        }
+        hci_commands_unanswered(false);
     }
 
     hci_result_t result = hci_poll_for_incoming_pkt();

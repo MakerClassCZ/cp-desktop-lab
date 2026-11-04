@@ -28,6 +28,7 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "common-hal/_bleio/hci_include/hci.h"
@@ -55,6 +56,7 @@ hci_result_t hci_disconnect(uint16_t handle);
 
 hci_result_t hci_le_cancel_conn(void);
 hci_result_t hci_le_conn_update(uint16_t handle, uint16_t conn_interval_min, uint16_t conn_interval_max, uint16_t conn_latency, uint16_t supervision_timeout);
+hci_result_t hci_le_extended_create_conn(uint8_t filter_policy, uint8_t own_addr_type, bt_addr_le_t *peer_addr, uint16_t scan_interval, uint16_t scan_window, uint16_t conn_interval_min, uint16_t conn_interval_max, uint16_t conn_latency, uint16_t supervision_timeout, uint16_t min_ce_len, uint16_t max_ce_len);
 hci_result_t hci_le_create_conn(uint16_t scan_interval, uint16_t scan_window, uint8_t filter_policy, bt_addr_le_t *peer_addr, uint8_t own_addr_type, uint16_t conn_interval_min, uint16_t conn_interval_max, uint16_t conn_latency, uint16_t supervision_timeout, uint16_t min_ce_len, uint16_t max_ce_len);
 
 hci_result_t hci_le_read_buffer_size(uint16_t *le_max_len, uint8_t *le_max_num);
@@ -76,11 +78,19 @@ hci_result_t hci_le_rand(uint8_t rand[8]);
 hci_result_t hci_le_set_random_address(uint8_t addr[6]);
 hci_result_t hci_le_set_advertising_set_random_address(uint8_t handle, uint8_t addr[6]);
 hci_result_t hci_vs_read_static_address(bt_addr_t *addr);
+hci_result_t hci_le_set_event_mask(uint64_t event_mask);
+hci_result_t hci_le_set_extended_scan_enable(uint8_t enable, uint8_t filter_dup);
+hci_result_t hci_le_set_extended_scan_parameters(uint8_t own_addr_type, uint8_t scan_type, uint16_t interval, uint16_t window);
 hci_result_t hci_le_set_scan_enable(uint8_t enable, uint8_t filter_dup);
 hci_result_t hci_le_set_scan_parameters(uint8_t scan_type, uint16_t interval, uint16_t window, uint8_t addr_type, uint8_t filter_policy);
 hci_result_t hci_le_set_scan_response_data(uint8_t length, uint8_t data[]);
 
 hci_result_t hci_poll_for_incoming_pkt(void);
+// A command is waiting for its answer: what runs in the background then sends none of its own.
+bool hci_command_in_progress(void);
+// Commands sent while on are not waited for: the background sends its own so, since background
+// tasks do not run inside it, and an answer waited for there would never come.
+void hci_commands_unanswered(bool on);
 
 hci_result_t hci_read_bd_addr(bt_addr_t *addr);
 hci_result_t hci_read_buffer_size(uint16_t *acl_max_len, uint8_t *sco_max_len, uint16_t *acl_max_num, uint16_t *sco_max_num);

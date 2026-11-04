@@ -546,7 +546,6 @@ void att_set_timeout(unsigned long timeout_in) {
 }
 
 void att_add_connection(uint16_t handle, uint8_t role, bt_addr_le_t *peer_addr, uint16_t interval, uint16_t latency, uint16_t supervision_timeout, uint8_t master_clock_accuracy) {
-    (void)interval;
     (void)latency;
     (void)supervision_timeout;
     (void)master_clock_accuracy;
@@ -575,6 +574,7 @@ void att_add_connection(uint16_t handle, uint8_t role, bt_addr_le_t *peer_addr, 
     bleio_connections[peer_index].encrypted = false;
     bleio_connections[peer_index].key_size = 0;
     bleio_connections[peer_index].mtu = BT_ATT_DEFAULT_LE_MTU;
+    bleio_connections[peer_index].conn_interval = interval;
     memcpy(&bleio_connections[peer_index].addr, peer_addr, sizeof(bleio_connections[peer_index].addr));
     // Made by discover_remote_services(), on the program's heap.
     bleio_connections[peer_index].remote_service_list = NULL;

@@ -33,6 +33,7 @@
 #include "hci_include/hci_err.h"
 #include "hci_include/l2cap_internal.h"
 
+#include <stddef.h>
 #include <string.h>
 
 #include "py/mphal.h"  // *****************************
@@ -118,6 +119,8 @@ static size_t cmd_response_len;
 static uint8_t *cmd_response_data;
 
 static volatile bool hci_poll_in_progress = false;
+static bool command_in_progress;
+static bool commands_unanswered;
 
 
 //////////////////////////////////////////////////////////////////////
@@ -192,15 +195,37 @@ static void process_num_comp_pkts(uint16_t handle, uint16_t num_pkts) {
     }
 }
 
-// One advertising report, as a scanner gets it.
+// One advertising report, as a scanner gets it: into the scan's results.
 static void process_advertising_report(uint8_t evt_type, const bt_addr_le_t *addr,
     const uint8_t *data, uint8_t data_len, int8_t rssi) {
-    // Nothing scans yet: the reports go to the scan results once start_scan() exists.
-    (void)evt_type;
-    (void)addr;
-    (void)data;
-    (void)data_len;
-    (void)rssi;
+    const bool connectable = evt_type == BT_HCI_ADV_IND || evt_type == BT_HCI_ADV_DIRECT_IND;
+    bleio_adapter_scan_report(&common_hal_bleio_adapter_obj, connectable, evt_type == BT_HCI_ADV_SCAN_RSP,
+        rssi, addr, data, data_len);
+}
+
+// LE Extended Advertising Report: each report's event type bits (connectable, scannable,
+// directed, scan response, legacy), address, PHYs, SID, TX power, RSSI, periodic interval, direct
+// address, then its data.
+static void process_le_extended_advertising_report(const uint8_t *params, size_t len) {
+    if (len < 1) {
+        return;
+    }
+    size_t at = 1;
+    for (uint8_t i = 0; i < params[0]; i++) {
+        if (at + sizeof(struct bt_hci_evt_le_ext_advertising_info) > len) {
+            return;
+        }
+        const struct bt_hci_evt_le_ext_advertising_info *info =
+            (const struct bt_hci_evt_le_ext_advertising_info *)(params + at);
+        const size_t data_at = at + sizeof(*info);
+        if (data_at + info->length > len) {
+            return;
+        }
+        const uint16_t type = info->evt_type;
+        bleio_adapter_scan_report(&common_hal_bleio_adapter_obj, type & BT_HCI_LE_ADV_EVT_TYPE_CONN,
+            type & BT_HCI_LE_ADV_EVT_TYPE_SCAN_RSP, info->rssi, &info->addr, params + data_at, info->length);
+        at = data_at + info->length;
+    }
 }
 
 // LE Advertising Report: the number of reports, then each one: its event type, the address (type
@@ -296,9 +321,17 @@ static void process_evt_pkt(size_t pkt_len, uint8_t pkt_data[]) {
             struct bt_hci_evt_le_meta_event *meta_evt = (struct bt_hci_evt_le_meta_event *)pkt->params;
             uint8_t *le_evt = pkt->params + sizeof (struct bt_hci_evt_le_meta_event);
 
-            if (meta_evt->subevent == BT_HCI_EVT_LE_CONN_COMPLETE) {
-                struct bt_hci_evt_le_conn_complete *le_conn_complete =
-                    (struct bt_hci_evt_le_conn_complete *)le_evt;
+            if (meta_evt->subevent == BT_HCI_EVT_LE_CONN_COMPLETE ||
+                meta_evt->subevent == BT_HCI_EVT_LE_ENH_CONN_COMPLETE) {
+                // The enhanced event has the local and the peer's RPA after the peer's address,
+                // then the rest as the other.
+                struct bt_hci_evt_le_conn_complete conn_complete;
+                const size_t head = offsetof(struct bt_hci_evt_le_conn_complete, interval);
+                const size_t rest = meta_evt->subevent == BT_HCI_EVT_LE_ENH_CONN_COMPLETE
+                    ? offsetof(struct bt_hci_evt_le_enh_conn_complete, interval) : head;
+                memcpy(&conn_complete, le_evt, head);
+                memcpy((uint8_t *)&conn_complete + head, le_evt + rest, sizeof(conn_complete) - head);
+                struct bt_hci_evt_le_conn_complete *le_conn_complete = &conn_complete;
 
                 // Advertising stops when a central connects to it; a connection we make as the
                 // central leaves it on.
@@ -320,8 +353,15 @@ static void process_evt_pkt(size_t pkt_len, uint8_t pkt_data[]) {
                         le_conn_complete->clock_accuracy);
 
                 }
+                // A connection the program asked for, made or not: connect() waits for it.
+                if (le_conn_complete->role == BT_HCI_ROLE_MASTER) {
+                    common_hal_bleio_adapter_obj.connect_status = le_conn_complete->status;
+                }
             } else if (meta_evt->subevent == BT_HCI_EVT_LE_ADVERTISING_REPORT) {
                 process_le_advertising_report(le_evt,
+                    pkt->param_len - sizeof(struct bt_hci_evt_le_meta_event));
+            } else if (meta_evt->subevent == BT_HCI_EVT_LE_EXT_ADVERTISING_REPORT) {
+                process_le_extended_advertising_report(le_evt,
                     pkt->param_len - sizeof(struct bt_hci_evt_le_meta_event));
             }
             break;
@@ -478,9 +518,16 @@ static hci_result_t send_command(uint16_t opcode, uint8_t params_len, void *para
     }
 
     cmd_response_received = false;
+    if (commands_unanswered) {
+        // From the background: the answer comes in later and passes by.
+        return HCI_OK;
+    }
+    const bool outer = !command_in_progress;
+    command_in_progress = true;
 
     // Wait for a response. Note that other packets may be received that are not
     // command responses.
+    result = HCI_RESPONSE_TIMEOUT;
     uint64_t start = supervisor_ticks_ms64();
     while (supervisor_ticks_ms64() - start < RESPONSE_TIMEOUT_MSECS) {
         // RUN_BACKGROUND_TASKS includes hci_poll_for_incoming_pkt();
@@ -490,12 +537,24 @@ static hci_result_t send_command(uint16_t opcode, uint8_t params_len, void *para
             // return the status value, which will will be
             // BT_HCI_ERR_SUCCESS (0x00) if the command succeeded,
             // or a BT_HCI_ERR_x value (> 0x00) if there was a problem.
-            return cmd_response_status;
+            result = cmd_response_status;
+            break;
         }
     }
+    if (outer) {
+        command_in_progress = false;
+    }
 
-    // No I/O error, but no response sent back in time.
-    return HCI_RESPONSE_TIMEOUT;
+    // HCI_RESPONSE_TIMEOUT: no I/O error, but no response sent back in time.
+    return result;
+}
+
+bool hci_command_in_progress(void) {
+    return command_in_progress;
+}
+
+void hci_commands_unanswered(bool on) {
+    commands_unanswered = on;
 }
 
 hci_result_t hci_send_acl_pkt(uint16_t handle, uint8_t cid, uint16_t data_len, uint8_t *data) {
@@ -794,6 +853,43 @@ hci_result_t hci_le_set_scan_parameters(uint8_t scan_type, uint16_t interval, ui
     return send_command(BT_HCI_OP_LE_SET_SCAN_PARAM, sizeof(params), &params);
 }
 
+hci_result_t hci_le_set_event_mask(uint64_t event_mask) {
+    return send_command(BT_HCI_OP_LE_SET_EVENT_MASK, sizeof(event_mask), &event_mask);
+}
+
+hci_result_t hci_le_set_extended_scan_parameters(uint8_t own_addr_type, uint8_t scan_type, uint16_t interval, uint16_t window) {
+    // On the 1M PHY only.
+    struct __packed {
+        struct bt_hci_cp_le_set_ext_scan_param cp;
+        struct bt_hci_ext_scan_phy phy;
+    } params = {
+        .cp = {
+            .own_addr_type = own_addr_type,
+            .filter_policy = 0x00,
+            .phys = BT_HCI_LE_EXT_SCAN_PHY_1M,
+        },
+        .phy = {
+            .type = scan_type,
+            .interval = interval,
+            .window = window,
+        },
+    };
+
+    return send_command(BT_HCI_OP_LE_SET_EXT_SCAN_PARAM, sizeof(params), &params);
+}
+
+hci_result_t hci_le_set_extended_scan_enable(uint8_t enable, uint8_t filter_dup) {
+    // No duration, no period: until disabled.
+    struct bt_hci_cp_le_set_ext_scan_enable params = {
+        .enable = enable,
+        .filter_dup = filter_dup,
+        .duration = 0,
+        .period = 0,
+    };
+
+    return send_command(BT_HCI_OP_LE_SET_EXT_SCAN_ENABLE, sizeof(params), &params);
+}
+
 hci_result_t hci_le_set_scan_enable(uint8_t enable, uint8_t filter_dup) {
     struct bt_hci_cp_le_set_scan_enable params = {
         .enable = enable,
@@ -823,8 +919,37 @@ hci_result_t hci_le_create_conn(uint16_t scan_interval, uint16_t scan_window, ui
     return send_command(BT_HCI_OP_LE_CREATE_CONN, sizeof(params), &params);
 }
 
+hci_result_t hci_le_extended_create_conn(uint8_t filter_policy, uint8_t own_addr_type, bt_addr_le_t *peer_addr, uint16_t scan_interval, uint16_t scan_window, uint16_t conn_interval_min, uint16_t conn_interval_max, uint16_t conn_latency, uint16_t supervision_timeout, uint16_t min_ce_len, uint16_t max_ce_len) {
+    // On the 1M PHY only.
+    struct __packed {
+        struct bt_hci_cp_le_ext_create_conn cp;
+        struct bt_hci_ext_conn_phy phy;
+    } params = {
+        .cp = {
+            .filter_policy = filter_policy,
+            .own_addr_type = own_addr_type,
+            .phys = BT_HCI_LE_EXT_SCAN_PHY_1M,
+        },
+        .phy = {
+            .scan_interval = scan_interval,
+            .scan_window = scan_window,
+            .conn_interval_min = conn_interval_min,
+            .conn_interval_max = conn_interval_max,
+            .conn_latency = conn_latency,
+            .supervision_timeout = supervision_timeout,
+            .min_ce_len = min_ce_len,
+            .max_ce_len = max_ce_len,
+        },
+    };
+    params.cp.peer_addr.type = peer_addr->type;
+    memcpy(params.cp.peer_addr.a.val, peer_addr->a.val, sizeof(params.cp.peer_addr.a.val));
+
+    return send_command(BT_HCI_OP_LE_EXT_CREATE_CONN, sizeof(params), &params);
+}
+
 hci_result_t hci_le_cancel_conn(void) {
-    return send_command(BT_HCI_OP_CONNECT_CANCEL, 0, NULL);
+    // LE Create Connection Cancel (0x200e), for both create commands.
+    return send_command(BT_HCI_OP_LE_CREATE_CONN_CANCEL, 0, NULL);
 }
 
 hci_result_t hci_le_conn_update(uint16_t handle, uint16_t conn_interval_min, uint16_t conn_interval_max, uint16_t conn_latency, uint16_t supervision_timeout) {

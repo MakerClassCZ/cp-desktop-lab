@@ -359,8 +359,7 @@ mp_float_t common_hal_bleio_connection_get_connection_interval(bleio_connection_
     while (self->conn_params_updating && !mp_hal_is_interrupted()) {
         RUN_BACKGROUND_TASKS;
     }
-    // FIX return 1.25f * self->conn_params.min_conn_interval;
-    return 0.0f;
+    return 1.25f * self->conn_interval;
 }
 
 // Return the current negotiated MTU length, minus overhead.

@@ -56,6 +56,12 @@ typedef struct _bleio_adapter_obj_t {
     uint64_t advertising_start_ticks;
     uint64_t advertising_timeout_msecs;  // If zero, do not check.
 
+    // The scan's start and timeout, which bleio_adapter_background() ends it at; 0: no timeout.
+    uint64_t scan_start_ticks;
+    uint64_t scan_timeout_msecs;
+    // A connection the program asked for: -1 while waiting, then LE Connection Complete's status.
+    volatile int16_t connect_status;
+
     // Generic services characteristics.
     bleio_characteristic_obj_t *device_name_characteristic;
     bleio_characteristic_obj_t *appearance_characteristic;
@@ -94,3 +100,6 @@ uint16_t bleio_adapter_max_attribute_handle(bleio_adapter_obj_t *adapter);
 void bleio_adapter_background(bleio_adapter_obj_t *adapter);
 void bleio_adapter_gc_collect(bleio_adapter_obj_t *adapter);
 void bleio_adapter_reset(bleio_adapter_obj_t *adapter);
+// An advertising report from a scan (hci.c), into the scan's results while it runs.
+void bleio_adapter_scan_report(bleio_adapter_obj_t *self, bool connectable, bool scan_response,
+    int8_t rssi, const bt_addr_le_t *addr, const uint8_t *data, uint8_t len);
