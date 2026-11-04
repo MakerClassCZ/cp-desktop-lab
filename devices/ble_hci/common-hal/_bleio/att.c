@@ -1544,40 +1544,26 @@ static void process_notify_or_indicate(uint16_t conn_handle, uint8_t opcode, uin
     }
 
     // struct bt_att_notify and bt_att_indicate are identical.
-    // FIXunused struct bt_att_notify *req = (struct bt_att_notify *) data;
+    struct bt_att_notify *req = (struct bt_att_notify *)data;
+    mp_buffer_info_t value = {
+        .buf = req->value,
+        .len = dlen - sizeof(req->handle),
+    };
 
-    // FIXunused uint8_t handle = req->handle;
-
-    for (size_t i = 0; i < BLEIO_TOTAL_CONNECTION_COUNT; i++) {
-        if (bleio_connections[i].conn_handle != conn_handle) {
-            continue;
+    // The value goes to the remote characteristic of that handle, which discovery found (and
+    // made on the program's heap: between two VMs the list is NULL), and from it to its observer:
+    // a CharacteristicBuffer or a PacketBuffer.
+    bleio_connection_internal_t *connection = bleio_conn_handle_to_connection(conn_handle);
+    mp_obj_list_t *services = connection != NULL ? connection->remote_service_list : NULL;
+    for (size_t i = 0; services != NULL && i < services->len; i++) {
+        bleio_service_obj_t *service = MP_OBJ_TO_PTR(services->items[i]);
+        for (size_t j = 0; j < service->characteristic_list->len; j++) {
+            bleio_characteristic_obj_t *characteristic =
+                MP_OBJ_TO_PTR(service->characteristic_list->items[j]);
+            if (characteristic->handle == req->handle) {
+                bleio_characteristic_set_local_value(characteristic, &value);
+            }
         }
-
-        // FIX BLERemoteDevice* device = bleio_connections[i].device;
-
-        // if (!device) {
-        //     break;
-        // }
-
-        // int serviceCount = device->serviceCount();
-
-        // for (size_t i = 0; i < serviceCount; i++) {
-        //     BLERemoteService* s = device->service(i);
-
-        //     if (s->start_handle() < handle && s->end_handle() >= handle) {
-        //         int characteristicCount = s->characteristicCount();
-
-        //         for (int j = 0; j < characteristicCount; j++) {
-        //             BLERemoteCharacteristic* c = s->characteristic(j);
-
-        //             if (c->value_handle() == handle) {
-        //                 //FIX c->writeValue(BLEDevice(bleio_connections[i].address_type, bleio_connections[i].address), &data[2], dlen - 2);
-        //             }
-        //         }
-
-        //         break;
-        //     }
-        // }
     }
 
     if (opcode == BT_ATT_OP_INDICATE) {
