@@ -56,7 +56,7 @@ uint8_t *desktop_stack_top;
 
 static void usage(const char *prog) {
     fprintf(stderr,
-        "usage: %s [--board NAME] [--drive PATH] [--drive-size MB] [--ram MB]\n"
+        "usage: %s [--board NAME] [--drive PATH] [--drive-size MB] [--nvm PATH] [--ram MB]\n"
         "  --board NAME      virtual (default), ft232h or mcp2221 (real pins through that chip on USB),\n"
         "                    gpiochip (this computer's own GPIO, I2C and SPI, as on a Raspberry Pi)\n"
         "  --list-boards     the boards, and whether each one's adapter is plugged in\n"
@@ -75,6 +75,7 @@ static void usage(const char *prog) {
         "  --drive PATH      CIRCUITPY: a directory (default ./CIRCUITPY), or a FAT image file;\n"
         "                    a missing PATH is created, as an image if it ends in .img\n"
         "  --drive-size MB   size of a newly created image (default 16)\n"
+        "  --nvm PATH        microcontroller.nvm's file (default the drive's path + .nvm, beside it)\n"
         "  --ram MB          heap for CircuitPython (default 16)\n"
         "  --debug [PORT]    wait for a debugger (VS Code) on 127.0.0.1:PORT before code.py (default 5678)\n"
         "  --api [PORT]      the control API on 127.0.0.1:PORT (default 8765, 0 = any free port)\n"
@@ -165,6 +166,8 @@ int main(int argc, char **argv) {
             desktop_options.spidev = argv[++i];
         } else if (strcmp(argv[i], "--drive") == 0 && i + 1 < argc) {
             desktop_options.drive_path = argv[++i];
+        } else if (strcmp(argv[i], "--nvm") == 0 && i + 1 < argc) {
+            desktop_options.nvm_path = argv[++i];
         } else if (strcmp(argv[i], "--drive-size") == 0 && i + 1 < argc) {
             desktop_options.drive_size = parse_mib(argv[++i], argv[0]);
         } else if (strcmp(argv[i], "--ram") == 0 && i + 1 < argc) {
@@ -231,6 +234,24 @@ int main(int argc, char **argv) {
         return 2;
     }
     desktop_options.drive_path = drive_path;
+    // microcontroller.nvm: beside the drive, never on it (CIRCUITPY/ makes CIRCUITPY.nvm too).
+    static char nvm_path[PATH_MAX];
+    if (desktop_options.nvm_path == NULL) {
+        int n = len;
+        while (n > 1 && (drive_path[n - 1] == '/' || drive_path[n - 1] == '\\')) {
+            n--;
+        }
+        len = snprintf(nvm_path, sizeof(nvm_path), "%.*s.nvm", n, drive_path);
+    } else {
+        len = platform_is_absolute(desktop_options.nvm_path)
+            ? snprintf(nvm_path, sizeof(nvm_path), "%s", desktop_options.nvm_path)
+            : snprintf(nvm_path, sizeof(nvm_path), "%s/%s", start_dir, desktop_options.nvm_path);
+    }
+    if (len < 0 || (size_t)len >= sizeof(nvm_path)) {
+        fprintf(stderr, "circuitpython: nvm path too long\n");
+        return 2;
+    }
+    desktop_options.nvm_path = nvm_path;
     // A drive that is not there is made, empty but for code.py: said, as a typo in the path makes one too.
     struct stat st;
     if (stat(drive_path, &st) != 0) {

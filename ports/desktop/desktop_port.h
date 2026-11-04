@@ -15,6 +15,7 @@ typedef struct {
     const char *drive_path;     // CIRCUITPY: a directory or a FAT image, absolute
     const char *start_dir;      // the working directory at start; VfsPosix changes it
     size_t drive_size;          // bytes, used only when the image is created
+    const char *nvm_path;       // --nvm: microcontroller.nvm's file, absolute; default the drive's path + .nvm
     size_t ram_size;            // bytes of RAM for the port heap
     int debug_port;             // --debug: the debug adapter's TCP port, 0 = none
     const char *exe_dir;        // the program's own directory, where debugadapter.py lives

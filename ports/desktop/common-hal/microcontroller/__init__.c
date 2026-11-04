@@ -18,6 +18,7 @@
 #include "supervisor/port.h"
 #if CIRCUITPY_WATCHDOG
 #include "common-hal/watchdog/WatchDogTimer.h"
+#include "shared-bindings/nvm/ByteArray.h"
 #endif
 #include "supervisor/shared/safe_mode.h"
 
@@ -94,6 +95,13 @@ MP_DEFINE_CONST_DICT(mcu_pin_globals, mcu_pin_global_dict_table);
 
 #if CIRCUITPY_WATCHDOG
 // The singleton watchdog.WatchDogTimer object.
+// The singleton nvm.ByteArray: its bytes are in common-hal/nvm/ByteArray.c.
+const nvm_bytearray_obj_t common_hal_mcu_nvm_obj = {
+    .base = {
+        .type = &nvm_bytearray_type,
+    },
+};
+
 watchdog_watchdogtimer_obj_t common_hal_mcu_watchdogtimer_obj = {
     .base = {
         .type = &watchdog_watchdogtimer_type,

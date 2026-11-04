@@ -32,7 +32,6 @@ CIRCUITPY_SKIP_SAFE_MODE_WAIT = 1
 CIRCUITPY_COUNTIO = 0
 CIRCUITPY_FREQUENCYIO = 0
 CIRCUITPY_I2CTARGET = 0
-CIRCUITPY_NVM = 0
 CIRCUITPY_PULSEIO = 1
 CIRCUITPY_RGBMATRIX = 1
 # sdcardio talks to the virtual bus's SD card (virtual/sdcard_virtual.c), as to a real one.
@@ -40,6 +39,9 @@ CIRCUITPY_SDCARDIO = 1
 
 # The watchdog on the program's clock (common-hal/watchdog).
 CIRCUITPY_WATCHDOG = 1
+
+# microcontroller.nvm: a file beside the drive (common-hal/nvm).
+CIRCUITPY_NVM = 1
 
 # alarm: light sleep in the VM, deep sleep as a restart (common-hal/alarm); no touch pads to wake on.
 CIRCUITPY_ALARM = 1

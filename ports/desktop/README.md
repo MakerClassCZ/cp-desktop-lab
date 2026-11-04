@@ -42,7 +42,7 @@ make BUILD=build-macos SDL_FRAMEWORK_DIR=/path/to/dir/with/SDL2.framework
 ## Run
 
 ```
-build-linux/circuitpython [--board NAME] [--drive PATH] [--drive-size MB] [--ram MB]
+build-linux/circuitpython [--board NAME] [--drive PATH] [--drive-size MB] [--nvm PATH] [--ram MB]
 ```
 
 `--board` is `virtual` (the default: the window, the keyboard and game controllers as buttons),
@@ -76,6 +76,11 @@ a loop mount, but only while CircuitPython is not running:
 mcopy -i CIRCUITPY.img -o code.py ::code.py
 mcopy -i CIRCUITPY.img -s -o mygame/* ::/
 ```
+
+`microcontroller.nvm` is 4 KB, as on a raspberrypi board, kept in a file beside the drive and not
+on it, as a board keeps it in flash outside CIRCUITPY: `CIRCUITPY.nvm` for `CIRCUITPY` (or
+`CIRCUITPY.img`), or `--nvm PATH`. A new one reads `0xFF`, as erased flash does; each write is in
+the file when it returns, so the next process, a reset or another run of the same drive reads it.
 
 The console works as on a board: Ctrl-C interrupts, Ctrl-D reloads, any key enters the REPL.
 Ctrl-\, closing the window or `board.exit()` (from code or the REPL, with an optional exit

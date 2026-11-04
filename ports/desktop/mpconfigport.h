@@ -82,6 +82,9 @@
 // VfsPosix's statvfs, for os.statvfs() on a directory CIRCUITPY; on Windows from platform/windows.
 #define MICROPY_PY_OS_STATVFS                   (1)
 
+// microcontroller.nvm, the size a raspberrypi board has; kept in a file beside the drive.
+#define CIRCUITPY_INTERNAL_NVM_SIZE             (4 * 1024)
+
 // board.DISPLAY and up to three the program puts on the buses (a TFT, an OLED, an RGB matrix).
 #define CIRCUITPY_DISPLAY_LIMIT                 (4)
 

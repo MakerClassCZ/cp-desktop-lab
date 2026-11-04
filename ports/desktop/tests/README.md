@@ -19,6 +19,8 @@ Each script takes the program and works in its own directory, so run them from a
   and `storage.remount`, `os` functions and their errors, imports, `storage.map_file`,
   settings.toml, the web workflow, reset).
 - `test_image.py`: the FAT image drive (`DEMO_IMAGE=path.img` also boots an existing image).
+- `test_nvm.py`: `microcontroller.nvm` in `CIRCUITPY.nvm` beside the drive or `--nvm PATH`:
+  0xFF when new, kept for the next process, not on the drive.
 - `test_erase.py`: `storage.erase_filesystem()` leaves a directory alone.
 - `test_ble.py`: Bluetooth LE: `_bleio`'s adapter, `--ble`, the virtual controller and the phone
   of the control API and cpapi; `CIRCUITPY_BLE_VIRTUAL_FAULT=no-public-address` gives the virtual
