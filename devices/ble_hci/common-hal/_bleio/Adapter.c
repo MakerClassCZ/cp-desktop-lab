@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "bonding.h"
 #include "hci.h"
 
 #include "py/gc.h"
@@ -280,7 +281,10 @@ static void bleio_adapter_hci_init(bleio_adapter_obj_t *self) {
     self->own_addr_type = BT_ADDR_LE_PUBLIC;
     bt_addr_t public_address;
     static const bt_addr_t no_address = { 0 };
-    if (hci_read_bd_addr(&public_address) == HCI_OK &&
+    const bool have_public_address = hci_read_bd_addr(&public_address) == HCI_OK;
+    self->identity.type = BT_ADDR_LE_PUBLIC;
+    self->identity.a = public_address;
+    if (have_public_address &&
         memcmp(public_address.val, no_address.val, sizeof(no_address.val)) == 0) {
         if (hci_vs_read_static_address(&self->random_address) != HCI_OK) {
             uint8_t rand[8];
@@ -291,7 +295,10 @@ static void bleio_adapter_hci_init(bleio_adapter_obj_t *self) {
         self->random_address.val[5] |= 0xc0;
         hci_check_error(hci_le_set_random_address(self->random_address.val));
         self->own_addr_type = BT_ADDR_LE_RANDOM;
+        self->identity.type = BT_ADDR_LE_RANDOM;
+        self->identity.a = self->random_address;
     }
+    self->identity_known = have_public_address || self->own_addr_type == BT_ADDR_LE_RANDOM;
 
     // Enabled desired events.
     // Most importantly, includes:
@@ -970,12 +977,21 @@ mp_obj_t common_hal_bleio_adapter_get_connections(bleio_adapter_obj_t *self) {
     return self->connection_objs;
 }
 
-void common_hal_bleio_adapter_erase_bonding(bleio_adapter_obj_t *self) {
-    // TODO
-    mp_raise_NotImplementedError(NULL);
-    check_enabled(self);
+// The identity the bonds are filed under: the one the last enable read, NULL before any (the
+// bond store then answers for every identity). Asks nothing of the controller, so neither
+// function below needs the adapter enabled, the VM heap, or can raise: the supervisor calls them
+// before the BLE workflow starts.
+static const bt_addr_le_t *bond_identity(bleio_adapter_obj_t *self) {
+    return self->identity_known ? &self->identity : NULL;
+}
 
-    // FIX bonding_erase_storage();
+void common_hal_bleio_adapter_erase_bonding(bleio_adapter_obj_t *self) {
+    bonding_erase(bond_identity(self));
+}
+
+bool common_hal_bleio_adapter_is_bonded_to_central(bleio_adapter_obj_t *self) {
+    // Bonded to a central: a bond where we are the peripheral.
+    return bonding_is_bonded(bond_identity(self), BONDING_ROLE_PERIPHERAL);
 }
 
 uint16_t bleio_adapter_add_attribute(bleio_adapter_obj_t *adapter, mp_obj_t *attribute) {

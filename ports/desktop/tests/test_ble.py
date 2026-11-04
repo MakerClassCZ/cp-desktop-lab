@@ -574,4 +574,25 @@ check(
     (anonymous_static, normal_static),
 )
 
+# erase_bonding() with no bonds, before and after the adapter is on
+ERASE = """
+import _bleio
+a = _bleio.adapter
+for step in ("off", "on"):
+    if step == "on":
+        a.enabled = True
+    try:
+        a.erase_bonding()
+        print("erased", step, a.enabled)
+    except Exception as e:
+        print("erase raised", step, repr(e))
+print("end")
+"""
+out, _ = run(ERASE, "", "end")
+check(
+    "erase_bonding() with the adapter off and on",
+    "erased off False" in out and "erased on True" in out,
+    out[-300:],
+)
+
 print("DONE")

@@ -658,6 +658,7 @@ ifeq ($(CIRCUITPY_BLEIO_HCI),1)
 # HCI device-specific HAL and helper sources.
 SRC_DEVICES_HAL += \
 	_bleio/att.c \
+	_bleio/bonding.c \
 	_bleio/hci.c \
 	_bleio/hci_uart_transport.c \
     _bleio/Adapter.c \

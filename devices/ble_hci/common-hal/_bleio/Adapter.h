@@ -80,6 +80,11 @@ typedef struct _bleio_adapter_obj_t {
     // public address.
     uint8_t own_addr_type;
     bt_addr_t random_address;
+    // The controller's identity address (its public one, or the static one when it has none), as
+    // the last enable found it; the bonds made through it are filed under it. Type and value 0
+    // until an enable has read it.
+    bt_addr_le_t identity;
+    bool identity_known;
 } bleio_adapter_obj_t;
 
 uint16_t bleio_adapter_add_attribute(bleio_adapter_obj_t *adapter, mp_obj_t *attribute);
