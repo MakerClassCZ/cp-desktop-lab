@@ -490,6 +490,10 @@ while True:
 with launch(ATT) as b:
     seen(b, "ready")
     b.request("POST", "/api/ble/connect")
+    # A client's MTU under 23 is not one LE allows: the link stays at 23, the answer is the
+    # server's own (Core Vol 3 Part F 3.4.2.2)
+    mtu = att(b, "021000")
+    name = att(b, "0a0300")  # the device name's value: 23 bytes, 22 of them in a Read Response
     quiet = {}
     for pdu in (
         "17030000004142",  # a Prepare Write Response nobody asked for
@@ -501,6 +505,12 @@ with launch(ATT) as b:
         b.request("POST", "/api/ble/att", pdu)
         quiet[pdu] = b.request("GET", "/api/ble/att?wait=300")["pdus"]
     unsupported = att(b, "2003000500")  # a Read Multiple Variable Request
+check("an MTU request under 23: the server's 23", mtu == "031700", mtu)
+check(
+    "... and a Read Response still carries 22 bytes",
+    name is not None and bytes.fromhex(name)[1:] == b"CP-lab with a long nam",
+    name,
+)
 check(
     "responses and commands get no Error Response",
     all(v == [] for v in quiet.values()),

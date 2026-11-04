@@ -738,6 +738,18 @@ static void process_error(uint16_t conn_handle, uint8_t dlen, uint8_t data[]) {
     }
 }
 
+// A connection's MTU after an exchange: the smaller of ours and the peer's, never less than LE's
+// 23 (a peer's smaller value is not one LE allows).
+static void att_set_connection_mtu(uint16_t conn_handle, uint16_t peer_mtu) {
+    uint16_t mtu = MAX(BT_ATT_DEFAULT_LE_MTU, MIN(peer_mtu, max_mtu));
+    for (size_t i = 0; i < BLEIO_TOTAL_CONNECTION_COUNT; i++) {
+        if (bleio_connections[i].conn_handle == conn_handle) {
+            bleio_connections[i].mtu = mtu;
+            break;
+        }
+    }
+}
+
 static void process_mtu_req(uint16_t conn_handle, uint8_t dlen, uint8_t data[]) {
     struct bt_att_exchange_mtu_req *req = (struct bt_att_exchange_mtu_req *)data;
 
@@ -746,26 +758,16 @@ static void process_mtu_req(uint16_t conn_handle, uint8_t dlen, uint8_t data[]) 
         return;
     }
 
-    uint16_t mtu = req->mtu;
+    att_set_connection_mtu(conn_handle, req->mtu);
 
-    if (mtu > max_mtu) {
-        mtu = max_mtu;
-    }
-
-    for (size_t i = 0; i < BLEIO_TOTAL_CONNECTION_COUNT; i++) {
-        if (bleio_connections[i].conn_handle == conn_handle) {
-            bleio_connections[i].mtu = mtu;
-            break;
-        }
-    }
-
+    // The answer is our own receive MTU; both sides then use the smaller one.
     struct __packed {
         struct bt_att_hdr h;
         struct bt_att_exchange_mtu_rsp r;
     } rsp = { {
                   .code = BT_ATT_OP_MTU_RSP,
               }, {
-                  .mtu = mtu,
+                  .mtu = max_mtu,
               }};
 
     hci_send_acl_pkt(conn_handle, BT_L2CAP_CID_ATT, sizeof(rsp), (uint8_t *)&rsp);
@@ -778,12 +780,7 @@ static void process_mtu_rsp(uint16_t conn_handle, uint8_t dlen, uint8_t data[]) 
         return;
     }
 
-    for (size_t i = 0; i < BLEIO_TOTAL_CONNECTION_COUNT; i++) {
-        if (bleio_connections[i].conn_handle == conn_handle) {
-            bleio_connections[i].mtu = rsp->mtu;
-            break;
-        }
-    }
+    att_set_connection_mtu(conn_handle, rsp->mtu);
 
     check_and_save_expected_rsp(conn_handle, BT_ATT_OP_MTU_RSP, dlen, data);
 }
