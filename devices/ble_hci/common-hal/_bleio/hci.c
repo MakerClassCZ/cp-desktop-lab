@@ -612,6 +612,14 @@ hci_result_t hci_le_set_random_address(uint8_t addr[6]) {
     return send_command(BT_HCI_OP_LE_SET_RANDOM_ADDRESS, 6, addr);
 }
 
+hci_result_t hci_le_set_advertising_set_random_address(uint8_t handle, uint8_t addr[6]) {
+    struct bt_hci_cp_le_set_adv_set_random_addr params = {
+        .handle = handle,
+    };
+    memcpy(params.bdaddr.val, addr, sizeof(params.bdaddr.val));
+    return send_command(BT_HCI_OP_LE_SET_ADV_SET_RANDOM_ADDR, sizeof(params), &params);
+}
+
 hci_result_t hci_le_rand(uint8_t rand[8]) {
     int result = send_command(BT_HCI_OP_LE_RAND, 0, NULL);
     if (result == HCI_OK) {

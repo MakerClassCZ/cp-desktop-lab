@@ -529,4 +529,49 @@ check(
     by_type,
 )
 
+# anonymous=True advertises from a random address the host set: a non-resolvable private one
+ANONYMOUS = """
+import _bleio, time
+a = _bleio.adapter
+a.start_advertising(bytes([2, 1, 6]), anonymous=True, timeout=60)
+print("anonymous")
+time.sleep(1.5)
+a.stop_advertising()
+a.start_advertising(bytes([2, 1, 6]), connectable=True)
+print("normal")
+while True:
+    time.sleep(0.1)
+"""
+
+
+def adv_address(b, text):
+    seen(b, text)
+    time.sleep(0.2)
+    s = b.request("GET", "/api/ble")
+    return s["public"], s["address"]
+
+
+with launch(ANONYMOUS) as b:
+    anonymous = adv_address(b, "anonymous")
+    normal = adv_address(b, "normal")
+with launch(ANONYMOUS, env=dict(HEADLESS, CIRCUITPY_BLE_VIRTUAL_FAULT="no-public-address")) as b:
+    anonymous_static = adv_address(b, "anonymous")
+    normal_static = adv_address(b, "normal")
+check(
+    "anonymous: a non-resolvable private address the host set",
+    anonymous[0] is False
+    and anonymous[1] != "00:00:00:00:00:00"
+    and int(anonymous[1][:2], 16) < 0x40,
+    anonymous,
+)
+check("... then the public one again", normal[0] is True, normal)
+check(
+    "anonymous without a public address, then the static one again",
+    anonymous_static[0] is False
+    and int(anonymous_static[1][:2], 16) < 0x40
+    and normal_static[0] is False
+    and int(normal_static[1][:2], 16) >= 0xC0,
+    (anonymous_static, normal_static),
+)
+
 print("DONE")

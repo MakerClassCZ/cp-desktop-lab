@@ -699,6 +699,19 @@ uint32_t _common_hal_bleio_adapter_start_advertising(bleio_adapter_obj_t *self,
         memcpy(&peer_addr.a.val, directed_to->bytes, sizeof(peer_addr.a.val));
     }
 
+    // The random address this advertisement goes out from, when it is one: anonymous, a new
+    // non-resolvable private address (random, the two top bits 00); else the static one of a
+    // controller without a public address, set again, since an anonymous advertisement before
+    // may have left the controller another.
+    const uint8_t own_addr_type = anonymous ? BT_ADDR_LE_RANDOM : self->own_addr_type;
+    bt_addr_t random_address = self->random_address;
+    if (anonymous) {
+        uint8_t rand[8];
+        hci_check_error(hci_le_rand(rand));
+        memcpy(random_address.val, rand, sizeof(random_address.val));
+        random_address.val[5] &= 0x3f;
+    }
+
     if (adapter_uses_extended_advertising(self)) {
         // Use legacy PDUs (ADV_IND etc.) so that 4.x centrals still see us and the
         // 31-byte data limit applies unchanged; only the HCI command set is extended.
@@ -723,7 +736,7 @@ uint32_t _common_hal_bleio_adapter_start_advertising(bleio_adapter_obj_t *self,
                 interval_units, // min interval
                 interval_units, // max interval
                 0b111,          // channel map: channels 37, 38, 39
-                anonymous ? BT_ADDR_LE_RANDOM : self->own_addr_type,
+                own_addr_type,
                 &peer_addr,
                 0x00,           // filter policy: no filter
                 BT_HCI_LE_ADV_TX_POWER_NO_PREF,
@@ -733,6 +746,11 @@ uint32_t _common_hal_bleio_adapter_start_advertising(bleio_adapter_obj_t *self,
                 0x00,                      // advertising SID
                 0x00                       // scan request notification disabled
                 ));
+
+        // An advertising set has a random address of its own, set once the set exists.
+        if (own_addr_type == BT_ADDR_LE_RANDOM) {
+            hci_check_error(hci_le_set_advertising_set_random_address(0, random_address.val));
+        }
 
         hci_check_error(
             hci_le_set_extended_advertising_data(
@@ -789,12 +807,16 @@ uint32_t _common_hal_bleio_adapter_start_advertising(bleio_adapter_obj_t *self,
         // Advertising interval.
         uint16_t interval_units = SEC_TO_UNITS(interval, UNIT_0_625_MS);
 
+        if (own_addr_type == BT_ADDR_LE_RANDOM) {
+            hci_check_error(hci_le_set_random_address(random_address.val));
+        }
+
         hci_check_error(
             hci_le_set_advertising_parameters(
                 interval_units, // min interval
                 interval_units, // max interval
                 adv_type,
-                anonymous ? BT_ADDR_LE_RANDOM : self->own_addr_type,
+                own_addr_type,
                 &peer_addr,
                 0b111,          // channel map: channels 37, 38, 39
                 0x00            // filter policy: no filter
