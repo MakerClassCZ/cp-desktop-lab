@@ -34,6 +34,7 @@
 
 #include "hci.h"
 #include "att.h"
+#include "bonding.h"
 
 // Zephyr include files to define HCI communication values and structs.
 // #include "hci_include/hci.h"
@@ -141,6 +142,52 @@ static void send_error(uint16_t conn_handle, uint8_t opcode, uint16_t handle, ui
               }};
 
     hci_send_acl_pkt(conn_handle, BT_L2CAP_CID_ATT, sizeof(rsp), (uint8_t *)&rsp);
+}
+
+// Whether the link of conn_handle meets security mode perm for a read or a write: 0, or the ATT
+// error to answer (Core Vol 3 Part C 10.3; the choice of error as Zephyr's bt_gatt_check_perm()).
+static uint8_t att_check_security(uint16_t conn_handle, bleio_attribute_security_mode_t perm, bool write) {
+    switch (perm) {
+        case SECURITY_MODE_NO_ACCESS:
+            return write ? BT_ATT_ERR_WRITE_NOT_PERMITTED : BT_ATT_ERR_READ_NOT_PERMITTED;
+        case SECURITY_MODE_OPEN:
+            return 0;
+        case SECURITY_MODE_ENC_NO_MITM:
+        case SECURITY_MODE_SIGNED_NO_MITM:  // met by an encrypted link; there is no signing
+            break;
+        default:
+            // MITM protection or LE Secure Connections: no pairing here makes such keys.
+            return BT_ATT_ERR_AUTHENTICATION;
+    }
+    bleio_connection_internal_t *connection = bleio_conn_handle_to_connection(conn_handle);
+    if (connection == NULL) {
+        return BT_ATT_ERR_UNLIKELY;
+    }
+    if (!connection->encrypted) {
+        // A peer we have a bond with is asked to encrypt with its key, any other to pair.
+        bleio_adapter_obj_t *adapter = &common_hal_bleio_adapter_obj;
+        const bt_addr_le_t *own = adapter->identity_known ? &adapter->identity : NULL;
+        return bonding_find_peer(own, &connection->addr) != NULL
+               ? BT_ATT_ERR_INSUFFICIENT_ENCRYPTION : BT_ATT_ERR_AUTHENTICATION;
+    }
+    if (connection->key_size < 7) {
+        return BT_ATT_ERR_ENCRYPTION_KEY_SIZE;
+    }
+    return 0;
+}
+
+// Whether a notification or indication of the characteristic whose value is at handle may go to
+// the link of conn_handle: the link meets its read permission, so a CCCD left on (or restored)
+// tells nothing before the link is encrypted. A characteristic no one may read still notifies
+// whoever the program turned it on for: no peer can write its CCCD.
+static bool att_may_notify(uint16_t conn_handle, uint16_t handle) {
+    mp_obj_t attribute_obj = bleio_adapter_get_attribute(&common_hal_bleio_adapter_obj, handle);
+    if (!mp_obj_is_type(attribute_obj, &bleio_characteristic_type)) {
+        return true;
+    }
+    bleio_characteristic_obj_t *characteristic = MP_OBJ_TO_PTR(attribute_obj);
+    const uint8_t err = att_check_security(conn_handle, characteristic->read_perm, false);
+    return err == 0 || err == BT_ATT_ERR_READ_NOT_PERMITTED;
 }
 
 static void send_req(uint16_t conn_handle, size_t request_length, uint8_t *request_buffer) {
@@ -664,7 +711,8 @@ bool att_notify(uint16_t handle, const uint8_t *value, int length) {
     int num_notifications = 0;
 
     for (size_t i = 0; i < BLEIO_TOTAL_CONNECTION_COUNT; i++) {
-        if (bleio_connections[i].conn_handle == 0xffff) {
+        if (bleio_connections[i].conn_handle == 0xffff ||
+            !att_may_notify(bleio_connections[i].conn_handle, handle)) {
             continue;
         }
 
@@ -694,7 +742,8 @@ bool att_indicate(uint16_t handle, const uint8_t *value, int length) {
     int num_indications = 0;
 
     for (size_t i = 0; i < BLEIO_TOTAL_CONNECTION_COUNT; i++) {
-        if (bleio_connections[i].conn_handle == 0xffff) {
+        if (bleio_connections[i].conn_handle == 0xffff ||
+            !att_may_notify(bleio_connections[i].conn_handle, handle)) {
             continue;
         }
 
@@ -1155,6 +1204,11 @@ static void process_read_or_read_blob_req(uint16_t conn_handle, uint16_t mtu, ui
                 send_error(conn_handle, opcode, handle, BT_ATT_ERR_READ_NOT_PERMITTED);
                 return;
             }
+            const uint8_t err = att_check_security(conn_handle, characteristic->read_perm, false);
+            if (err) {
+                send_error(conn_handle, opcode, handle, err);
+                return;
+            }
 
             mp_buffer_info_t bufinfo;
             mp_get_buffer(characteristic->value, &bufinfo, MP_BUFFER_READ);
@@ -1170,6 +1224,11 @@ static void process_read_or_read_blob_req(uint16_t conn_handle, uint16_t mtu, ui
         }
     } else if (mp_obj_is_type(attribute_obj, &bleio_descriptor_type)) {
         bleio_descriptor_obj_t *descriptor = MP_OBJ_TO_PTR(attribute_obj);
+        const uint8_t err = att_check_security(conn_handle, descriptor->read_perm, false);
+        if (err) {
+            send_error(conn_handle, opcode, handle, err);
+            return;
+        }
 
         mp_buffer_info_t bufinfo;
         mp_get_buffer(descriptor->value, &bufinfo, MP_BUFFER_READ);
@@ -1287,6 +1346,11 @@ static void process_read_type_req(uint16_t conn_handle, uint16_t mtu, uint8_t dl
             // See if request is for a descriptor value with a 16-bit UUID, such as the CCCD.
             bleio_descriptor_obj_t *descriptor = MP_OBJ_TO_PTR(attribute_obj);
             if (bleio_uuid_get_uuid16_or_unknown(descriptor->uuid) == type_uuid) {
+                const uint8_t err = att_check_security(conn_handle, descriptor->read_perm, false);
+                if (err) {
+                    send_error(conn_handle, BT_ATT_OP_READ_TYPE_REQ, handle, err);
+                    return;
+                }
                 struct bt_att_data *att_data = (struct bt_att_data *)&rsp_bytes[rsp_length];
 
                 att_data->handle = handle;
@@ -1312,6 +1376,13 @@ static void process_read_type_req(uint16_t conn_handle, uint16_t mtu, uint8_t dl
             bleio_characteristic_obj_t *characteristic = MP_OBJ_TO_PTR(attribute_obj);
             if (characteristic->handle == handle &&
                 bleio_uuid_get_uuid16_or_unknown(characteristic->uuid) == type_uuid) {
+                const uint8_t err = (characteristic->props & CHAR_PROP_READ) == 0
+                    ? BT_ATT_ERR_READ_NOT_PERMITTED
+                    : att_check_security(conn_handle, characteristic->read_perm, false);
+                if (err) {
+                    send_error(conn_handle, BT_ATT_OP_READ_TYPE_REQ, handle, err);
+                    return;
+                }
 
                 struct bt_att_data *att_data = (struct bt_att_data *)&rsp_bytes[rsp_length];
 
@@ -1412,6 +1483,13 @@ static void process_write_req_or_cmd(uint16_t conn_handle, uint16_t mtu, uint8_t
             }
             return;
         }
+        const uint8_t err = att_check_security(conn_handle, characteristic->write_perm, true);
+        if (err) {
+            if (with_response) {
+                send_error(conn_handle, BT_ATT_OP_WRITE_REQ, req->handle, err);
+            }
+            return;
+        }
 
         // Just change the local value. Don't fire off notifications, etc.
         bleio_characteristic_set_local_value(characteristic, &bufinfo);
@@ -1422,6 +1500,14 @@ static void process_write_req_or_cmd(uint16_t conn_handle, uint16_t mtu, uint8_t
         if (bleio_uuid_get_uuid16_or_unknown(descriptor->uuid) != BLE_UUID_CCCD) {
             if (with_response) {
                 send_error(conn_handle, BT_ATT_OP_WRITE_REQ, req->handle, BT_ATT_ERR_WRITE_NOT_PERMITTED);
+            }
+            return;
+        }
+        // A CCCD's write permission is its characteristic's read permission (Service.c).
+        const uint8_t err = att_check_security(conn_handle, descriptor->write_perm, true);
+        if (err) {
+            if (with_response) {
+                send_error(conn_handle, BT_ATT_OP_WRITE_REQ, req->handle, err);
             }
             return;
         }
@@ -1480,6 +1566,12 @@ static void process_prepare_write_req(uint16_t conn_handle, uint16_t mtu, uint8_
 
     if ((characteristic->props & CHAR_PROP_WRITE) == 0) {
         send_error(conn_handle, BT_ATT_OP_PREPARE_WRITE_REQ, handle, BT_ATT_ERR_WRITE_NOT_PERMITTED);
+        return;
+    }
+
+    const uint8_t err = att_check_security(conn_handle, characteristic->write_perm, true);
+    if (err) {
+        send_error(conn_handle, BT_ATT_OP_PREPARE_WRITE_REQ, handle, err);
         return;
     }
 

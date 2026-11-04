@@ -574,6 +574,113 @@ check(
     (anonymous_static, normal_static),
 )
 
+# Security modes: a link that is not encrypted gets what OPEN allows, nothing more
+SECURE = """
+import _bleio, time
+a = _bleio.adapter
+A, C = _bleio.Attribute, _bleio.Characteristic
+s = _bleio.Service(_bleio.UUID(0x1240))
+RW = C.READ | C.WRITE | C.WRITE_NO_RESPONSE
+enc = C.add_to_service(s, _bleio.UUID(0x1241), properties=RW | C.NOTIFY,
+    read_perm=A.ENCRYPT_NO_MITM, write_perm=A.ENCRYPT_NO_MITM, max_length=8, initial_value=b"secret")
+mitm = C.add_to_service(s, _bleio.UUID(0x1242), properties=RW,
+    read_perm=A.ENCRYPT_WITH_MITM, write_perm=A.ENCRYPT_WITH_MITM, max_length=8, initial_value=b"mitm")
+lesc = C.add_to_service(s, _bleio.UUID(0x1243), properties=RW,
+    read_perm=A.LESC_ENCRYPT_WITH_MITM, write_perm=A.LESC_ENCRYPT_WITH_MITM, max_length=8,
+    initial_value=b"lesc")
+signed = C.add_to_service(s, _bleio.UUID(0x1244), properties=RW,
+    read_perm=A.SIGNED_NO_MITM, write_perm=A.SIGNED_NO_MITM, max_length=8, initial_value=b"signed")
+hidden = C.add_to_service(s, _bleio.UUID(0x1245), properties=RW,
+    read_perm=A.NO_ACCESS, write_perm=A.NO_ACCESS, max_length=8, initial_value=b"hidden")
+tick = C.add_to_service(s, _bleio.UUID(0x1246), properties=RW | C.NOTIFY,
+    read_perm=A.OPEN, write_perm=A.OPEN, max_length=8, initial_value=b"open")
+_bleio.Descriptor.add_to_characteristic(tick, _bleio.UUID(0x2901), read_perm=A.ENCRYPT_NO_MITM,
+    write_perm=A.NO_ACCESS, max_length=8, initial_value=b"desc")
+a.start_advertising(bytes([2, 1, 6]), connectable=True)
+print("ready")
+values = [c.value for c in (enc, mitm, lesc, signed, hidden)]
+while True:
+    now = [c.value for c in (enc, mitm, lesc, signed, hidden)]
+    if now != values:
+        values = now
+        print("changed", values)
+    if tick.value == b"go":
+        # Notifications on for both, as a bonded phone's restored CCCDs would be: only the open
+        # one may go out on a link that is not encrypted.
+        for c in (enc, tick):
+            c.descriptors[0].value = b"\\x01\\x00"
+        enc.value = b"leak"
+        tick.value = b"tick"
+        print("notified")
+    time.sleep(0.02)
+"""
+
+
+def att_error(f):
+    """The ATT error code f raises, or what it returned."""
+    try:
+        return ("returned", f())
+    except cpapi.AttError as e:
+        return e.code
+    except TimeoutError as e:
+        return ("timeout", str(e))
+
+
+with launch(SECURE) as b:
+    seen(b, "ready")
+    p = b.ble.connect()
+    found = [c.uuid for s in p.services() for c in s.characteristics]
+    reads = {u: att_error(lambda u=u: p.read(u)) for u in (0x1241, 0x1242, 0x1243, 0x1244, 0x1245)}
+    writes = {
+        u: att_error(lambda u=u: p.write(u, b"x")) for u in (0x1241, 0x1242, 0x1243, 0x1244, 0x1245)
+    }
+    for u in (0x1241, 0x1245):
+        p.write(u, b"x", response=False)
+    enc = p.characteristic(0x1241)
+    subscribe = att_error(lambda: p.subscribe(0x1241))
+    blob = att_error(lambda: p._request(b"\x0c" + struct.pack("<HH", enc.handle, 0), 0x0D))
+    by_type = att_error(
+        lambda: p._request(b"\x08" + struct.pack("<HHH", 1, 0xFFFF, 0x1241), 0x09)
+    )
+    prepare = att_error(
+        lambda: p._request(b"\x16" + struct.pack("<HH", enc.handle, 0) + b"x", 0x17)
+    )
+    tick = p.characteristic(0x1246)
+    desc = att_error(lambda: p._request(b"\x0a" + struct.pack("<H", tick.handle + 2), 0x0B))
+    open_read = att_error(lambda: p.read(0x1246))
+    p.write(0x1246, b"go")
+    notified = seen(b, "notified")
+    p._take(1)
+    got = {h: v for h, v in p._notified.items()}
+    out = b.console(since=0)["data"]
+check(
+    "discovery is open on a link that is not encrypted",
+    all(cpapi.uuid(u) in found for u in range(0x1241, 0x1247)),
+    found,
+)
+check(
+    "reads: encryption needed 0x05, NO_ACCESS 0x02",
+    reads == {0x1241: 0x05, 0x1242: 0x05, 0x1243: 0x05, 0x1244: 0x05, 0x1245: 0x02},
+    reads,
+)
+check(
+    "writes: encryption needed 0x05, NO_ACCESS 0x03",
+    writes == {0x1241: 0x05, 0x1242: 0x05, 0x1243: 0x05, 0x1244: 0x05, 0x1245: 0x03},
+    writes,
+)
+check("Write Commands change nothing", "changed" not in out, out[-300:])
+check("the CCCD of an encrypted characteristic: 0x05", subscribe == 0x05, subscribe)
+check("Read Blob of it: 0x05", blob == 0x05, blob)
+check("Read By Type of its value: 0x05", by_type == 0x05, by_type)
+check("Prepare Write to it: 0x05", prepare == 0x05, prepare)
+check("a descriptor that needs encryption: 0x05", desc == 0x05, desc)
+check("an OPEN characteristic reads as before", open_read == ("returned", b"open"), open_read)
+check(
+    "notifications only of what the link may read",
+    notified and got.get(tick.handle) == [b"tick"] and enc.handle not in got,
+    (notified, got),
+)
+
 # erase_bonding() with no bonds, before and after the adapter is on
 ERASE = """
 import _bleio
