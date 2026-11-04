@@ -192,6 +192,43 @@ static void process_num_comp_pkts(uint16_t handle, uint16_t num_pkts) {
     }
 }
 
+// One advertising report, as a scanner gets it.
+static void process_advertising_report(uint8_t evt_type, const bt_addr_le_t *addr,
+    const uint8_t *data, uint8_t data_len, int8_t rssi) {
+    // Nothing scans yet: the reports go to the scan results once start_scan() exists.
+    (void)evt_type;
+    (void)addr;
+    (void)data;
+    (void)data_len;
+    (void)rssi;
+}
+
+// LE Advertising Report: the number of reports, then each one: its event type, the address (type
+// and value), the data's length, the data, the RSSI after it. Read report by report as Zephyr
+// does (controllers send one per event); a report that does not fit in the event ends it.
+static void process_le_advertising_report(const uint8_t *params, size_t len) {
+    if (len < sizeof(struct bt_hci_evt_le_advertising_report)) {
+        return;
+    }
+    const struct bt_hci_evt_le_advertising_report *report =
+        (const struct bt_hci_evt_le_advertising_report *)params;
+    size_t at = sizeof(*report);
+    for (uint8_t i = 0; i < report->num_reports; i++) {
+        if (at + sizeof(struct bt_hci_evt_le_advertising_info) > len) {
+            return;
+        }
+        const struct bt_hci_evt_le_advertising_info *info =
+            (const struct bt_hci_evt_le_advertising_info *)(params + at);
+        const size_t rssi_at = at + sizeof(*info) + info->length;
+        if (rssi_at >= len) {
+            return;
+        }
+        process_advertising_report(info->evt_type, &info->addr, info->data, info->length,
+            (int8_t)params[rssi_at]);
+        at = rssi_at + 1;
+    }
+}
+
 static void process_evt_pkt(size_t pkt_len, uint8_t pkt_data[]) {
     h4_hci_evt_pkt_t *pkt = (h4_hci_evt_pkt_t *)pkt_data;
 
@@ -281,19 +318,8 @@ static void process_evt_pkt(size_t pkt_len, uint8_t pkt_data[]) {
 
                 }
             } else if (meta_evt->subevent == BT_HCI_EVT_LE_ADVERTISING_REPORT) {
-                struct bt_hci_evt_le_advertising_info *le_advertising_info =
-                    (struct bt_hci_evt_le_advertising_info *)le_evt;
-                if (le_advertising_info->evt_type == BT_HCI_ADV_DIRECT_IND) {
-                    // FIX
-                    // last byte is RSSI
-                    // GAP.handleLeAdvertisingReport(leAdvertisingReport->type,
-                    //                               leAdvertisingReport->peerBdaddrType,
-                    //                               leAdvertisingReport->peerBdaddr,
-                    //                               leAdvertisingReport->eirLength,
-                    //                               leAdvertisingReport->eirData,
-                    //                               rssi); //FIX, don't separate
-
-                }
+                process_le_advertising_report(le_evt,
+                    pkt->param_len - sizeof(struct bt_hci_evt_le_meta_event));
             }
             break;
         }
