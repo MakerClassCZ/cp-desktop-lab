@@ -7,7 +7,10 @@ include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 project(hci_bridge C CXX ASM)
 pico_sdk_init()
 
-add_executable(hci_bridge main.c)
+# The CYW43's Bluetooth core through the raspberrypi port's own module, the code its _bleio uses.
+set(CYW43_HCI ${CMAKE_CURRENT_LIST_DIR}/../../../../raspberrypi/common-hal/_bleio)
+add_executable(hci_bridge main.c ${CYW43_HCI}/cyw43_hci.c)
+target_include_directories(hci_bridge PRIVATE ${CYW43_HCI})
 target_compile_definitions(hci_bridge PRIVATE
     CYW43_ENABLE_BLUETOOTH=1
     CYW43_LWIP=0

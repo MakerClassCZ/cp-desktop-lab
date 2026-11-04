@@ -8,7 +8,8 @@ with `--ble-log PATH`, in a btsnoop file for Wireshark. Two boards make good con
 ## A Pico 2 W or a Pico W
 
 `pico/` is a bridge between the board's USB serial port and its CYW43439's Bluetooth core, on the
-Pico SDK. The release has it built: `hci-bridge-pico2w.uf2` for a Pico 2 W, `hci-bridge-picow.uf2`
+Pico SDK. It reaches the core through `ports/raspberrypi/common-hal/_bleio/cyw43_hci.c`, the code
+the raspberrypi port's own `_bleio` uses. The release has it built: `hci-bridge-pico2w.uf2` for a Pico 2 W, `hci-bridge-picow.uf2`
 for a Pico W (the same chip on an RP2040).
 
 1. Hold BOOTSEL, plug the board in, copy its `.uf2` to the `RP2350` (`RPI-RP2`) drive. Its LED
