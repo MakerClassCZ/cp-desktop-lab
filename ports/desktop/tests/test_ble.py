@@ -452,4 +452,24 @@ with launch(NAME) as b:
     out = b.console(since=0)["data"][-300:]
 check("the adapter's name in the run after a reload", ok, out)
 
+# discover_remote_services() on the phone's link: the program as a GATT client of a central
+DISCOVER = """
+import _bleio
+a = _bleio.adapter
+a.start_advertising(bytes([2, 1, 6]), connectable=True)
+print("ready")
+while not a.connected:
+    pass
+try:
+    print("discovered", a.connections[0].discover_remote_services())
+except Exception as e:
+    print("discover raised", repr(e))
+"""
+with launch(DISCOVER) as b:
+    seen(b, "ready")
+    b.request("POST", "/api/ble/connect")
+    ok = seen(b, "discovered ()")
+    out = b.console(since=0)["data"][-300:]
+check("discover_remote_services() on the phone's connection", ok, out)
+
 print("DONE")

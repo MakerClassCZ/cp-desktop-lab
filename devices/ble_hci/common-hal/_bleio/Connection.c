@@ -301,7 +301,9 @@ static volatile bool m_discovery_successful;
 // }
 
 void bleio_connection_clear(bleio_connection_internal_t *self) {
-    mp_obj_list_clear(MP_OBJ_FROM_PTR(self->remote_service_list));
+    if (self->remote_service_list != NULL) {
+        mp_obj_list_clear(MP_OBJ_FROM_PTR(self->remote_service_list));
+    }
 
     self->conn_handle = BLE_CONN_HANDLE_INVALID;
     self->pair_status = PAIR_NOT_PAIRED;
@@ -718,6 +720,11 @@ void common_hal_bleio_connection_set_connection_interval(bleio_connection_intern
 mp_obj_tuple_t *common_hal_bleio_connection_discover_remote_services(bleio_connection_obj_t *self, mp_obj_t service_uuids_whitelist) {
     // FIX discover_remote_services(self->connection, service_uuids_whitelist);
     bleio_connection_ensure_connected(self);
+    // The list is made here, on the program's heap, as nordic makes it: never in the event
+    // handler that adds the connection, which may run between two VMs.
+    if (self->connection->remote_service_list == NULL) {
+        self->connection->remote_service_list = mp_obj_new_list(0, NULL);
+    }
     // Convert to a tuple and then clear the list so the callee will take ownership.
     mp_obj_tuple_t *services_tuple =
         mp_obj_new_tuple(self->connection->remote_service_list->len,
