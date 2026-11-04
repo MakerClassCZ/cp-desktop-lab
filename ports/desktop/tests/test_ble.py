@@ -472,4 +472,40 @@ with launch(DISCOVER) as b:
     out = b.console(since=0)["data"][-300:]
 check("discover_remote_services() on the phone's connection", ok, out)
 
+# ATT as a server: the MTU a phone asks for, opcodes it does not know, Read By Type's lengths
+ATT = """
+import _bleio, time
+a = _bleio.adapter
+a.enabled = True
+a.name = "CP-lab with a long name"
+s = _bleio.Service(_bleio.UUID(0x1234))
+_bleio.Characteristic.add_to_service(s, _bleio.UUID(0x1235), properties=_bleio.Characteristic.READ,
+    read_perm=_bleio.Attribute.OPEN, write_perm=_bleio.Attribute.NO_ACCESS, max_length=8,
+    initial_value=b"abc")
+a.start_advertising(bytes([2, 1, 6]), connectable=True)
+print("ready")
+while True:
+    time.sleep(0.1)
+"""
+with launch(ATT) as b:
+    seen(b, "ready")
+    b.request("POST", "/api/ble/connect")
+    quiet = {}
+    for pdu in (
+        "17030000004142",  # a Prepare Write Response nobody asked for
+        "19",  # an Execute Write Response
+        "21030041",  # a Read Multiple Variable Response
+        "5f0300",  # a command no one knows
+        "d2030041" + "00" * 12,  # a Signed Write Command: no answer, signed or not
+    ):
+        b.request("POST", "/api/ble/att", pdu)
+        quiet[pdu] = b.request("GET", "/api/ble/att?wait=300")["pdus"]
+    unsupported = att(b, "2003000500")  # a Read Multiple Variable Request
+check(
+    "responses and commands get no Error Response",
+    all(v == [] for v in quiet.values()),
+    quiet,
+)
+check("a request not supported: Error 0x06", unsupported == "0120000006", unsupported)
+
 print("DONE")

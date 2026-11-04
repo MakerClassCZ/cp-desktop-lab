@@ -1645,6 +1645,35 @@ void att_write_cmd(uint16_t conn_handle, uint16_t handle, const uint8_t *data, u
     send_req(conn_handle, sizeof(cmd_bytes), cmd_bytes);
 }
 
+// An opcode with this bit set is a command (Core Vol 3 Part F 3.3.1).
+#define ATT_CMD_FLAG 0x40
+
+// Responses, notifications, indications and confirmations: what is never answered.
+static bool att_opcode_needs_no_answer(uint8_t opcode) {
+    switch (opcode) {
+        case BT_ATT_OP_ERROR_RSP:
+        case BT_ATT_OP_MTU_RSP:
+        case BT_ATT_OP_FIND_INFO_RSP:
+        case BT_ATT_OP_FIND_TYPE_RSP:
+        case BT_ATT_OP_READ_TYPE_RSP:
+        case BT_ATT_OP_READ_RSP:
+        case BT_ATT_OP_READ_BLOB_RSP:
+        case BT_ATT_OP_READ_MULT_RSP:
+        case BT_ATT_OP_READ_GROUP_RSP:
+        case BT_ATT_OP_WRITE_RSP:
+        case BT_ATT_OP_PREPARE_WRITE_RSP:
+        case BT_ATT_OP_EXEC_WRITE_RSP:
+        case BT_ATT_OP_NOTIFY:
+        case BT_ATT_OP_INDICATE:
+        case BT_ATT_OP_CONFIRM:
+        case BT_ATT_OP_READ_MULT_VL_RSP:
+        case BT_ATT_OP_NOTIFY_MULT:
+            return true;
+        default:
+            return false;
+    }
+}
+
 void att_process_data(uint16_t conn_handle, uint8_t dlen, uint8_t data[]) {
     // Opcode is a single byte at the front of the data.
     uint8_t opcode = data[0];
@@ -1731,10 +1760,14 @@ void att_process_data(uint16_t conn_handle, uint8_t dlen, uint8_t data[]) {
             process_confirm(conn_handle, dlen, data);
             break;
 
-        case BT_ATT_OP_READ_MULT_REQ:
-        case BT_ATT_OP_SIGNED_WRITE_CMD:
         default:
-            send_error(conn_handle, opcode, 0x00, BT_ATT_ERR_NOT_SUPPORTED);
+            // Only a request is answered: a request not supported, and an opcode not known
+            // unless its command flag is set (as Zephyr does). A command (a Signed Write too),
+            // a response, a notification or indication, a confirmation: nothing is sent back,
+            // as the other side waits for nothing (Core Vol 3 Part F 3.3, 3.4.1.1).
+            if (!(opcode & ATT_CMD_FLAG) && !att_opcode_needs_no_answer(opcode)) {
+                send_error(conn_handle, opcode, 0x00, BT_ATT_ERR_NOT_SUPPORTED);
+            }
             break;
     }
 }
