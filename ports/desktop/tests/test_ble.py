@@ -509,7 +509,7 @@ with launch(ATT) as b:
 check("an MTU request under 23: the server's 23", mtu == "031700", mtu)
 check(
     "... and a Read Response still carries 22 bytes",
-    name is not None and bytes.fromhex(name)[1:] == b"CP-lab with a long nam",
+    name is not None and bytes.fromhex(name)[1:] == b"CP-lab with a long name"[:22],
     name,
 )
 check(
@@ -611,6 +611,7 @@ while True:
             c.descriptors[0].value = b"\\x01\\x00"
         enc.value = b"leak"
         tick.value = b"tick"
+        values = [c.value for c in (enc, mitm, lesc, signed, hidden)]
         print("notified")
     time.sleep(0.02)
 """
@@ -632,16 +633,15 @@ with launch(SECURE) as b:
     found = [c.uuid for s in p.services() for c in s.characteristics]
     reads = {u: att_error(lambda u=u: p.read(u)) for u in (0x1241, 0x1242, 0x1243, 0x1244, 0x1245)}
     writes = {
-        u: att_error(lambda u=u: p.write(u, b"x")) for u in (0x1241, 0x1242, 0x1243, 0x1244, 0x1245)
+        u: att_error(lambda u=u: p.write(u, b"x"))
+        for u in (0x1241, 0x1242, 0x1243, 0x1244, 0x1245)
     }
     for u in (0x1241, 0x1245):
         p.write(u, b"x", response=False)
     enc = p.characteristic(0x1241)
     subscribe = att_error(lambda: p.subscribe(0x1241))
     blob = att_error(lambda: p._request(b"\x0c" + struct.pack("<HH", enc.handle, 0), 0x0D))
-    by_type = att_error(
-        lambda: p._request(b"\x08" + struct.pack("<HHH", 1, 0xFFFF, 0x1241), 0x09)
-    )
+    by_type = att_error(lambda: p._request(b"\x08" + struct.pack("<HHH", 1, 0xFFFF, 0x1241), 0x09))
     prepare = att_error(
         lambda: p._request(b"\x16" + struct.pack("<HH", enc.handle, 0) + b"x", 0x17)
     )
