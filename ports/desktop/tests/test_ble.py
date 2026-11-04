@@ -346,7 +346,9 @@ print("cycled", a.enabled, "worst off %.3f" % worst)
 """
 out, _ = run(CYCLE, "", "cycled")
 m = re.search(r"cycled True worst off ([0-9.]+)", out)
-check("disabling the adapter does not wait out the reset", m and float(m.group(1)) < 0.5, out[-300:])
+check(
+    "disabling the adapter does not wait out the reset", m and float(m.group(1)) < 0.5, out[-300:]
+)
 
 # A connection stops advertising in the controller; stop_advertising() then asks nothing (a CYW43
 # answers Command Disallowed, an ESP32 nothing at all)
@@ -372,7 +374,9 @@ with launch(STOP) as b:
     except (TimeoutError, cpapi.ApiError):
         pass
     check(
-        "stop_advertising() after a connection", seen(b, "stopped False"), b.console(since=0)["data"][-300:]
+        "stop_advertising() after a connection",
+        seen(b, "stopped False"),
+        b.console(since=0)["data"][-300:],
     )
 
 # Five runs of a program that makes a service: the adapter stays, the heap does not shrink
