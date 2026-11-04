@@ -1297,9 +1297,11 @@ static void process_read_type_req(uint16_t conn_handle, uint16_t mtu, uint8_t dl
             }
 
         } else if (mp_obj_is_type(attribute_obj, &bleio_characteristic_type)) {
-            // See if request is for a characteristic value with a 16-bit UUID.
+            // See if request is for a characteristic value with a 16-bit UUID. The declaration's
+            // handle holds the same object: only the value's is the value.
             bleio_characteristic_obj_t *characteristic = MP_OBJ_TO_PTR(attribute_obj);
-            if (bleio_uuid_get_uuid16_or_unknown(characteristic->uuid) == type_uuid) {
+            if (characteristic->handle == handle &&
+                bleio_uuid_get_uuid16_or_unknown(characteristic->uuid) == type_uuid) {
 
                 struct bt_att_data *att_data = (struct bt_att_data *)&rsp_bytes[rsp_length];
 

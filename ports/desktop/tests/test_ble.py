@@ -523,5 +523,10 @@ check(
     by_type is not None and by_type[:4] == "0905" and by_type.endswith("616263"),
     by_type,
 )
+check(
+    "... and its handle the value's, not the declaration's",
+    by_type is not None and by_type[4:8] == "0c00",
+    by_type,
+)
 
 print("DONE")
