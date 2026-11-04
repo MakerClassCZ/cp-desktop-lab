@@ -39,6 +39,7 @@ typedef int sock_t;
 #include "api_json.h"
 #include "api_ring.h"
 #include "ble_controller.h"
+#include "common-hal/_bleio/smp_crypto.h"
 #include "ble_host.h"
 #include "bus_trace.h"
 #include "desktop_port.h"
@@ -992,9 +993,56 @@ static void _ble_att_take(request_t *r) {
     api_buf_free(&b);
 }
 
+// Bytes given most significant first as the Bluetooth Core prints them, least significant first
+// as SMP takes them.
+static void _le_from(uint8_t *out, const char *hex, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        unsigned v;
+        sscanf(hex + 2 * (n - 1 - i), "%2x", &v);
+        out[i] = (uint8_t)v;
+    }
+}
+
+static void _buf_hex_msb(api_buf_t *b, const uint8_t *le, size_t n) {
+    for (size_t i = n; i > 0; i--) {
+        api_buf_printf(b, "%02x", le[i - 1]);
+    }
+}
+
+// The host's c1, s1 and ah (devices/ble_hci smp_crypto.c) on the sample data of the Bluetooth
+// Core (Vol 3 Part H 2.2.3, 2.2.4 and Appendix D.7): a check of the crypto the pairing uses.
+static void _ble_crypto(request_t *r) {
+    uint8_t k[16] = { 0 }, rnd[16], preq[7], pres[7], ia[6], ra[6], r1[16], r2[16], irk[16], prand[3];
+    uint8_t c1[16], s1[16], ah[3];
+    _le_from(rnd, "5783D52156AD6F0E6388274EC6702EE0", 16);
+    _le_from(preq, "07071000000101", 7);
+    _le_from(pres, "05000800000302", 7);
+    _le_from(ia, "A1A2A3A4A5A6", 6);
+    _le_from(ra, "B1B2B3B4B5B6", 6);
+    smp_c1(k, rnd, preq, pres, 1, ia, 0, ra, c1);
+    _le_from(r1, "000F0E0D0C0B0A091122334455667788", 16);
+    _le_from(r2, "010203040506070899AABBCCDDEEFF00", 16);
+    smp_s1(k, r1, r2, s1);
+    _le_from(irk, "EC0234A357C8AD05341010A60A397D9B", 16);
+    _le_from(prand, "708194", 3);
+    smp_ah(irk, prand, ah);
+    api_buf_t b = {0};
+    api_buf_add(&b, "{\"c1\": \"", 8);
+    _buf_hex_msb(&b, c1, sizeof(c1));
+    api_buf_add(&b, "\", \"s1\": \"", 10);
+    _buf_hex_msb(&b, s1, sizeof(s1));
+    api_buf_add(&b, "\", \"ah\": \"", 10);
+    _buf_hex_msb(&b, ah, sizeof(ah));
+    api_buf_add(&b, "\"}", 2);
+    _answer_json(r, 200, &b);
+    api_buf_free(&b);
+}
+
 static void _ble(request_t *r, bool get, bool post) {
     if (strcmp(r->path, "/api/ble") == 0 && get) {
         _ble_state(r);
+    } else if (strcmp(r->path, "/api/ble/crypto") == 0 && get) {
+        _ble_crypto(r);
     } else if (strcmp(r->path, "/api/ble/connect") == 0 && post) {
         if (!_phone(r)) {
             return;

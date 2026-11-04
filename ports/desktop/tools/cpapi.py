@@ -870,6 +870,96 @@ class Ble:
                 time.sleep(0.05)
 
 
+# ---- Bluetooth LE security: AES-128 and SMP's c1, s1 and ah (Core Vol 3 Part H 2.2) ----
+#
+# Test-grade and slow, standard library only: the phone's side of LE Legacy pairing. SMP's values
+# go least significant byte first, as on the air; AES takes and gives the most significant first.
+
+
+def _aes_sbox():
+    sbox, p, q = [0] * 256, 1, 1
+    while True:
+        # p runs through the multiplicative group of GF(2^8), q through its inverses.
+        p = p ^ ((p << 1) & 0xFF) ^ (0x1B if p & 0x80 else 0)
+        q ^= q << 1
+        q ^= q << 2
+        q ^= q << 4
+        q &= 0xFF
+        if q & 0x80:
+            q ^= 0x09
+        r = lambda x, s: ((x << s) | (x >> (8 - s))) & 0xFF
+        sbox[p] = q ^ r(q, 1) ^ r(q, 2) ^ r(q, 3) ^ r(q, 4) ^ 0x63
+        if p == 1:
+            break
+    sbox[0] = 0x63
+    return sbox
+
+
+_SBOX = _aes_sbox()
+
+
+def _xtime(b):
+    return ((b << 1) ^ (0x1B if b & 0x80 else 0)) & 0xFF
+
+
+def aes128(key, block):
+    """AES-128 encryption of one 16-byte block (FIPS-197), most significant byte first."""
+    w = [list(key[i : i + 4]) for i in range(0, 16, 4)]
+    rcon = 1
+    for i in range(4, 44):
+        t = list(w[i - 1])
+        if i % 4 == 0:
+            t = [_SBOX[t[1]] ^ rcon, _SBOX[t[2]], _SBOX[t[3]], _SBOX[t[0]]]
+            rcon = _xtime(rcon)
+        w.append([a ^ b for a, b in zip(w[i - 4], t)])
+    s = [b ^ k for b, k in zip(block, sum(w[0:4], []))]
+    for rnd in range(1, 11):
+        s = [_SBOX[b] for b in s]
+        s = [s[(i + 4 * (i % 4)) % 16] for i in range(16)]  # rows shifted left by their number
+        if rnd < 10:
+            m = []
+            for c in range(4):
+                a = s[4 * c : 4 * c + 4]
+                x = a[0] ^ a[1] ^ a[2] ^ a[3]
+                m += [a[i] ^ x ^ _xtime(a[i] ^ a[(i + 1) % 4]) for i in range(4)]
+            s = m
+        s = [b ^ k for b, k in zip(s, sum(w[4 * rnd : 4 * rnd + 4], []))]
+    return bytes(s)
+
+
+def smp_e(key, data):
+    """SMP's e(): AES-128 of values given and returned least significant byte first."""
+    return aes128(bytes(reversed(key)), bytes(reversed(data)))[::-1]
+
+
+def _xor(a, b):
+    return bytes(x ^ y for x, y in zip(a, b))
+
+
+def smp_c1(k, r, preq, pres, iat, ia, rat, ra):
+    """The confirm value: k, r 16 bytes; preq, pres the 7-byte Pairing Request and Response; the
+    initiator's and responder's address types (0 public, 1 random) and addresses (6 bytes), all
+    least significant byte first."""
+    p1 = bytes([iat, rat]) + bytes(preq) + bytes(pres)
+    p2 = bytes(ra) + bytes(ia) + bytes(4)
+    return smp_e(k, _xor(smp_e(k, _xor(r, p1)), p2))
+
+
+def smp_s1(k, r1, r2):
+    """The STK: e(k, r1's and r2's low halves), least significant byte first."""
+    return smp_e(k, bytes(r2[:8]) + bytes(r1[:8]))
+
+
+def smp_ah(k, r):
+    """The random address hash of a 3-byte prand under an IRK k."""
+    return smp_e(k, bytes(r[:3]) + bytes(13))[:3]
+
+
+def _le(text):
+    """A value written most significant first ("5783 d521...") as its bytes least significant first."""
+    return bytes.fromhex(text.replace(" ", ""))[::-1]
+
+
 class bluefruit:
     """Bluefruit Connect's packets, as its app sends them to the Nordic UART."""
 
