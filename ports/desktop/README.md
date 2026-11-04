@@ -667,7 +667,7 @@ naming another `Host`, or a browser's preflight, is refused, so a web page canno
 | `POST /api/panel` | key script lines (`set ENV.temp 24.5`, `press A`, `turn ENC 2`, `send IR_RX`, `down Z`), applied before the answer |
 | `GET /api/display?name=NAME` | the window (`DISPLAY`), or a board file's display, as PNG |
 | `GET /api/trace?since=N&wait=TEXT&timeout=MS` | the bus trace, as the console; with or without `--trace-bus` |
-| `GET /api/ble` | the Bluetooth controller (`virtual`, `serial`, `off`), what is advertised (`data`, `scan_response` in hex, `name`, `connectable`), the address, the connection |
+| `GET /api/ble` | the Bluetooth controller (`virtual`, `serial`, `off`), what is advertised (`data`, `scan_response` in hex, `name`, `connectable`), the address, the connection; `links`: each connection's `handle`, `peer`, the program's `role` and whether it is `encrypted` |
 | `POST /api/ble/connect`, `/disconnect` | the phone joins what the program advertises, or leaves (409 with a real controller) |
 | `POST /api/ble/att` | an ATT PDU from the phone to the program, as hex |
 | `GET /api/ble/att?wait=MS` | the ATT PDUs the program sent the phone since the last call (`pdus`, hex), waiting for the first |

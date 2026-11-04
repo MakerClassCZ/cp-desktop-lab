@@ -29,6 +29,15 @@ void ble_host_attach_adapter(void);
 // "virtual", "serial" (--ble PORT) or "off".
 const char *ble_host_controller(void);
 
+// A connection as the HCI shows it.
+#define BLE_HOST_LINKS 4
+typedef struct {
+    uint16_t handle;
+    bool central;               // the program's role on it: central, else peripheral
+    bool encrypted;
+    uint8_t peer[6];            // least significant byte first
+} ble_host_link_t;
+
 // What the HCI shows, the same for every controller (host/ble_watch.c).
 typedef struct {
     bool advertising;
@@ -42,6 +51,8 @@ typedef struct {
     uint8_t data_len;
     uint8_t scan_response[31];
     uint8_t scan_response_len;
+    ble_host_link_t links[BLE_HOST_LINKS];  // the open connections, in the order they came
+    uint8_t link_count;
 } ble_host_state_t;
 
 // Every complete H4 packet, to_controller or from it: the state, the trace, the log.

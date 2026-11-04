@@ -86,6 +86,7 @@ with launch(PERIPHERAL, args=["--ble-log", log]) as b:
     row = b.state().get("ble")
     b.request("POST", "/api/ble/connect")
     connected = seen(b, "connected (<Connection>,)")
+    links = b.request("GET", "/api/ble").get("links")
     # The controller sends a vendor event at each connection, as the CYW43439 does: the MTU
     # exchange after it still answers.
     mtu = att(b, "02f700")
@@ -95,6 +96,7 @@ with launch(PERIPHERAL, args=["--ble-log", log]) as b:
     again = att(b, "060100ffff00280118")
     b.request("POST", "/api/ble/disconnect")
     disconnected = seen(b, "disconnected ()")
+    links_after = b.request("GET", "/api/ble").get("links")
     trace = b.trace(since=0)["data"]
     out = b.console(since=0)["data"]
 check(
@@ -113,6 +115,13 @@ check(
     row,
 )
 check("connect: adapter.connections holds a Connection", connected, out[-300:])
+check(
+    "/api/ble links: the phone's, the program its peripheral, not encrypted; none after",
+    links
+    == [{"handle": 0x40, "peer": "7c:10:c9:1c:37:89", "role": "peripheral", "encrypted": False}]
+    and links_after == [],
+    (links, links_after),
+)
 check("MTU exchange after the vendor event", (mtu or "").startswith("03"), mtu)
 check("a FIND_TYPE for GATT finds it", (found or "").startswith("07"), found)
 check("a 300-byte frame in fragments does not break the host", again == found, again)

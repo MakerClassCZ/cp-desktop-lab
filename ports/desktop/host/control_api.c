@@ -927,7 +927,15 @@ static void _ble_state(request_t *r) {
         _buf_hex(&b, s.data, s.data_len);
         api_buf_add(&b, "\", \"scan_response\": \"", 21);
         _buf_hex(&b, s.scan_response, s.scan_response_len);
-        api_buf_add(&b, "\"", 1);
+        api_buf_add(&b, "\", \"links\": [", 13);
+        for (uint8_t i = 0; i < s.link_count; i++) {
+            const ble_host_link_t *l = &s.links[i];
+            api_buf_printf(&b, "%s{\"handle\": %u, \"peer\": \"%02x:%02x:%02x:%02x:%02x:%02x\", "
+                "\"role\": \"%s\", \"encrypted\": %s}", i ? ", " : "", l->handle,
+                l->peer[5], l->peer[4], l->peer[3], l->peer[2], l->peer[1], l->peer[0],
+                l->central ? "central" : "peripheral", l->encrypted ? "true" : "false");
+        }
+        api_buf_add(&b, "]", 1);
     }
     api_buf_add(&b, "}", 1);
     _answer_json(r, 200, &b);

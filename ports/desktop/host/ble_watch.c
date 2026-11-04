@@ -180,6 +180,7 @@ static void _command(const uint8_t *h4, size_t len) {
     switch (opcode) {
         case 0x0c03:            // Reset
             _state.advertising = _state.connected = false;
+            _state.link_count = 0;
             break;
         case 0x2005:            // LE Set Random Address
             if (n >= 6) {
@@ -221,6 +222,15 @@ static void _command(const uint8_t *h4, size_t len) {
     }
 }
 
+static ble_host_link_t *_link(uint16_t handle) {
+    for (uint8_t i = 0; i < _state.link_count; i++) {
+        if (_state.links[i].handle == handle) {
+            return &_state.links[i];
+        }
+    }
+    return NULL;
+}
+
 static void _event(const uint8_t *h4, size_t len) {
     const uint8_t *p = h4 + 3;
     size_t n = len - 3;
@@ -232,10 +242,28 @@ static void _event(const uint8_t *h4, size_t len) {
         _state.connected = true;
         _state.advertising = false;
         memcpy(_state.peer, p + 6, 6);
+        if (_state.link_count < BLE_HOST_LINKS) {
+            ble_host_link_t *link = &_state.links[_state.link_count++];
+            link->handle = (uint16_t)(p[2] | p[3] << 8) & 0x0fff;
+            link->central = p[4] == 0x00;
+            link->encrypted = false;
+            memcpy(link->peer, p + 6, 6);
+        }
         bus_trace_text("BLE CONNECT %02x:%02x:%02x:%02x:%02x:%02x", p[11], p[10], p[9], p[8], p[7], p[6]);
     } else if (h4[1] == 0x05 && n >= 4 && p[0] == 0) {
-        _state.connected = false;
+        ble_host_link_t *link = _link((uint16_t)(p[1] | p[2] << 8) & 0x0fff);
+        if (link != NULL) {
+            ble_host_link_t *end = &_state.links[_state.link_count--];
+            memmove(link, link + 1, (size_t)(end - (link + 1)) * sizeof(*link));
+        }
+        _state.connected = _state.link_count > 0;
         bus_trace_text("BLE DISCONNECT 0x%02x", p[3]);
+    } else if ((h4[1] == 0x08 && n >= 4) || (h4[1] == 0x30 && n >= 3)) {
+        // Encryption Change (its on or off), Encryption Key Refresh Complete (on).
+        ble_host_link_t *link = _link((uint16_t)(p[1] | p[2] << 8) & 0x0fff);
+        if (link != NULL && p[0] == 0) {
+            link->encrypted = h4[1] == 0x30 || p[3] != 0;
+        }
     }
 }
 
