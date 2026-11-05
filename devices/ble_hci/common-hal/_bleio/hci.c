@@ -124,6 +124,22 @@ static volatile bool hci_poll_in_progress = false;
 // SMP's) wait until there are none.
 static volatile uint8_t hci_waits;
 
+// Frames sent while a packet is being handled (ATT's answers) when the controller's buffers for
+// them are not free: their credits come back in packets queued behind the one being handled,
+// which cannot be read before it is done. They go out, in order, when it is.
+#define DEFERRED_MAX 2
+typedef struct {
+    uint16_t handle;
+    uint8_t cid;
+    uint16_t len;
+    uint8_t data[BLEIO_HCI_MAX_MTU];
+} deferred_frame_t;
+static deferred_frame_t deferred[DEFERRED_MAX];
+static uint8_t deferred_count;
+static bool deferred_sending;
+
+static void send_deferred(void);
+
 
 //////////////////////////////////////////////////////////////////////
 
@@ -464,6 +480,7 @@ void bleio_hci_reset(void) {
     pending_pkt = 0;
     hci_poll_in_progress = false;
     hci_waits = 0;
+    deferred_count = 0;
     bleio_att_reset();
     smp_reset();
 }
@@ -574,6 +591,9 @@ hci_result_t hci_poll_for_incoming_pkt(void) {
     }
 
     hci_poll_in_progress = false;
+    if (deferred_count > 0) {
+        send_deferred();
+    }
     return HCI_OK;
 }
 
@@ -634,6 +654,18 @@ bool hci_busy(void) {
     return hci_waits > 0 || hci_poll_in_progress;
 }
 
+static void send_deferred(void) {
+    if (deferred_sending) {
+        return;
+    }
+    deferred_sending = true;
+    for (uint8_t i = 0; i < deferred_count; i++) {
+        hci_send_acl_pkt(deferred[i].handle, deferred[i].cid, deferred[i].len, deferred[i].data);
+    }
+    deferred_count = 0;
+    deferred_sending = false;
+}
+
 hci_result_t hci_send_acl_pkt(uint16_t handle, uint8_t cid, uint16_t data_len, uint8_t *data) {
     // The L2CAP frame, its header then the data, goes in ACL packets no longer than the
     // controller's buffers (LE Read Buffer Size): the first a start, the rest continuations.
@@ -653,6 +685,23 @@ hci_result_t hci_send_acl_pkt(uint16_t handle, uint8_t cid, uint16_t data_len, u
     // hangs it.
     const size_t fragments = (frame_len + max_len - 1) / max_len;
     const size_t buffers = common_hal_bleio_adapter_obj.max_acl_num_buffers;
+    if (!deferred_sending) {
+        if (hci_poll_in_progress &&
+            (deferred_count > 0 || pending_pkt + MIN(fragments, buffers) > buffers)) {
+            if (deferred_count == DEFERRED_MAX || data_len > BLEIO_HCI_MAX_MTU) {
+                return HCI_WRITE_TIMEOUT;
+            }
+            deferred_frame_t *f = &deferred[deferred_count++];
+            f->handle = handle;
+            f->cid = cid;
+            f->len = data_len;
+            memcpy(f->data, data, data_len);
+            return HCI_OK;
+        }
+        if (!hci_poll_in_progress) {
+            send_deferred();    // what waited goes first
+        }
+    }
     uint64_t start = supervisor_ticks_ms64();
     while (pending_pkt + MIN(fragments, buffers) > buffers) {
         // The credits come back in Number Of Completed Packets, read here as in send_command().

@@ -742,3 +742,32 @@ check(
     "sent 3" in sent and len(got) >= 3,
     (sent[-200:], got),
 )
+
+# Two requests back to back with ACL buffers of 27 bytes: the answer to the second, a long read
+# in all 8 buffers, waits for the first one's credit and still goes out.
+LONG_VALUE = """
+import _bleio, time
+C = _bleio.Characteristic
+s = _bleio.Service(_bleio.UUID(0x1270))
+C.add_to_service(s, _bleio.UUID(0x1271), properties=C.READ, max_length=300,
+    initial_value=bytes(range(256)) + bytes(44))
+C.add_to_service(s, _bleio.UUID(0x1272), properties=C.WRITE, max_length=8)
+_bleio.adapter.start_advertising(bytes([2, 1, 6]), connectable=True)
+print("ready")
+while True:
+    time.sleep(0.1)
+"""
+with launch(LONG_VALUE, env=dict(HEADLESS, CIRCUITPY_BLE_VIRTUAL_FAULT="small-buffers")) as b:
+    seen(b, "ready")
+    p = b.ble.connect()
+    long_c, write_c = p.characteristic(0x1271), p.characteristic(0x1272)
+    p._send(b"\x12" + struct.pack("<H", write_c.handle) + b"w")  # Write Request
+    p._send(b"\x0a" + struct.pack("<H", long_c.handle))  # Read Request, without waiting
+    answers, end = [], time.time() + 4
+    while len(answers) < 2 and time.time() < end:
+        answers += p._take(0.5)
+check(
+    "small buffers: a write and a long read back to back, both answered",
+    [a[:1] for a in answers] == [b"\x13", b"\x0b"] and answers[1][1:] == bytes(range(p.mtu - 1)),
+    (p.mtu, [a[:8].hex() for a in answers]),
+)
