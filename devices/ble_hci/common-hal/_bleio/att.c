@@ -1516,8 +1516,9 @@ static void process_write_req_or_cmd(uint16_t conn_handle, uint16_t mtu, uint8_t
         }
 
         // Just change the local value. Don't fire off notifications, etc.
-        bleio_characteristic_set_local_value(characteristic, &bufinfo);
-        bleio_characteristic_peer(characteristic, conn_handle);
+        if (bleio_characteristic_set_local_value(characteristic, &bufinfo)) {
+            bleio_characteristic_peer(characteristic, conn_handle);
+        }
 
     } else if (mp_obj_is_type(attribute_obj, &bleio_descriptor_type)) {
         bleio_descriptor_obj_t *descriptor = MP_OBJ_TO_PTR(attribute_obj);

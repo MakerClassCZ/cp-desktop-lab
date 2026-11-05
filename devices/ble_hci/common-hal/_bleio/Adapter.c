@@ -31,6 +31,7 @@
 #include "shared-bindings/_bleio/Connection.h"
 #include "shared-bindings/_bleio/ScanEntry.h"
 #include "shared-bindings/time/__init__.h"
+#include "supervisor/shared/bluetooth/bluetooth.h"
 
 #define MSEC_TO_UNITS(TIME, RESOLUTION) (((TIME) * 1000) / (RESOLUTION))
 #define SEC_TO_UNITS(TIME, RESOLUTION) (((TIME) * 1000000) / (RESOLUTION))
@@ -433,6 +434,14 @@ void common_hal_bleio_adapter_set_enabled(bleio_adapter_obj_t *self, bool enable
     if (is_enabled == enabled) {
         return;
     }
+
+    #if CIRCUITPY_BLE_FILE_SERVICE || CIRCUITPY_BLE_SERIAL_SERVICE
+    // The program turns the adapter off under the BLE workflow: the workflow stops (its services
+    // and static buffers go with the table) and starts again after this VM (bleio_reset()).
+    if (!enabled) {
+        supervisor_stop_bluetooth();
+    }
+    #endif
 
     // We must poll for input from the HCI adapter.
     // TODO Can we instead trigger an interrupt on UART input traffic?

@@ -67,6 +67,10 @@ static bool workflow_running(void) {
 // connection, its MTU and CCCDs stay, and no HCI Reset is sent. Otherwise a full reset.
 void bleio_user_reset(void) {
     bleio_adapter_obj_t *adapter = &common_hal_bleio_adapter_obj;
+    // What the program wrote last to its packet buffers goes out before they go.
+    if (adapter->enabled) {
+        bleio_packet_buffer_background();
+    }
     if (!workflow_running()) {
         bleio_reset();
         return;
