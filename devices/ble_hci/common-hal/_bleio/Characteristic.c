@@ -29,12 +29,10 @@ void common_hal_bleio_characteristic_construct(bleio_characteristic_obj_t *self,
     self->props = props;
     self->read_perm = read_perm;
     self->write_perm = write_perm;
-    self->descriptor_list = mp_obj_new_list(0, NULL);
     self->observer = mp_const_none;
     self->user_desc = NULL;
     self->cccd = NULL;
     self->sccd = NULL;
-    self->value = mp_obj_new_bytes(initial_value_bufinfo->buf, initial_value_bufinfo->len);
 
     const mp_int_t max_length_max = 512;
 
@@ -42,6 +40,11 @@ void common_hal_bleio_characteristic_construct(bleio_characteristic_obj_t *self,
 
     self->max_length = max_length;
     self->fixed_length = fixed_length;
+
+    // Off the VM heap for _bleio's own services and the BLE workflow's (Adapter.h). The value has
+    // room for max_length bytes and is written in place; the supervisor gives no initial value.
+    self->descriptor_list = bleio_attribute_list_new(self, 2);
+    self->value = bleio_attribute_value_new(self, service->is_remote ? 0 : max_length, initial_value_bufinfo);
 
     if (service->is_remote) {
         self->handle = handle;
@@ -115,8 +118,9 @@ void common_hal_bleio_characteristic_set_value(bleio_characteristic_obj_t *self,
                 mp_raise_bleio_BluetoothError(MP_ERROR_TEXT("Characteristic not writable"));
             }
         } else {
-            // Always write the value locally even if no connections are active.
-            bleio_characteristic_set_local_value(self, bufinfo);
+            // Always write the value locally even if no connections are active. Only the value: an
+            // observer (a PacketBuffer) takes what a peer writes, not what it sends itself.
+            bleio_attribute_value_set(self->value, bufinfo->buf, bufinfo->len);
             // Notify or indicate all active connections.
 
             uint16_t cccd_value = 0;
@@ -187,6 +191,7 @@ void common_hal_bleio_characteristic_set_cccd(bleio_characteristic_obj_t *self, 
     att_write_value(conn_handle, self->cccd->handle, value, sizeof(value), true);
 }
 
+// A peer wrote the value: the observer gets it too.
 bool bleio_characteristic_set_local_value(bleio_characteristic_obj_t *self, mp_buffer_info_t *bufinfo) {
     if (self->fixed_length && bufinfo->len != self->max_length) {
         return false;
@@ -195,7 +200,7 @@ bool bleio_characteristic_set_local_value(bleio_characteristic_obj_t *self, mp_b
         return false;
     }
 
-    self->value = mp_obj_new_bytes(bufinfo->buf, bufinfo->len);
+    bleio_attribute_value_set(self->value, bufinfo->buf, bufinfo->len);
 
     if (mp_obj_is_type(self->observer, &bleio_characteristic_buffer_type)) {
         bleio_characteristic_buffer_update(MP_OBJ_FROM_PTR(self->observer), bufinfo);
@@ -205,6 +210,12 @@ bool bleio_characteristic_set_local_value(bleio_characteristic_obj_t *self, mp_b
         return false;
     }
     return true;
+}
+
+void bleio_characteristic_peer(bleio_characteristic_obj_t *self, uint16_t conn_handle) {
+    if (mp_obj_is_type(self->observer, &bleio_packet_buffer_type)) {
+        bleio_packet_buffer_peer(MP_OBJ_TO_PTR(self->observer), conn_handle);
+    }
 }
 
 void bleio_characteristic_set_observer(bleio_characteristic_obj_t *self, mp_obj_t observer) {

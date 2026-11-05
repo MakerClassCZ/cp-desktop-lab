@@ -11,15 +11,17 @@
 #include "shared-bindings/_bleio/Descriptor.h"
 #include "shared-bindings/_bleio/Service.h"
 #include "shared-bindings/_bleio/Adapter.h"
+#include "common-hal/_bleio/Adapter.h"
 
 uint32_t _common_hal_bleio_service_construct(bleio_service_obj_t *self, bleio_uuid_obj_t *uuid, bool is_secondary, mp_obj_list_t *characteristic_list) {
+    // A static service (the BLE workflow's file transfer service) may come without its type,
+    // which the table needs to know it for a service.
+    self->base.type = &bleio_service_type;
     self->uuid = uuid;
     self->characteristic_list = characteristic_list;
     self->is_remote = false;
     self->connection = NULL;
     self->is_secondary = is_secondary;
-
-    vm_used_ble = true;
 
     self->handle = bleio_adapter_add_attribute(&common_hal_bleio_adapter_obj, MP_OBJ_TO_PTR(self));
     self->start_handle = self->handle;
@@ -30,7 +32,12 @@ uint32_t _common_hal_bleio_service_construct(bleio_service_obj_t *self, bleio_uu
     return 0;
 }
 
+// The program's service: its attributes follow the table's static part, and a reload restarts the
+// stack to take them away (bleio_reset()). The supervisor's services use the function above.
 void common_hal_bleio_service_construct(bleio_service_obj_t *self, bleio_uuid_obj_t *uuid, bool is_secondary) {
+    bleio_adapter_close_static_attributes(&common_hal_bleio_adapter_obj);
+    vm_used_ble = true;
+    vm_added_services = true;
     if (_common_hal_bleio_service_construct(self, uuid, is_secondary,
         mp_obj_new_list(0, NULL)) != 0) {
         mp_raise_RuntimeError(MP_ERROR_TEXT("Failed to add service"));
@@ -84,7 +91,8 @@ void common_hal_bleio_service_add_characteristic(bleio_service_obj_t *self,
 
     if (characteristic->props & (CHAR_PROP_NOTIFY | CHAR_PROP_INDICATE)) {
         // We need a CCCD if this characteristic is doing notify or indicate.
-        bleio_descriptor_obj_t *cccd = mp_obj_malloc(bleio_descriptor_obj_t, &bleio_descriptor_type);
+        bleio_descriptor_obj_t *cccd = bleio_attribute_alloc(characteristic, sizeof(bleio_descriptor_obj_t));
+        cccd->base.type = &bleio_descriptor_type;
 
         uint16_t zero = 0;
         mp_buffer_info_t zero_cccd_value = {

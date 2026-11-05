@@ -50,11 +50,17 @@
 #include "shared-bindings/_bleio/__init__.h"
 #include "shared-bindings/_bleio/Characteristic.h"
 #include "shared-bindings/_bleio/Descriptor.h"
+#include "shared-bindings/_bleio/PacketBuffer.h"
 #include "shared-bindings/_bleio/Service.h"
 #include "shared-bindings/_bleio/UUID.h"
 #include "supervisor/shared/tick.h"
 
-static uint16_t max_mtu = BT_ATT_DEFAULT_LE_MTU;  // 23
+// The ATT MTU we take: 247, an LE packet of 251 bytes (the most of a Data Length Extension), so a
+// notification carries 244 bytes. The host's buffers hold that (hci.c: 255).
+#ifndef BLEIO_HCI_MAX_MTU
+#define BLEIO_HCI_MAX_MTU 247
+#endif
+static uint16_t max_mtu = BLEIO_HCI_MAX_MTU;
 static unsigned long timeout = 5000;
 
 static volatile bool confirm;
@@ -239,7 +245,7 @@ static void check_and_save_expected_rsp(uint16_t conn_handle, uint8_t opcode, ui
 }
 
 void bleio_att_reset(void) {
-    max_mtu = BT_ATT_DEFAULT_LE_MTU;
+    max_mtu = BLEIO_HCI_MAX_MTU;
     expected_rsp.conn_handle = 0xffff;
     timeout = 5000;
     long_write_handle = BLE_GATT_HANDLE_INVALID;
@@ -545,6 +551,10 @@ void att_set_max_mtu(uint16_t max_mtu_in) {
     max_mtu = max_mtu_in;
 }
 
+void att_cap_max_mtu(uint16_t limit) {
+    max_mtu = MAX(BT_ATT_DEFAULT_LE_MTU, MIN(BLEIO_HCI_MAX_MTU, limit));
+}
+
 void att_set_timeout(unsigned long timeout_in) {
     timeout = timeout_in;
 }
@@ -574,6 +584,8 @@ void att_add_connection(uint16_t handle, uint8_t role, bt_addr_le_t *peer_addr, 
     common_hal_bleio_adapter_obj.connection_objs = NULL;
     bleio_connections[peer_index].role = role;
     bleio_connections[peer_index].is_central = role == BT_HCI_ROLE_MASTER;
+    // hci.c says when it came from the program's own advertising.
+    bleio_connections[peer_index].user_owned = role == BT_HCI_ROLE_MASTER;
     // Encryption starts later, with pairing or a bond's key.
     bleio_connections[peer_index].encrypted = false;
     bleio_connections[peer_index].key_size = 0;
@@ -608,10 +620,21 @@ void att_remove_connection(uint16_t conn_handle, uint8_t reason) {
         return;
     }
 
+    // Packet buffers that notified this peer stop.
+    size_t max_attribute_handle = bleio_adapter_max_attribute_handle(&common_hal_bleio_adapter_obj);
+    for (size_t handle = 1; handle <= max_attribute_handle; handle++) {
+        mp_obj_t attribute_obj = bleio_adapter_get_attribute(&common_hal_bleio_adapter_obj, handle);
+        if (mp_obj_is_type(attribute_obj, &bleio_characteristic_type)) {
+            bleio_characteristic_obj_t *characteristic = MP_OBJ_TO_PTR(attribute_obj);
+            if (mp_obj_is_type(characteristic->observer, &bleio_packet_buffer_type)) {
+                bleio_packet_buffer_disconnected(MP_OBJ_TO_PTR(characteristic->observer), conn_handle);
+            }
+        }
+    }
+
     if (peer_count == 1) {
 
         // Clear CCCD values on disconnect.
-        size_t max_attribute_handle = bleio_adapter_max_attribute_handle(&common_hal_bleio_adapter_obj);
         for (size_t handle = 1; handle <= max_attribute_handle; handle++) {
             mp_obj_t attribute_obj = bleio_adapter_get_attribute(&common_hal_bleio_adapter_obj, handle);
 
@@ -624,7 +647,7 @@ void att_remove_connection(uint16_t conn_handle, uint8_t reason) {
             if (mp_obj_is_type(attribute_obj, &bleio_descriptor_type)) {
                 bleio_descriptor_obj_t *descriptor = MP_OBJ_TO_PTR(attribute_obj);
                 if (bleio_uuid_get_uuid16_or_unknown(descriptor->uuid) == BLE_UUID_CCCD) {
-                    common_hal_bleio_descriptor_set_value(descriptor, &zero_cccd_value);
+                    bleio_descriptor_set_local_value(descriptor, &zero_cccd_value);
                 }
             }
         }
@@ -636,6 +659,7 @@ void att_remove_connection(uint16_t conn_handle, uint8_t reason) {
     bleio_connections[peer_index].conn_handle = 0xffff;
     bleio_connections[peer_index].role = 0x00;
     bleio_connections[peer_index].is_central = false;
+    bleio_connections[peer_index].user_owned = false;
     bleio_connections[peer_index].encrypted = false;
     bleio_connections[peer_index].key_size = 0;
     memset(&bleio_connections[peer_index].addr, 0x00, sizeof(bleio_connections[peer_index].addr));
@@ -1528,7 +1552,9 @@ static void process_write_req_or_cmd(uint16_t conn_handle, uint16_t mtu, uint8_t
         }
 
         // Just change the local value. Don't fire off notifications, etc.
-        bleio_characteristic_set_local_value(characteristic, &bufinfo);
+        if (bleio_characteristic_set_local_value(characteristic, &bufinfo)) {
+            bleio_characteristic_peer(characteristic, conn_handle);
+        }
 
     } else if (mp_obj_is_type(attribute_obj, &bleio_descriptor_type)) {
         bleio_descriptor_obj_t *descriptor = MP_OBJ_TO_PTR(attribute_obj);
@@ -1548,7 +1574,14 @@ static void process_write_req_or_cmd(uint16_t conn_handle, uint16_t mtu, uint8_t
             return;
         }
 
-        common_hal_bleio_descriptor_set_value(descriptor, &bufinfo);
+        // A CCCD is two bytes: anything else changes nothing (and raises nothing, here).
+        if (!bleio_descriptor_set_local_value(descriptor, &bufinfo)) {
+            if (with_response) {
+                send_error(conn_handle, BT_ATT_OP_WRITE_REQ, req->handle, BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+            }
+            return;
+        }
+        bleio_characteristic_peer(descriptor->characteristic, conn_handle);
         // A bonded peer's CCCDs go to its bond.
         smp_on_cccd_written(conn_handle);
     }

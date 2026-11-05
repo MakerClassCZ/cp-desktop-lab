@@ -122,16 +122,26 @@ static void _fail(bleio_connection_internal_t *c, uint8_t reason) {
 
 // ---- Bonds and the GATT table ----
 
+// The table read directly, its static part (_bleio's and the BLE workflow's attributes) then the
+// program's: bleio_adapter_get_attribute() would enable a port's adapter that is off, from a
+// handler too. One past the last handle; the attribute at a handle below that.
+static size_t _attribute_end(void) {
+    bleio_adapter_obj_t *adapter = &common_hal_bleio_adapter_obj;
+    return adapter->static_attribute_count + (adapter->attributes != NULL ? adapter->attributes->len : 0);
+}
+
+static mp_obj_t _attribute_at(size_t handle) {
+    bleio_adapter_obj_t *adapter = &common_hal_bleio_adapter_obj;
+    return handle < adapter->static_attribute_count ? adapter->static_attributes[handle]
+           : adapter->attributes->items[handle - adapter->static_attribute_count];
+}
+
 // A CRC-32 of each attribute's handle, kind, UUID and properties: a bonded peer's cached table is
 // still ours when it matches.
 static uint32_t _gatt_hash(void) {
-    bleio_adapter_obj_t *adapter = &common_hal_bleio_adapter_obj;
     uint32_t crc = 0;
-    if (adapter->attributes == NULL) {
-        return crc;
-    }
-    for (size_t handle = 1; handle < adapter->attributes->len; handle++) {
-        mp_obj_t obj = adapter->attributes->items[handle];
+    for (size_t handle = 1; handle < _attribute_end(); handle++) {
+        mp_obj_t obj = _attribute_at(handle);
         uint8_t entry[2 + 1 + 16 + 1];
         size_t n = 3;
         bleio_uuid_obj_t *uuid = NULL;
@@ -160,14 +170,11 @@ static uint32_t _gatt_hash(void) {
     return crc;
 }
 
-// The table read directly: bleio_adapter_get_attribute() would enable a port's adapter that is
-// off, from a handler too.
 static bleio_descriptor_obj_t *_cccd_at(uint16_t handle) {
-    mp_obj_list_t *attributes = common_hal_bleio_adapter_obj.attributes;
-    if (attributes == NULL || handle == 0 || handle >= attributes->len) {
+    if (handle == 0 || handle >= _attribute_end()) {
         return NULL;
     }
-    mp_obj_t obj = attributes->items[handle];
+    mp_obj_t obj = _attribute_at(handle);
     if (!mp_obj_is_type(obj, &bleio_descriptor_type)) {
         return NULL;
     }
@@ -177,13 +184,9 @@ static bleio_descriptor_obj_t *_cccd_at(uint16_t handle) {
 
 // The CCCDs that are on, with the table's hash, into a bond.
 static void _snapshot_cccds(bonding_record_t *record) {
-    bleio_adapter_obj_t *adapter = &common_hal_bleio_adapter_obj;
     record->cccd_count = 0;
     record->gatt_hash = _gatt_hash();
-    if (adapter->attributes == NULL) {
-        return;
-    }
-    for (size_t handle = 1; handle < adapter->attributes->len && record->cccd_count < BONDING_CCCD_MAX; handle++) {
+    for (size_t handle = 1; handle < _attribute_end() && record->cccd_count < BONDING_CCCD_MAX; handle++) {
         bleio_descriptor_obj_t *d = _cccd_at(handle);
         if (d == NULL) {
             continue;
@@ -211,7 +214,7 @@ static void _set_cccd(uint16_t handle, uint16_t value) {
 // the peer discovers anew rather than use handles that are gone.
 static void _restore_cccds(bleio_connection_internal_t *c, bonding_record_t *record) {
     bleio_adapter_obj_t *adapter = &common_hal_bleio_adapter_obj;
-    if (adapter->attributes == NULL) {
+    if (_attribute_end() <= 1) {
         return;
     }
     const uint32_t hash = _gatt_hash();

@@ -673,6 +673,172 @@ NUS_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"  # the phone writes here
 NUS_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"  # the program notifies here
 
 
+# The BLE workflow (supervisor/shared/bluetooth/): the file transfer service and CircuitPython's
+# serial service, as code.circuitpython.org and Glider use them.
+FT_SERVICE = 0xFEBB
+FT_VERSION = "adaf0100-4669-6c65-5472-616e73666572"
+FT_TRANSFER = "adaf0200-4669-6c65-5472-616e73666572"
+SERIAL_SERVICE = "adaf0001-4369-7263-7569-74507974686e"
+SERIAL_RX = "adaf0002-4369-7263-7569-74507974686e"  # the phone writes here
+SERIAL_TX = "adaf0003-4369-7263-7569-74507974686e"  # the board notifies here
+SERIAL_VERSION = "adaf0100-4369-7263-7569-74507974686e"
+
+# The file transfer protocol's statuses (file_transfer_protocol.h).
+FT_STATUS = {
+    0x01: "ok",
+    0x02: "error",
+    0x03: "error_no_file",
+    0x04: "error_protocol",
+    0x05: "error_readonly",
+}
+
+
+class FileTransferError(Exception):
+    """A status other than ok: status is its name ("error_no_file"), command the answer's."""
+
+    def __init__(self, command, status):
+        self.status = FT_STATUS.get(status, "0x%02x" % status)
+        self.command = command
+        super().__init__("file transfer 0x%02x: %s" % (command, self.status))
+
+
+class FileEntry:
+    """One entry of listdir(): its name, whether it is a directory, size, mtime (ns since 1970)."""
+
+    def __init__(self, name, directory, size, mtime):
+        self.name, self.directory, self.size, self.mtime = name, directory, size, mtime
+
+    def __repr__(self):
+        return "FileEntry(%r, %d)" % (self.name + ("/" if self.directory else ""), self.size)
+
+
+class FileTransfer:
+    """The BLE workflow's file transfer protocol, written from file_transfer_protocol.h: each
+    command goes out as Write Commands to the transfer characteristic in pieces of MTU-3 bytes,
+    the answers come back as its notifications and are put together by the protocol's struct
+    sizes. A status other than ok raises FileTransferError."""
+
+    CHUNK = 512  # the most a read asks for at a time, as the editors do
+
+    def __init__(self, peer):
+        self.peer = peer
+        self._rx = b""
+
+    def version(self):
+        return struct.unpack("<I", self.peer.read(FT_VERSION))[0]
+
+    def _handle(self):
+        return self.peer.characteristic(FT_TRANSFER).handle
+
+    def _send(self, data):
+        self.peer.subscribe(FT_TRANSFER)
+        step = self.peer.mtu - 3
+        for k in range(0, len(data), step):
+            self.peer.write(FT_TRANSFER, data[k : k + step], response=False)
+
+    def _recv(self, n, timeout=10):
+        """The next n bytes the board notified on the transfer characteristic."""
+        handle, end = self._handle(), time.time() + timeout
+        while len(self._rx) < n:
+            got = self.peer._notified.pop(handle, [])
+            self._rx += b"".join(got)
+            if len(self._rx) >= n:
+                break
+            if time.time() > end:
+                raise TimeoutError("%d of %d bytes from the file transfer" % (len(self._rx), n))
+            self.peer._take(min(max(end - time.time(), 0), 1))
+        data, self._rx = self._rx[:n], self._rx[n:]
+        return data
+
+    def _status(self, command, status):
+        if status != 0x01:
+            raise FileTransferError(command, status)
+
+    def listdir(self, path):
+        """The entries of the directory at path."""
+        p = path.encode()
+        self._send(struct.pack("<BBH", 0x50, 0, len(p)) + p)
+        entries = []
+        while True:
+            command, status, plen, number, count, flags, mtime, size = struct.unpack(
+                "<BBHIIIQI", self._recv(28)
+            )
+            self._status(command, status)
+            if number >= count:
+                return entries
+            name = self._recv(plen).decode(errors="replace")
+            entries.append(FileEntry(name, bool(flags & 1), size, mtime))
+
+    def read(self, path, chunk=CHUNK):
+        """The whole file at path, chunk bytes at a time, as READ then READ_PACING."""
+        p = path.encode()
+        self._send(struct.pack("<BBHII", 0x10, 0, len(p), 0, chunk) + p)
+        data = b""
+        while True:
+            command, status, _, offset, total, size = struct.unpack("<BBHIII", self._recv(16))
+            self._status(command, status)
+            data += self._recv(size)
+            if offset + size >= total:
+                return data
+            self._send(struct.pack("<BBHII", 0x12, 0x01, 0, offset + size, chunk))
+
+    def write(self, path, data, mtime=None):
+        """data to the file at path (created, or truncated to it); mtime in ns since 1970 (now by
+        default). The mtime the board kept, FAT's 2 s apart, is returned."""
+        p, data = path.encode(), data.encode() if isinstance(data, str) else bytes(data)
+        mtime = time.time_ns() if mtime is None else mtime
+        self._send(struct.pack("<BBHIQI", 0x20, 0, len(p), 0, mtime, len(data)) + p)
+        while True:
+            command, status, _, offset, kept, free = struct.unpack("<BBHIQI", self._recv(20))
+            self._status(command, status)
+            if free == 0:
+                return kept
+            piece = data[offset : offset + free]
+            self._send(struct.pack("<BBHII", 0x22, 0x01, 0, offset, len(piece)) + piece)
+
+    def delete(self, path):
+        """The file, or the directory and all in it, at path."""
+        p = path.encode()
+        self._send(struct.pack("<BBH", 0x30, 0, len(p)) + p)
+        command, status = struct.unpack("<BB", self._recv(2))
+        self._status(command, status)
+
+    def mkdir(self, path, mtime=None):
+        p = path.encode()
+        mtime = time.time_ns() if mtime is None else mtime
+        self._send(struct.pack("<BBHIQ", 0x40, 0, len(p), 0, mtime) + p)
+        command, status, _, _, _ = struct.unpack("<BBHIQ", self._recv(16))
+        self._status(command, status)
+
+    def move(self, old, new):
+        o, n = old.encode(), new.encode()
+        self._send(struct.pack("<BBHH", 0x60, 0, len(o), len(n)) + o + b"\0" + n)
+        command, status = struct.unpack("<BB", self._recv(2))
+        self._status(command, status)
+
+
+class BleConsole:
+    """The BLE workflow's serial service: the REPL and code.py's output, as the phone has them."""
+
+    def __init__(self, peer):
+        self.peer = peer
+
+    def write(self, text):
+        """Text (or bytes) typed, in pieces an MTU takes; notifications on first."""
+        self.peer.subscribe(SERIAL_TX)
+        data = text.encode() if isinstance(text, str) else bytes(text)
+        for k in range(0, len(data), self.peer.mtu - 3):
+            self.peer.write(SERIAL_RX, data[k : k + self.peer.mtu - 3], response=False)
+
+    def read(self, timeout=1):
+        """What the board wrote since the last call, waiting up to timeout for the first of it."""
+        return b"".join(self.peer.notifications(SERIAL_TX, timeout)).decode(errors="replace")
+
+    def interrupt(self):
+        """Ctrl-C."""
+        self.write(b"\x03")
+
+
 class Peer:
     """The phone connected to the program: a GATT client over ATT PDUs through the control API."""
 
@@ -889,6 +1055,20 @@ class Peer:
         """What the program wrote to its Nordic UART since the last call."""
         return b"".join(self.notifications(NUS_TX, timeout)).decode(errors="replace")
 
+    @property
+    def files(self):
+        """The BLE workflow's file transfer service (a FileTransfer)."""
+        if not hasattr(self, "_files"):
+            self._files = FileTransfer(self)
+        return self._files
+
+    @property
+    def console(self):
+        """The BLE workflow's serial service (a BleConsole)."""
+        if not hasattr(self, "_console"):
+            self._console = BleConsole(self)
+        return self._console
+
     def disconnect(self):
         self.board.request("POST", "/api/ble/disconnect")
 
@@ -1019,6 +1199,21 @@ class Ble:
         """What the program advertises now, or None when it advertises nothing."""
         s = self.state()
         return Advertisement(s) if s.get("advertising") else None
+
+    def discover(self, timeout=15):
+        """Discovery mode, as reset plus the boot button on a board: the lab resets, bonds erased,
+        and advertises publicly as CIRCUITPY. Returns when the new boot answers."""
+        before = self.board.info()["boot"]
+        self.board.request("POST", "/api/ble/discover")
+        end = time.time() + timeout
+        while time.time() < end:
+            try:
+                if self.board.info()["boot"] != before:
+                    return
+            except (OSError, http.client.HTTPException, ApiError):
+                pass
+            time.sleep(0.05)
+        raise TimeoutError("no new boot after discover")
 
     def connect(self, timeout=5, identity=None, bond=None, auto_pair=True, pair=False):
         """The phone joins the program's advertisement: a Peer, its MTU exchanged. Waits up to

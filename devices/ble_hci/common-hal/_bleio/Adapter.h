@@ -25,10 +25,17 @@
 
 extern bleio_connection_internal_t bleio_connections[BLEIO_TOTAL_CONNECTION_COUNT];
 
+// The attribute table's first part: _bleio's own GAP and GATT services and the BLE workflow's,
+// added from an enable until the program adds a service. It is off the VM heap (static objects,
+// their values and lists in a static arena), so it outlives a VM and the handles in it stay the
+// same from one run to the next; the program's attributes follow it, on the VM's heap.
+#ifndef BLEIO_HCI_STATIC_ATTRIBUTES
+#define BLEIO_HCI_STATIC_ATTRIBUTES 40
+#endif
+
 typedef struct _bleio_adapter_obj_t {
     mp_obj_base_t base;
     bleio_scanresults_obj_t *scan_results;
-    mp_obj_t name;
     mp_obj_tuple_t *connection_objs;
     // The link to the controller, and what its callbacks are given.
     const bleio_hci_transport_t *hci_transport;
@@ -71,8 +78,12 @@ typedef struct _bleio_adapter_obj_t {
     uint16_t max_acl_num_buffers;
     uint8_t features[8];        // Supported BLE features.
 
-    // All the local attributes for this device. The index into the list
-    // corresponds to the handle.
+    // The local attributes; an attribute's handle is its index. The first static_attribute_count
+    // are in static_attributes, the rest in attributes (the program's, NULL when it has none).
+    mp_obj_t static_attributes[BLEIO_HCI_STATIC_ATTRIBUTES];
+    uint16_t static_attribute_count;
+    // Attributes still go to the static part: from an enable until the program adds a service.
+    bool static_attributes_open;
     mp_obj_list_t *attributes;
     // Handle for last added service. Characteristics can only be added immediately after
     // the service they belong to. This vets that.
@@ -98,6 +109,21 @@ typedef struct _bleio_adapter_obj_t {
 } bleio_adapter_obj_t;
 
 uint16_t bleio_adapter_add_attribute(bleio_adapter_obj_t *adapter, mp_obj_t *attribute);
+// The program adds a service: the static part of the table ends.
+void bleio_adapter_close_static_attributes(bleio_adapter_obj_t *adapter);
+// The table cut back to its static part: what the program added goes with its heap.
+void bleio_adapter_cut_attributes(bleio_adapter_obj_t *adapter);
+// Memory for what an attribute object owner holds (its value, its lists, its CCCD): from the VM
+// heap for an owner on the heap (the program's), else from the static arena, which the next
+// enable starts over.
+void *bleio_attribute_alloc(const void *owner, size_t size);
+// An attribute's value: a bytearray of capacity bytes (at least 1), set to initial (may be NULL);
+// written in place from then on, so an ATT write allocates nothing.
+mp_obj_t bleio_attribute_value_new(const void *owner, size_t capacity, const mp_buffer_info_t *initial);
+void bleio_attribute_value_set(mp_obj_t value, const uint8_t *data, size_t len);
+// A list for owner: on the heap an empty one that grows; in the arena one of alloc items that
+// never does.
+mp_obj_list_t *bleio_attribute_list_new(const void *owner, size_t alloc);
 void bleio_adapter_advertising_was_stopped(bleio_adapter_obj_t *self);
 mp_obj_t *bleio_adapter_get_attribute(bleio_adapter_obj_t *adapter, uint16_t handle);
 uint16_t bleio_adapter_max_attribute_handle(bleio_adapter_obj_t *adapter);

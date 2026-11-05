@@ -266,7 +266,7 @@ void supervisor_bluetooth_init(void) {
         // still be held down when this interval starts; entering discovery mode from
         // it would erase bonding unasked. Require a release first.
         bool button_released = !port_boot_button_pressed();
-        while (diff < 1000) {
+        while (CIRCUITPY_BLE_DISCOVERY_WAIT && diff < 1000) {
             #if CIRCUITPY_STATUS_LED
             // Blink on for 50 and off for 100
             bool led_on = boot_in_discovery_mode || (diff % 150) <= 50;

@@ -4,6 +4,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-#if CIRCUITPY_BLE_FILE_SERVICE
-#error CIRCUITPY_BLE_FILE_SERVICE not implemented for CIRCUITPY_BLEIO_HCI
-#endif
+// The BLE workflow (supervisor/shared/bluetooth/) needs nothing here: the HCI background
+// (bleio_hci_background()) runs supervisor_bluetooth_background(), and its attributes stay off
+// the VM heap (Adapter.h).

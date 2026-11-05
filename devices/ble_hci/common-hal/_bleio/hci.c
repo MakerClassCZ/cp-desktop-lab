@@ -396,6 +396,9 @@ static void process_evt_pkt(size_t pkt_len, uint8_t pkt_data[]) {
                 // We don't tell the adapter to stop, because stopping advertising
                 // when it's already stopped seems to exercise a bug in the ESP32 HCI code:
                 // It doesn't return a response.
+                // The program's link when it came from the program's own advertising.
+                const bool program_advertising = common_hal_bleio_adapter_obj.now_advertising &&
+                    !common_hal_bleio_adapter_obj.circuitpython_advertising;
                 if (le_conn_complete->role == BT_HCI_ROLE_SLAVE) {
                     bleio_adapter_advertising_was_stopped(&common_hal_bleio_adapter_obj);
                 }
@@ -409,6 +412,14 @@ static void process_evt_pkt(size_t pkt_len, uint8_t pkt_data[]) {
                         le_conn_complete->latency,
                         le_conn_complete->supv_timeout,
                         le_conn_complete->clock_accuracy);
+                    bleio_connection_internal_t *connection =
+                        bleio_conn_handle_to_connection(le_conn_complete->handle);
+                    // The program's: a link from its own advertising, or one it made as the
+                    // central (the workflow never connects out).
+                    if (connection != NULL &&
+                        (program_advertising || le_conn_complete->role == BT_HCI_ROLE_MASTER)) {
+                        connection->user_owned = true;
+                    }
 
                     // Our address on the link, which pairing's c1 takes: as a peripheral the one we
                     // advertised from, as a central the one we connect from.
@@ -624,13 +635,29 @@ bool hci_busy(void) {
 }
 
 hci_result_t hci_send_acl_pkt(uint16_t handle, uint8_t cid, uint16_t data_len, uint8_t *data) {
-    // Wait for all backlogged packets to finish, as long as a command's answer may take: a
-    // controller that keeps the credit (gone, or never set up) fails the send, never hangs it.
+    // The L2CAP frame, its header then the data, goes in ACL packets no longer than the
+    // controller's buffers (LE Read Buffer Size): the first a start, the rest continuations.
+    const size_t frame_len = sizeof(acl_data_t) + data_len;
+    uint8_t frame[frame_len];
+    acl_data_t *acl_data = (acl_data_t *)frame;
+    acl_data->acl_data_len = data_len;
+    acl_data->cid = cid;
+    memcpy(&acl_data->acl_data, data, data_len);
+    const size_t max_len = common_hal_bleio_adapter_obj.max_acl_buffer_len > 0
+        ? common_hal_bleio_adapter_obj.max_acl_buffer_len : 27;
+
+    // Buffers for all the fragments first, so the frame goes out whole: no other frame (an ATT
+    // answer to what a poll reads) may come between its fragments. The MTU keeps a frame within
+    // the controller's buffers (att_cap_max_mtu()). Waited for as long as a command's answer may
+    // take: a controller that keeps the credits (gone, or never set up) fails the send, never
+    // hangs it.
+    const size_t fragments = (frame_len + max_len - 1) / max_len;
+    const size_t buffers = common_hal_bleio_adapter_obj.max_acl_num_buffers;
     uint64_t start = supervisor_ticks_ms64();
-    while (pending_pkt >= common_hal_bleio_adapter_obj.max_acl_num_buffers) {
+    while (pending_pkt + MIN(fragments, buffers) > buffers) {
+        // The credits come back in Number Of Completed Packets, read here as in send_command().
         hci_waits++;
         RUN_BACKGROUND_TASKS;
-        // As in send_command(): the credits come back in packets read here.
         hci_poll_for_incoming_pkt();
         hci_waits--;
         if (supervisor_ticks_ms64() - start > RESPONSE_TIMEOUT_MSECS) {
@@ -638,36 +665,37 @@ hci_result_t hci_send_acl_pkt(uint16_t handle, uint8_t cid, uint16_t data_len, u
         }
     }
 
-    // buf_len is size of entire packet including header.
-    const size_t buf_len = sizeof(h4_hci_acl_pkt_t) + sizeof(acl_data_t) + data_len;
-    uint8_t tx_buffer[buf_len];
+    for (size_t at = 0; at < frame_len;) {
 
-    h4_hci_acl_pkt_t *acl_pkt = (h4_hci_acl_pkt_t *)tx_buffer;
-    acl_data_t *acl_data = (acl_data_t *)acl_pkt->data;
-    acl_pkt->pkt_type = H4_ACL;
-    acl_pkt->handle = handle;
-    // Host-to-controller LE data must use the non-flushable start flag; NimBLE
-    // controllers (ESP32-C6) silently discard packets with ACL_DATA_PB_FIRST_FLUSH.
-    acl_pkt->pb = ACL_DATA_PB_FIRST_NON_FLUSH;
-    acl_pkt->bc = 0;
-    acl_pkt->data_len = (uint16_t)(sizeof(acl_data_t) + data_len);
-    acl_data->acl_data_len = data_len;
-    acl_data->cid = cid;
+        const size_t n = MIN(frame_len - at, max_len);
+        // buf_len is size of entire packet including header.
+        const size_t buf_len = sizeof(h4_hci_acl_pkt_t) + n;
+        uint8_t tx_buffer[buf_len];
+        h4_hci_acl_pkt_t *acl_pkt = (h4_hci_acl_pkt_t *)tx_buffer;
+        acl_pkt->pkt_type = H4_ACL;
+        acl_pkt->handle = handle;
+        // Host-to-controller LE data must use the non-flushable start flag; NimBLE
+        // controllers (ESP32-C6) silently discard packets with ACL_DATA_PB_FIRST_FLUSH.
+        acl_pkt->pb = at == 0 ? ACL_DATA_PB_FIRST_NON_FLUSH : ACL_DATA_PB_MIDDLE;
+        acl_pkt->bc = 0;
+        acl_pkt->data_len = (uint16_t)n;
+        memcpy(acl_pkt->data, frame + at, n);
 
-    memcpy(&acl_data->acl_data, data, data_len);
+        #if HCI_DEBUG
+        dump_acl_pkt(true, buf_len, tx_buffer);
+        #endif
 
-    #if HCI_DEBUG
-    dump_acl_pkt(true, buf_len, tx_buffer);
-    #endif
+        pending_pkt++;
 
-    pending_pkt++;
-
-    hci_result_t result = write_pkt(tx_buffer, buf_len);
-    if (result != HCI_OK) {
-        // Not sent, so not to be completed: its credit is not spent.
-        pending_pkt--;
+        hci_result_t result = write_pkt(tx_buffer, buf_len);
+        if (result != HCI_OK) {
+            // Not sent, so not to be completed: its credit is not spent.
+            pending_pkt--;
+            return result;
+        }
+        at += n;
     }
-    return result;
+    return HCI_OK;
 }
 
 hci_result_t hci_reset(void) {

@@ -14,6 +14,7 @@
 #include "shared-bindings/_bleio/Descriptor.h"
 #include "shared-bindings/_bleio/Service.h"
 #include "shared-bindings/_bleio/UUID.h"
+#include "common-hal/_bleio/Adapter.h"
 
 void common_hal_bleio_descriptor_construct(bleio_descriptor_obj_t *self, bleio_characteristic_obj_t *characteristic, bleio_uuid_obj_t *uuid, bleio_attribute_security_mode_t read_perm, bleio_attribute_security_mode_t write_perm, mp_int_t max_length, bool fixed_length, mp_buffer_info_t *initial_value_bufinfo) {
     self->characteristic = characteristic;
@@ -21,7 +22,6 @@ void common_hal_bleio_descriptor_construct(bleio_descriptor_obj_t *self, bleio_c
     self->handle = BLE_GATT_HANDLE_INVALID;
     self->read_perm = read_perm;
     self->write_perm = write_perm;
-    self->value = mp_obj_new_bytes(initial_value_bufinfo->buf, initial_value_bufinfo->len);
 
     const mp_int_t max_length_max = fixed_length ? BLE_GATTS_FIX_ATTR_LEN_MAX : BLE_GATTS_VAR_ATTR_LEN_MAX;
     if (max_length < 0 || max_length > max_length_max) {
@@ -31,6 +31,9 @@ void common_hal_bleio_descriptor_construct(bleio_descriptor_obj_t *self, bleio_c
     self->max_length = max_length;
     self->fixed_length = fixed_length;
 
+    // Room for max_length bytes, written in place (Adapter.h); a CCCD the phone writes between two
+    // VMs allocates nothing.
+    self->value = bleio_attribute_value_new(self, max_length, NULL);
     common_hal_bleio_descriptor_set_value(self, initial_value_bufinfo);
 }
 
@@ -71,7 +74,7 @@ void common_hal_bleio_descriptor_set_value(bleio_descriptor_obj_t *self, mp_buff
         mp_raise_ValueError(MP_ERROR_TEXT("Value length > max_length"));
     }
 
-    self->value = mp_obj_new_bytes(bufinfo->buf, bufinfo->len);
+    bleio_descriptor_set_local_value(self, bufinfo);
 
     // Do GATT operations only if this descriptor has been registered.
     if (self->handle != BLE_GATT_HANDLE_INVALID) {
@@ -80,15 +83,15 @@ void common_hal_bleio_descriptor_set_value(bleio_descriptor_obj_t *self, mp_buff
             bleio_check_connected(conn_handle);
             att_write_value(conn_handle, self->handle, bufinfo->buf, bufinfo->len, true);
         } else {
-            // Always write the value locally even if no connections are active.
-            if (self->fixed_length && bufinfo->len != self->max_length) {
-                return;
-            }
-            if (bufinfo->len > self->max_length) {
-                return;
-            }
-
-            self->value = mp_obj_new_bytes(bufinfo->buf, bufinfo->len);
+            // Written locally above, even if no connections are active.
         }
     }
+}
+
+bool bleio_descriptor_set_local_value(bleio_descriptor_obj_t *self, mp_buffer_info_t *bufinfo) {
+    if ((self->fixed_length && bufinfo->len != self->max_length) || bufinfo->len > self->max_length) {
+        return false;
+    }
+    bleio_attribute_value_set(self->value, bufinfo->buf, bufinfo->len);
+    return true;
 }

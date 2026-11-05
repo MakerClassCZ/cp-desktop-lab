@@ -222,6 +222,11 @@ CFLAGS += -DCIRCUITPY_BLEIO=$(CIRCUITPY_BLEIO)
 CIRCUITPY_BLE_FILE_SERVICE ?= 0
 CFLAGS += -DCIRCUITPY_BLE_FILE_SERVICE=$(CIRCUITPY_BLE_FILE_SERVICE)
 
+# The BLE workflow waits a second at boot for the boot button that asks for discovery mode. A board
+# without one sets 0: discovery then comes only from the saved word or from having no USB.
+CIRCUITPY_BLE_DISCOVERY_WAIT ?= 1
+CFLAGS += -DCIRCUITPY_BLE_DISCOVERY_WAIT=$(CIRCUITPY_BLE_DISCOVERY_WAIT)
+
 CIRCUITPY_BOARD ?= 1
 CFLAGS += -DCIRCUITPY_BOARD=$(CIRCUITPY_BOARD)
 

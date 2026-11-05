@@ -24,6 +24,12 @@ CIRCUITPY_ANALOGIO = 1
 # _bleio over the shared HCI host stack (devices/ble_hci): the virtual controller, or a real one
 # on a serial port (--ble PORT).
 CIRCUITPY_BLEIO_HCI = 1
+# The BLE workflow (file transfer and serial over BLE, as a CLUE's), off unless --ble-workflow or a
+# board file turns it on. No boot button: discovery mode comes from --ble-workflow discover or the
+# API, through the supervisor's saved word, not from a second's wait at every start.
+CIRCUITPY_BLE_FILE_SERVICE = 1
+CIRCUITPY_BLE_SERIAL_SERVICE = 1
+CIRCUITPY_BLE_DISCOVERY_WAIT = 0
 
 # A desktop has no reset button to hold for safe mode.
 CIRCUITPY_SKIP_SAFE_MODE_WAIT = 1

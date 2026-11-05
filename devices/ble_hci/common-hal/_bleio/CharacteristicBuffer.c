@@ -19,11 +19,37 @@
 
 // Push all the data onto the ring buffer. When the buffer is full, new bytes will be dropped.
 static void write_to_ringbuf(bleio_characteristic_buffer_obj_t *self, uint8_t *data, uint16_t len) {
-    ringbuf_put_n(&self->ringbuf, data, len);
+    if (self->watch_for_interrupt_char) {
+        for (uint16_t i = 0; i < len; i++) {
+            if (data[i] == mp_interrupt_char) {
+                mp_sched_keyboard_interrupt();
+                ringbuf_clear(&self->ringbuf);
+            } else {
+                ringbuf_put(&self->ringbuf, data[i]);
+            }
+        }
+    } else {
+        ringbuf_put_n(&self->ringbuf, data, len);
+    }
 }
 
 void bleio_characteristic_buffer_update(bleio_characteristic_buffer_obj_t *self, mp_buffer_info_t *bufinfo) {
     write_to_ringbuf(self, bufinfo->buf, bufinfo->len);
+}
+
+// A buffer the caller gives (the BLE workflow's, static), so nothing is allocated.
+void _common_hal_bleio_characteristic_buffer_construct(bleio_characteristic_buffer_obj_t *self,
+    bleio_characteristic_obj_t *characteristic,
+    mp_float_t timeout,
+    uint8_t *buffer, size_t buffer_size,
+    void *static_handler_entry,
+    bool watch_for_interrupt_char) {
+    (void)static_handler_entry;
+    self->characteristic = characteristic;
+    self->timeout_ms = timeout * 1000;
+    self->watch_for_interrupt_char = watch_for_interrupt_char;
+    ringbuf_init(&self->ringbuf, buffer, buffer_size);
+    bleio_characteristic_set_observer(characteristic, self);
 }
 
 // Assumes that timeout and buffer_size have been validated before call.
@@ -31,13 +57,8 @@ void common_hal_bleio_characteristic_buffer_construct(bleio_characteristic_buffe
     bleio_characteristic_obj_t *characteristic,
     mp_float_t timeout,
     size_t buffer_size) {
-
-    self->characteristic = characteristic;
-    self->timeout_ms = timeout * 1000;
-    // This is a macro.
-    ringbuf_alloc(&self->ringbuf, buffer_size);
-
-    bleio_characteristic_set_observer(characteristic, self);
+    _common_hal_bleio_characteristic_buffer_construct(self, characteristic, timeout,
+        m_malloc(buffer_size), buffer_size, NULL, false);
 }
 
 uint32_t common_hal_bleio_characteristic_buffer_read(bleio_characteristic_buffer_obj_t *self, uint8_t *data, size_t len, int *errcode) {
@@ -73,6 +94,7 @@ void common_hal_bleio_characteristic_buffer_deinit(bleio_characteristic_buffer_o
     if (!common_hal_bleio_characteristic_buffer_deinited(self)) {
         bleio_characteristic_clear_observer(self->characteristic);
         ringbuf_deinit(&self->ringbuf);
+        self->characteristic = NULL;
     }
 }
 

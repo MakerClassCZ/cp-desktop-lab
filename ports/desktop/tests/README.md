@@ -24,12 +24,15 @@ Each script takes the program and works in its own directory, so run them from a
 - `test_erase.py`: `storage.erase_filesystem()` leaves a directory alone.
 - `test_ble.py`: Bluetooth LE: `_bleio`'s adapter, `--ble`, the virtual controller and the phone
   of the control API and cpapi; `CIRCUITPY_BLE_VIRTUAL_FAULT=no-public-address` gives the virtual
-  controller no public address, as Zephyr's on an nRF; `CIRCUITPY_LIB`
-  (or `frozen/Adafruit_CircuitPython_BLE` fetched) gives it `adafruit_ble`.
+  controller no public address, as Zephyr's on an nRF, `=small-buffers` ACL buffers of 27 bytes;
+  `CIRCUITPY_LIB` (or `frozen/Adafruit_CircuitPython_BLE` fetched) gives it `adafruit_ble`.
 - `test_ble_smp.py`: pairing (LE Legacy, Just Works), bonds and `CIRCUITPY.bonds`, encryption, with
   cpapi's phone; the crypto on the Bluetooth Core's sample data;
   `CIRCUITPY_BLE_VIRTUAL_FAULT=no-static-address` gives the virtual controller neither a public
   nor a static address; `CIRCUITPY_LIB` with `adafruit_ble` adds an HID keyboard.
+- `test_ble_workflow.py`: the BLE workflow (`--ble-workflow`): its advertisement and services,
+  the file transfer on a folder and an image, reloads that keep the phone connected, BLE serial,
+  discovery; `CIRCUITPY_BLE_BONDED=1` stands in for a bond until pairing exists.
 - `test_code.py`: `--code FILE` runs a file of the drive in place of `code.py`, from its own
   directory, every run; `cpapi run --code`.
 - `test_closed_file.py`: a closed file on a directory drive fails as on FAT, and a refresh survives it.

@@ -256,14 +256,30 @@ static bool _ble_encrypted(const ble_host_state_t *s) {
     return false;
 }
 
+// The BLE workflow's Discover button, at the row's right while the workflow is on.
+#define DISCOVER_X (WIDTH - PAD - 110)
+#define DISCOVER_W 110
+
+static bool _workflow_on(void) {
+    return strcmp(ble_host_workflow_state(), "off") != 0;
+}
+
 static void _draw_ble(int y) {
     ble_host_state_t s;
     const char *status = _ble_status(&s);
+    const char *workflow = ble_host_workflow_state();
     char value[96], bonds[16] = "";
     if (s.bonds > 0) {
         snprintf(bonds, sizeof(bonds), "  bonds: %u", s.bonds);
     }
-    if (s.connected && _ble_central(&s)) {
+    if (strcmp(workflow, "off") != 0) {
+        // The workflow's state, and the name while it advertises it.
+        if (s.advertising && s.name[0] != '\0') {
+            snprintf(value, sizeof(value), "workflow: %s \"%s\"%s", workflow, s.name, bonds);
+        } else {
+            snprintf(value, sizeof(value), "workflow: %s%s%s", workflow, _ble_encrypted(&s) ? ", encrypted" : "", bonds);
+        }
+    } else if (s.connected && _ble_central(&s)) {
         snprintf(value, sizeof(value), "connected to %s%s%s", s.central_name, _ble_encrypted(&s) ? ", encrypted" : "", bonds);
     } else if (s.advertising) {
         snprintf(value, sizeof(value), "%s \"%s\"%s", status, s.name, bonds);
@@ -273,6 +289,10 @@ static void _draw_ble(int y) {
     _text(PAD, y + 4, "BLE", 0xd0d0d0);
     _fill(CTRL_X, y + 4, 24, 24, s.connected ? 0x3080e0 : s.advertising ? 0x205090 : 0x303030);
     _text(CTRL_X + 36, y + 8, value, 0xd0d0d0);
+    if (strcmp(workflow, "off") != 0) {
+        _fill(DISCOVER_X, y + 4, DISCOVER_W, 24, 0x404040);
+        _text(DISCOVER_X + 8, y + 8, "Discover", 0xd0d0d0);
+    }
 }
 
 static int _height(void) {
@@ -788,8 +808,8 @@ void panel_state_json(api_buf_t *b) {
     api_buf_printf(b, "{\"panel\": \"%s\", ", _hidden ? "hidden" : _window != NULL ? "shown" : "none");
     ble_host_state_t ble;
     const char *ble_status = _ble_status(&ble);
-    api_buf_printf(b, "\"ble\": {\"state\": \"%s\", \"encrypted\": %s, \"bonds\": %u, \"name\": ",
-        ble_status, _ble_encrypted(&ble) ? "true" : "false", ble.bonds);
+    api_buf_printf(b, "\"ble\": {\"state\": \"%s\", \"workflow\": \"%s\", \"encrypted\": %s, \"bonds\": %u, \"name\": ",
+        ble_status, ble_host_workflow_state(), _ble_encrypted(&ble) ? "true" : "false", ble.bonds);
     api_buf_json_string(b, ble.name, strlen(ble.name));
     if (ble.connected && _ble_central(&ble)) {
         // The peer the program connected to, as the row shows it: "connected to HRM".
@@ -894,6 +914,13 @@ bool panel_event(const SDL_Event *e) {
             if (button >= 0) {
                 _held_button = button;
                 gamepad_press(button, true);
+                return true;
+            }
+            // The BLE row's Discover: the lab resets into discovery mode, as with the boot button.
+            int ble_y = _parts_top + parts_count() * ROW;
+            if (_ble_row() && _workflow_on() && e->button.y >= ble_y + 4 && e->button.y < ble_y + 28
+                && e->button.x >= DISCOVER_X && e->button.x < DISCOVER_X + DISCOVER_W) {
+                ble_host_request_discovery();
                 return true;
             }
             part_t *p = _part_at(e->button.y);

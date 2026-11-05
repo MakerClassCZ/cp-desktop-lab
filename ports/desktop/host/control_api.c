@@ -1013,9 +1013,11 @@ static void _ble_state(request_t *r) {
                 encrypted = l;
             }
         }
-        // The first encrypted link's, and the bonds of the controller's identity.
+        // The first encrypted link's, and the bonds of the controller's identity; the BLE workflow.
         api_buf_printf(&b, "], \"encrypted\": %s, \"key_size\": %u, \"bonds\": %u",
             encrypted ? "true" : "false", encrypted ? encrypted->key_size : 0, s.bonds);
+        api_buf_printf(&b, ", \"workflow\": \"%s\", \"bonded\": %s", ble_host_workflow_state(),
+            ble_host_bonded() ? "true" : "false");
     }
     api_buf_add(&b, "}", 1);
     _answer_json(r, 200, &b);
@@ -1374,6 +1376,14 @@ static void _ble(request_t *r, bool get, bool post) {
             _error(r, 409, "the program advertises nothing connectable, or a phone is connected");
         } else {
             _ok(r);
+        }
+    } else if (strcmp(r->path, "/api/ble/discover") == 0 && post) {
+        // As reset plus the boot button on a board: answered first, then the lab resets.
+        if (strcmp(ble_host_workflow_mode(), "off") == 0 || strcmp(ble_host_controller(), "off") == 0) {
+            _error(r, 409, "the BLE workflow is off (--ble-workflow on or discover turns it on)");
+        } else {
+            _ok(r);
+            ble_host_request_discovery();
         }
     } else if (strcmp(r->path, "/api/ble/disconnect") == 0 && post) {
         uint8_t address[6];
