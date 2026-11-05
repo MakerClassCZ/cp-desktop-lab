@@ -858,24 +858,23 @@ hci_result_t hci_le_set_event_mask(uint64_t event_mask) {
 }
 
 hci_result_t hci_le_set_extended_scan_parameters(uint8_t own_addr_type, uint8_t scan_type, uint16_t interval, uint16_t window) {
-    // On the 1M PHY only.
-    struct __packed {
-        struct bt_hci_cp_le_set_ext_scan_param cp;
-        struct bt_hci_ext_scan_phy phy;
-    } params = {
-        .cp = {
-            .own_addr_type = own_addr_type,
-            .filter_policy = 0x00,
-            .phys = BT_HCI_LE_EXT_SCAN_PHY_1M,
-        },
-        .phy = {
-            .type = scan_type,
-            .interval = interval,
-            .window = window,
-        },
+    // On the 1M PHY only: the command's head, then that PHY's parameters (laid out one after
+    // the other, since the head ends in a flexible array).
+    const struct bt_hci_cp_le_set_ext_scan_param cp = {
+        .own_addr_type = own_addr_type,
+        .filter_policy = 0x00,
+        .phys = BT_HCI_LE_EXT_SCAN_PHY_1M,
     };
+    const struct bt_hci_ext_scan_phy phy = {
+        .type = scan_type,
+        .interval = interval,
+        .window = window,
+    };
+    uint8_t params[sizeof(cp) + sizeof(phy)];
+    memcpy(params, &cp, sizeof(cp));
+    memcpy(params + sizeof(cp), &phy, sizeof(phy));
 
-    return send_command(BT_HCI_OP_LE_SET_EXT_SCAN_PARAM, sizeof(params), &params);
+    return send_command(BT_HCI_OP_LE_SET_EXT_SCAN_PARAM, sizeof(params), params);
 }
 
 hci_result_t hci_le_set_extended_scan_enable(uint8_t enable, uint8_t filter_dup) {
@@ -920,31 +919,29 @@ hci_result_t hci_le_create_conn(uint16_t scan_interval, uint16_t scan_window, ui
 }
 
 hci_result_t hci_le_extended_create_conn(uint8_t filter_policy, uint8_t own_addr_type, bt_addr_le_t *peer_addr, uint16_t scan_interval, uint16_t scan_window, uint16_t conn_interval_min, uint16_t conn_interval_max, uint16_t conn_latency, uint16_t supervision_timeout, uint16_t min_ce_len, uint16_t max_ce_len) {
-    // On the 1M PHY only.
-    struct __packed {
-        struct bt_hci_cp_le_ext_create_conn cp;
-        struct bt_hci_ext_conn_phy phy;
-    } params = {
-        .cp = {
-            .filter_policy = filter_policy,
-            .own_addr_type = own_addr_type,
-            .phys = BT_HCI_LE_EXT_SCAN_PHY_1M,
-        },
-        .phy = {
-            .scan_interval = scan_interval,
-            .scan_window = scan_window,
-            .conn_interval_min = conn_interval_min,
-            .conn_interval_max = conn_interval_max,
-            .conn_latency = conn_latency,
-            .supervision_timeout = supervision_timeout,
-            .min_ce_len = min_ce_len,
-            .max_ce_len = max_ce_len,
-        },
+    // On the 1M PHY only: the command's head, then that PHY's parameters.
+    struct bt_hci_cp_le_ext_create_conn cp = {
+        .filter_policy = filter_policy,
+        .own_addr_type = own_addr_type,
+        .phys = BT_HCI_LE_EXT_SCAN_PHY_1M,
     };
-    params.cp.peer_addr.type = peer_addr->type;
-    memcpy(params.cp.peer_addr.a.val, peer_addr->a.val, sizeof(params.cp.peer_addr.a.val));
+    cp.peer_addr.type = peer_addr->type;
+    memcpy(cp.peer_addr.a.val, peer_addr->a.val, sizeof(cp.peer_addr.a.val));
+    const struct bt_hci_ext_conn_phy phy = {
+        .scan_interval = scan_interval,
+        .scan_window = scan_window,
+        .conn_interval_min = conn_interval_min,
+        .conn_interval_max = conn_interval_max,
+        .conn_latency = conn_latency,
+        .supervision_timeout = supervision_timeout,
+        .min_ce_len = min_ce_len,
+        .max_ce_len = max_ce_len,
+    };
+    uint8_t params[sizeof(cp) + sizeof(phy)];
+    memcpy(params, &cp, sizeof(cp));
+    memcpy(params + sizeof(cp), &phy, sizeof(phy));
 
-    return send_command(BT_HCI_OP_LE_EXT_CREATE_CONN, sizeof(params), &params);
+    return send_command(BT_HCI_OP_LE_EXT_CREATE_CONN, sizeof(params), params);
 }
 
 hci_result_t hci_le_cancel_conn(void) {
