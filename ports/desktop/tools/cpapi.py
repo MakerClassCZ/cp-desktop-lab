@@ -708,7 +708,7 @@ class FileEntry:
         self.name, self.directory, self.size, self.mtime = name, directory, size, mtime
 
     def __repr__(self):
-        return "FileEntry(%r%s, %d)" % (self.name, "/" if self.directory else "", self.size)
+        return "FileEntry(%r, %d)" % (self.name + ("/" if self.directory else ""), self.size)
 
 
 class FileTransfer:

@@ -279,8 +279,55 @@ The MCP server has the same as `ble_scan`, `ble_connect`, `ble_services`, `ble_r
 `BLE ADV "CLUE" connectable 02 01 06 ...`, `BLE CONNECT 7c:10:c9:1c:37:89`, `BLE ATT <- WRITE_CMD
 0x000b 68 69 "hi"` (to the program) and `->` (from it), `BLE DISCONNECT 0x13`; `--ble-log PATH`
 writes every HCI packet as btsnoop, which Wireshark opens; the board panel has a BLE row. The
-stack is a peripheral at an MTU of 23 (20 bytes a notification): no scanning or connecting from
-`code.py` yet, no pairing.
+stack is a peripheral at an MTU of 247 (244 bytes a notification; the phone of `cpapi` asks for
+it, a real phone too): no scanning or connecting from `code.py` yet, no pairing.
+
+### The BLE workflow: files and the REPL over Bluetooth
+
+A CLUE without USB lets code.circuitpython.org, Glider or the Adafruit apps edit CIRCUITPY and use
+the REPL over Bluetooth. The lab does the same with `--ble-workflow`:
+
+| option | at start |
+|---|---|
+| `--ble-workflow off` (default) | nothing: the lab behaves as without it |
+| `--ble-workflow on` | the workflow's services; not bonded: discovery mode (advertised as `CIRCUITPYxxxx` with the 0xFEBB service), bonded: private advertising |
+| `--ble-workflow discover` | as reset with the boot button held: bonds erased, then discovery mode; once (a later reset boots as `on`) |
+
+A board file says `[board] ble_workflow = "on"`; the option wins. `CIRCUITPY_BLE_WORKFLOW = false`
+in `settings.toml` turns it off as on a board; with `off`, `supervisor.runtime.ble_workflow = True`
+does nothing. The board panel's BLE row shows `workflow: discovery "CIRCUITPY3a7f"` and has a
+Discover button; `POST /api/ble/discover` (and `b.ble.discover()`) does the same: the lab resets
+into discovery mode. Saving a file from the phone reloads `code.py` and the phone stays connected,
+as on a CLUE; a program that adds services of its own restarts the stack at its reload, and the
+phone connects again. The host and the phone can both edit the drive; there is no lock between
+them: the last one to write wins.
+
+Pairing is not there yet, and the workflow's characteristics need an encrypted link. Until it is,
+`--ble-insecure` opens them, with a warning: anyone in range can read and write CIRCUITPY. A real
+controller (`--ble PORT`) refuses to start the workflow without it. `CIRCUITPY_BLE_BONDED=1` in the
+environment stands in for a bond on the virtual controller (private advertising, `reconnecting`).
+
+The phone of `cpapi` speaks the workflow:
+
+```python
+with cpapi.Board.launch("circuitpython", "CIRCUITPY", args=["--ble-workflow", "on", "--ble-insecure"]) as b:
+    p = b.ble.connect()
+    print(p.files.listdir("/"))               # [FileEntry('code.py', 22), FileEntry('lib/', 0)]
+    p.files.write("/code.py", 'print("hi")\n')  # the lab reloads; the phone stays connected
+    print(p.files.read("/code.py"))
+    p.console.write("print(6 * 7)\r")         # the REPL over BLE (Ctrl-C: p.console.interrupt())
+    print(p.console.read(timeout=1))
+```
+
+`read`, `write`, `delete` (recursive), `mkdir`, `move` and `version` too; a status other than ok
+raises `FileTransferError` (`e.status`: `error_no_file`, `error_readonly` ...). The trace shows
+each command and answer: `BLE FT <- WRITE /code.py 412 bytes`, `BLE FT -> WRITE_PACING ok 0/412`,
+`BLE FT <- LISTDIR /lib`, `BLE FT -> LISTDIR_ENTRY 2/5 neopixel.mpy 1405`.
+
+With a real controller and a browser (before pairing): `--ble COM48 --ble-workflow discover
+--ble-insecure`, then in Chrome at code.circuitpython.org choose Bluetooth and pick `CIRCUITPYxxxx`.
+Check: the file list opens, `code.py` opens and saves (the lab reloads, the browser stays
+connected), the REPL answers and Ctrl-C stops a loop, and after a disconnect it connects again.
 
 ## The board panel: NeoPixels, buttons, sliders and other boards' pin names
 
@@ -667,7 +714,8 @@ naming another `Host`, or a browser's preflight, is refused, so a web page canno
 | `POST /api/panel` | key script lines (`set ENV.temp 24.5`, `press A`, `turn ENC 2`, `send IR_RX`, `down Z`), applied before the answer |
 | `GET /api/display?name=NAME` | the window (`DISPLAY`), or a board file's display, as PNG |
 | `GET /api/trace?since=N&wait=TEXT&timeout=MS` | the bus trace, as the console; with or without `--trace-bus` |
-| `GET /api/ble` | the Bluetooth controller (`virtual`, `serial`, `off`), what is advertised (`data`, `scan_response` in hex, `name`, `connectable`), the address, the connection; `links`: each connection's `handle`, `peer`, the program's `role` and whether it is `encrypted` |
+| `GET /api/ble` | the Bluetooth controller (`virtual`, `serial`, `off`), what is advertised (`data`, `scan_response` in hex, `name`, `connectable`), the address, the connection; `links`: each connection's `handle`, `peer`, the program's `role` and whether it is `encrypted`; the BLE workflow's state (`workflow`: `off`, `discovery`, `reconnecting`, `connected`, `on`) and `bonded` |
+| `POST /api/ble/discover` | the BLE workflow's discovery mode: the lab resets, bonds erased, advertised as `CIRCUITPYxxxx` (409 when the workflow is off) |
 | `POST /api/ble/connect`, `/disconnect` | the phone joins what the program advertises, or leaves (409 with a real controller) |
 | `POST /api/ble/att` | an ATT PDU from the phone to the program, as hex |
 | `GET /api/ble/att?wait=MS` | the ATT PDUs the program sent the phone since the last call (`pdus`, hex), waiting for the first |
@@ -784,7 +832,8 @@ file. `CIRCUITPY_SDL_KEYS` names a file or FIFO of panel lines (above; `down Z`,
 - Native `.mpy` files (turbo): loading them needs executable memory.
 - On Windows: `audiomp3` (its decoder's inline assembly is for MSVC).
 - mDNS; an AirLift (ESP32 co-processor) for boards that reach the network through one.
-- Bluetooth LE as a central (scanning and connecting from `code.py`), pairing, and an MTU over 23.
+- Bluetooth LE as a central (scanning and connecting from `code.py`), and pairing (the BLE
+  workflow runs without encryption until then, `--ble-insecure`).
 - `pwmio`, `touchio`, `pulseio`, `rgbmatrix`, `picodvi` and the SD card on the virtual board
   only; `usb` (USB host) and `espcamera` not at all; `alarm` without touch alarms.
 - Builds and packages for handhelds: the port needs a cross compiler with the device's SDL2
