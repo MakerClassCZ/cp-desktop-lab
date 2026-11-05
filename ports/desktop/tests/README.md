@@ -32,7 +32,8 @@ Each script takes the program and works in its own directory, so run them from a
   nor a static address; `CIRCUITPY_LIB` with `adafruit_ble` adds an HID keyboard.
 - `test_ble_workflow.py`: the BLE workflow (`--ble-workflow`): its advertisement and services,
   the file transfer on a folder and an image, reloads that keep the phone connected, BLE serial,
-  discovery; `CIRCUITPY_BLE_BONDED=1` stands in for a bond until pairing exists.
+  discovery, pairing through cpapi's phone and what a bond changes (private advertising from an
+  RPA, new centrals refused outside discovery, the subscriptions back).
 - `test_code.py`: `--code FILE` runs a file of the drive in place of `code.py`, from its own
   directory, every run; `cpapi run --code`.
 - `test_closed_file.py`: a closed file on a directory drive fails as on FAT, and a refresh survives it.

@@ -51,10 +51,10 @@ chip's static random one (EC:AC:… on the one tried), the same at every start.
 Either way, a board that opens its serial ports itself, such as a board manager, holds the port:
 let it go first.
 
-## Pairing with a real phone: what to try by hand
+## What to try by hand: real phones, a browser, two radios
 
-The lab's tests pair the virtual controller with `cpapi`'s phone. With a real controller and real
-phones, before anything else: check that the controller answers LE Long Term Key Request Reply and
+The lab's tests play the phone, the devices and the browser on the virtual controller. With real
+controllers, before anything else: check that the controller answers LE Long Term Key Request Reply and
 sends Encryption Change (`--ble-log` shows them; Zephyr's `hci_uart` has them with
 `CONFIG_BT_CTLR_LE_ENC=y`, its default), and note what its Read Local Supported Commands says of
 the P-256 commands (LE Secure Connections would need them). Then:
@@ -66,3 +66,15 @@ the P-256 commands (LE Secure Connections would need them). Then:
   phone's address changed (15 minutes or more); reload `code.py` with changed services and see
   that the phone discovers again; `erase_bonding()` and what the phone then shows, until it is
   removed there too.
+- Central, over the real radio: lab A on a Pico 2 W (`--ble COM48`) as the central, lab B on a
+  Feather nRF52840 (`--ble COM50`) as the peripheral, CLUE to CLUE; lab A's scan of the room;
+  nRF Connect on a phone as a GATT server (its heart rate example) for the client. Each
+  `--ble-log` opens in Wireshark.
+- The BLE workflow: `--ble COM48 --ble-workflow discover`, then Chrome at code.circuitpython.org
+  (Windows and Linux), Glider on iOS, the Adafruit app on Android: pick `CIRCUITPYxxxx`, pair when
+  asked, list the files, open and save `code.py` (the lab reloads, the browser stays connected),
+  open the REPL, Ctrl-C a loop, disconnect, restart the lab and reconnect with the bond (private
+  advertising), and see that a second, unbonded phone cannot pair until discovery mode.
+- An independent client of the file transfer: CPython with Adafruit's `adafruit_ble`,
+  `adafruit_ble_file_transfer` and Blinka's `_bleio` over `bleak`, against the lab on a Pico 2 W:
+  a listing and a write must match.

@@ -254,101 +254,86 @@ first use and stays across reloads. Its controller:
 | `--ble off` | `None`, as on a board without Bluetooth |
 
 A Pico 2 W (the release's `hci-bridge-pico2w.uf2`) or an nRF52840 board with Zephyr's `hci_uart`
-makes a controller for `--ble PORT`: see [tools/hci-bridge](tools/hci-bridge/README.md).
-A board file of a board without Bluetooth says `[board] ble = "off"`; `--ble` wins over it.
-AirLift code that builds its own `_bleio.Adapter(uart=...)` over `--uart` runs with `--ble off`
-(there is one adapter). `--fast-time` refuses `--ble PORT`: a real controller keeps real time.
+makes a controller for `--ble PORT`; [tools/hci-bridge](tools/hci-bridge/README.md) also lists
+what to try by hand with real phones and browsers. A board file of a board without Bluetooth says
+`[board] ble = "off"`; `--ble` wins over it. AirLift code that builds its own
+`_bleio.Adapter(uart=...)` over `--uart` runs with `--ble off` (there is one adapter).
+`--fast-time` refuses `--ble PORT`: a real controller keeps real time.
 
-With the virtual controller a test or an agent is the phone, through the control API
-(`/api/ble`, below) or `cpapi`, as Bluefruit Connect or nRF Connect would be:
+What works: the program as a peripheral (advertising, services, notifications) and as a central
+(scanning, connecting, the GATT client), pairing and bonds, and the BLE workflow (files and the
+REPL over Bluetooth). The ATT MTU is up to 247 (244 bytes a notification or a write); there are no
+long writes. Each drive has its own address (02:dc and a hash of its path; `CIRCUITPY_BLE_ADDRESS`
+sets it). The trace shows each step (`BLE ADV`, `SCAN`, `REPORT`, `CONNECT`, `ATT`, `PAIR`,
+`ENCRYPTED`, `BOND`, `FT`, `DISCONNECT`), never a key; `--ble-log PATH` writes every HCI packet as
+btsnoop, which Wireshark opens (keys included, as a real HCI log has them). The board panel has a
+BLE row.
+
+### The phone, and the devices around the program
+
+With the virtual controller a test or an agent plays the other side, through the control API
+(`/api/ble`, below), `cpapi` or the MCP server. The phone connects to what the program advertises,
+as Bluefruit Connect or nRF Connect would:
 
 ```python
 with cpapi.Board.launch("circuitpython", "CIRCUITPY") as b:
     b.wait("ready")
     print(b.ble.scan())                       # Advertisement(name='CLUE', services=[...])
     p = b.ble.connect()                       # the MTU exchanged
-    print(p.services())                       # GAP, GATT and the program's, with characteristics
+    print(p.services())                       # GAP, GATT and the program's
     p.uart_write(cpapi.bluefruit.color(255, 0, 0))   # a Bluefruit Connect colour packet
     print(p.uart_read(timeout=2))             # what the program wrote to its Nordic UART
-    p.write(0x1235, b"on")                    # a characteristic by UUID; read(), subscribe(),
-    p.disconnect()                            # notifications() too
+    p.write(0x1235, b"on")                    # by UUID; read(), subscribe(), notifications() too
 ```
 
-The MCP server has the same as `ble_scan`, `ble_connect`, `ble_services`, `ble_read`,
-`ble_write`, `ble_notifications` and `ble_disconnect`. With either controller the trace has
-`BLE ADV "CLUE" connectable 02 01 06 ...`, `BLE CONNECT 7c:10:c9:1c:37:89`, `BLE ATT <- WRITE_CMD
-0x000b 68 69 "hi"` (to the program) and `->` (from it), `BLE DISCONNECT 0x13`; `--ble-log PATH`
-writes every HCI packet as btsnoop, which Wireshark opens; the board panel has a BLE row.
-
-The program can be the central too: `start_scan()`, `connect()` and the GATT client
-(`discover_remote_services()`, reading and writing remote characteristics, notifications into a
-`CharacteristicBuffer` or `PacketBuffer`), as a CLUE reads a heart rate strap or another CLUE.
-Around the virtual controller is an air the test fills with devices: `cpapi.Air` plays them,
+For a program that scans and connects, `cpapi.Air` fills the air with devices:
 `cpapi.devices` has a heart rate sensor, a Nordic UART device and a beacon, and
-`cpapi.Peripheral` makes others (services, characteristics, values, errors).
+`cpapi.Peripheral` makes others (services, characteristics, values, errors). `cpapi.Air(a, b)`
+puts two labs on one air, CLUE to CLUE (by hand: `python tools/cpapi.py air 8765 8766` for two
+labs started with `--api 8765` and `--api 8766` and the same `CIRCUITPY_API_TOKEN`).
 
 ```python
 with cpapi.Board.launch("circuitpython", "CIRCUITPY") as b, cpapi.Air(b) as air:
     hrm = air.add(cpapi.devices.heart_rate(bpm=72))   # advertises 0x180D as "HRM"
     b.wait("connected")                       # code.py scans and connects with adafruit_ble
     hrm.beat(80)                              # a measurement the program reads
-    uart = air.add(cpapi.devices.uart())
-    print(uart.received(timeout=5))           # what the program wrote to it; uart.send(text)
 ```
 
-Two labs on one air are CLUE to CLUE: `cpapi.Air(a, b)` relays what one advertises to the other
-and a connection between them both ways, or by hand, two programs started with `--api 8765` and
-`--api 8766` and the same `CIRCUITPY_API_TOKEN`: `python tools/cpapi.py air 8765 8766`. Each
-drive has its own address (02:dc and a hash of its path; `CIRCUITPY_BLE_ADDRESS` sets it). The
-trace adds `BLE SCAN on active`, `BLE REPORT 5a:11:22:33:44:55 ADV_IND -60 "HRM" 02 01 06 ...`
-(once per address and data in a scan) and `BLE CONNECT 5a:11:22:33:44:55 central`; the panel
-row says `scanning` or `connected to HRM`. The MCP server adds `ble_device_add`,
-`ble_device_notify`, `ble_device_written` and `ble_device_remove`.
-`CIRCUITPY_BLE_VIRTUAL_FAULT=extended` makes the virtual controller one with extended
-advertising, as Zephyr's on an nRF52840, which takes the extended commands only.
-
-The stack runs at an MTU of up to 247 (244 bytes a notification; the phone of `cpapi` asks
-for it, a real phone too), with no long writes. The
-program pairs as a peripheral (below); as a central, `connection.pair()` raises
-`NotImplementedError`.
+The MCP server has `ble_scan`, `ble_connect`, `ble_services`, `ble_read`, `ble_write`,
+`ble_notifications`, `ble_disconnect`, `ble_pair`, `ble_bonds`, `ble_erase_bonds`, and
+`ble_device_add`, `ble_device_notify`, `ble_device_written`, `ble_device_remove` for the devices.
+`CIRCUITPY_BLE_VIRTUAL_FAULT` makes the virtual controller a different one: `no-public-address`
+(as Zephyr's on an nRF), `no-static-address`, `extended` (extended advertising only, as an
+nRF52840's) or `small-buffers` (27-byte ACL packets).
 
 ### Pairing and bonds
 
-A phone or a PC can pair with the program, as with a CLUE: LE Legacy pairing, "Just Works" (no
-code to compare or type). A characteristic with `read_perm` or `write_perm`
-`Attribute.ENCRYPT_NO_MITM` is read only over an encrypted link: the phone is told so (ATT error
-0x05) and pairs by itself, so a BLE keyboard or media keys (`adafruit_ble`'s `HIDService`) work.
-The program can ask too: `connection.pair()` waits until the link is encrypted, or raises
-`SecurityError`; `pair(bond=False)` encrypts and keeps nothing; `connection.paired` says whether
-the link is encrypted. When both sides ask for a bond (phones do), the keys are kept, and the
-phone comes back later without pairing again, its subscriptions (CCCDs) put back; when the
-program's services changed meanwhile, the phone is told (Service Changed) instead.
+The program pairs as a CLUE does: LE Legacy pairing, "Just Works" (no code to compare or type). A
+characteristic with `Attribute.ENCRYPT_NO_MITM` needs an encrypted link: a phone is refused (ATT
+error 0x05) and pairs by itself, so a BLE keyboard (`adafruit_ble`'s `HIDService`) works. The
+program can ask: `connection.pair()` waits until the link is encrypted or raises
+`SecurityError`; `pair(bond=False)` keeps nothing; `connection.paired` says whether the link is
+encrypted. A bonded phone comes back without pairing again and gets its subscriptions back; if
+the program's services changed meanwhile, it is told (Service Changed). As a central the program
+does not pair yet: `connection.pair()` raises `NotImplementedError`.
 
-The bonds are kept in `CIRCUITPY.bonds` beside the drive (or `--ble-bonds PATH`), the bytes a board
-keeps in flash, for the virtual controller and real ones side by side; they survive a restart.
-`_bleio.adapter.erase_bonding()` forgets the bonds of the controller in use; the phone still has its
-keys and its next connection fails until you remove the board there too ("Forget this device" on
-iOS, "Unpair" on Android, "Remove device" in Windows). Not available: LE Secure Connections,
-numeric comparison and passkeys, so `ENCRYPT_WITH_MITM` and `LESC_ENCRYPT_WITH_MITM` stay refused
-and `connection.authenticated` is `False`. Legacy pairing protects a link from a later listener,
-not from one that heard the pairing itself (as on the nRF boards). A `--ble-log` of a real
-phone's pairing holds that bond's keys.
+Bonds are kept in `CIRCUITPY.bonds` beside the drive (or `--ble-bonds PATH`), the bytes a board
+keeps in flash, for each controller apart; they survive a restart. `_bleio.adapter.erase_bonding()`
+forgets them; remove the board on the phone too ("Forget this device"), or its next connection
+fails. Not there: LE Secure Connections, numeric comparison and passkeys, so `*_WITH_MITM`
+attributes stay refused and `connection.authenticated` is `False`. Legacy pairing protects a link
+from a later listener, not from one that heard the pairing (as on the nRF boards).
 
-The `cpapi` phone pairs as a phone does (`auto_pair=False` shows the bare ATT errors):
+`cpapi`'s phone pairs as a phone does (`auto_pair=False` shows the bare refusals):
 
 ```python
-phone = cpapi.Identity()                      # an IRK and an identity address
-p = b.ble.connect(identity=phone)             # from a resolvable private address of it
-print(p.read(0x2A4B))                         # 0x05, so it pairs, then reads; or p.pair()
-bond = p.bond                                 # the program's LTK, EDIV, Rand, IRK, identity
+p = b.ble.connect(identity=cpapi.Identity())  # from a resolvable private address of its own
+print(p.read(0x2A4B))                         # refused, so it pairs, then reads; or p.pair()
+bond = p.bond                                 # the keys and identities exchanged
 p.disconnect()
 p = b.ble.connect(bond=bond)                  # back from a new address, encrypted at once
 print(b.ble.bonds())                          # the program's bond store
 ```
-
-The MCP server has `ble_pair`, `ble_bonds`, `ble_erase_bonds`, and `ble_connect` with `bond`. The
-trace shows `BLE PAIR <- REQUEST io=none bond key=16`, `BLE ENCRYPTED key=16`,
-`BLE LTK ediv=0x1a2b found`, `BLE BOND saved identity 4a:...`, never a key.
 
 ### The BLE workflow: files and the REPL over Bluetooth
 
@@ -357,45 +342,34 @@ the REPL over Bluetooth. The lab does the same with `--ble-workflow`:
 
 | option | at start |
 |---|---|
-| `--ble-workflow off` (default) | nothing: the lab behaves as without it |
-| `--ble-workflow on` | the workflow's services; not bonded: discovery mode (advertised as `CIRCUITPYxxxx` with the 0xFEBB service), bonded: private advertising |
+| `--ble-workflow off` (default) | nothing: the lab behaves as without it, and keeps its bonds |
+| `--ble-workflow on` | the workflow's services; no bond: discovery mode (advertised as `CIRCUITPYxxxx` with the 0xFEBB service); bonded: private advertising, from an address only a bonded phone recognises |
 | `--ble-workflow discover` | as reset with the boot button held: bonds erased, then discovery mode; once (a later reset boots as `on`) |
 
-A board file says `[board] ble_workflow = "on"`; the option wins. `CIRCUITPY_BLE_WORKFLOW = false`
-in `settings.toml` turns it off as on a board; with `off`, `supervisor.runtime.ble_workflow = True`
-does nothing. The board panel's BLE row shows `workflow: discovery "CIRCUITPY3a7f"` and has a
-Discover button; `POST /api/ble/discover` (and `b.ble.discover()`) does the same: the lab resets
-into discovery mode. Saving a file from the phone reloads `code.py` and the phone stays connected,
-as on a CLUE; a program that adds services of its own restarts the stack at its reload, and the
-phone connects again. The host and the phone can both edit the drive; there is no lock between
-them: the last one to write wins.
-
-Pairing is not there yet, and the workflow's characteristics need an encrypted link. Until it is,
-`--ble-insecure` opens them, with a warning: anyone in range can read and write CIRCUITPY. A real
-controller (`--ble PORT`) refuses to start the workflow without it. `CIRCUITPY_BLE_BONDED=1` in the
-environment stands in for a bond on the virtual controller (private advertising, `reconnecting`).
-
-The phone of `cpapi` speaks the workflow:
+The workflow's files and serial service need an encrypted link: a new phone pairs in discovery
+mode only; outside it only bonded phones come back (the program's own services pair any phone,
+as above). A board file says `[board] ble_workflow = "on"`; the option wins.
+`CIRCUITPY_BLE_WORKFLOW = false` in `settings.toml` turns it off as on a board. The panel's BLE row
+shows `workflow: discovery "CIRCUITPY3a7f"` and has a Discover button; `POST /api/ble/discover` (and
+`b.ble.discover()`) does the same: the lab resets into discovery mode. Saving a file from the phone
+reloads `code.py` and the phone stays connected, as on a CLUE; a program with services of its own
+restarts the stack at its reload, and the phone connects again. The host and the phone can both
+edit the drive, with no lock between them: the last one to write wins.
 
 ```python
-with cpapi.Board.launch("circuitpython", "CIRCUITPY", args=["--ble-workflow", "on", "--ble-insecure"]) as b:
-    p = b.ble.connect()
+with cpapi.Board.launch("circuitpython", "CIRCUITPY", args=["--ble-workflow", "on"]) as b:
+    p = b.ble.connect()                       # pairs at the first refusal
     print(p.files.listdir("/"))               # [FileEntry('code.py', 22), FileEntry('lib/', 0)]
     p.files.write("/code.py", 'print("hi")\n')  # the lab reloads; the phone stays connected
-    print(p.files.read("/code.py"))
     p.console.write("print(6 * 7)\r")         # the REPL over BLE (Ctrl-C: p.console.interrupt())
     print(p.console.read(timeout=1))
 ```
 
 `read`, `write`, `delete` (recursive), `mkdir`, `move` and `version` too; a status other than ok
 raises `FileTransferError` (`e.status`: `error_no_file`, `error_readonly` ...). The trace shows
-each command and answer: `BLE FT <- WRITE /code.py 412 bytes`, `BLE FT -> WRITE_PACING ok 0/412`,
-`BLE FT <- LISTDIR /lib`, `BLE FT -> LISTDIR_ENTRY 2/5 neopixel.mpy 1405`.
-
-With a real controller and a browser (before pairing): `--ble COM48 --ble-workflow discover
---ble-insecure`, then in Chrome at code.circuitpython.org choose Bluetooth and pick `CIRCUITPYxxxx`.
-Check: the file list opens, `code.py` opens and saves (the lab reloads, the browser stays
-connected), the REPL answers and Ctrl-C stops a loop, and after a disconnect it connects again.
+each command and answer: `BLE FT <- WRITE /code.py 412 bytes`, `BLE FT -> WRITE_PACING ok 0/412`.
+With a real controller and a browser: `--ble COM48 --ble-workflow discover`, then in Chrome at
+code.circuitpython.org choose Bluetooth, pick `CIRCUITPYxxxx` and pair when asked.
 
 ## The board panel: NeoPixels, buttons, sliders and other boards' pin names
 
@@ -907,8 +881,8 @@ file. `CIRCUITPY_SDL_KEYS` names a file or FIFO of panel lines (above; `down Z`,
 - Native `.mpy` files (turbo): loading them needs executable memory.
 - On Windows: `audiomp3` (its decoder's inline assembly is for MSVC).
 - mDNS; an AirLift (ESP32 co-processor) for boards that reach the network through one.
-- Bluetooth LE as a central (scanning and connecting from `code.py`), and pairing (the BLE
-  workflow runs without encryption until then, `--ble-insecure`).
+- Bluetooth LE: pairing as a central, LE Secure Connections (numeric comparison, passkeys), long
+  writes.
 - `pwmio`, `touchio`, `pulseio`, `rgbmatrix`, `picodvi` and the SD card on the virtual board
   only; `usb` (USB host) and `espcamera` not at all; `alarm` without touch alarms.
 - Builds and packages for handhelds: the port needs a cross compiler with the device's SDL2
