@@ -64,7 +64,15 @@ with Board.launch("ports/desktop/build-linux/circuitpython", "/tmp/repro/CIRCUIT
   `p.uart_write(text)` and `p.uart_read()` for the Nordic UART, `p.disconnect()`;
   `cpapi.bluefruit.color(r, g, b)` (and `button`, `accelerometer`) are Bluefruit Connect's
   packets. The trace has `BLE ADV`, `BLE CONNECT`, `BLE ATT <-`/`->` and `BLE DISCONNECT`.
-- `tools/cp_mcp.py` serves the same to an agent over MCP (`ble_scan`, `ble_connect`, ...).
+- A program that scans and connects (the central): `with cpapi.Air(b) as air:`, then
+  `hrm = air.add(cpapi.devices.heart_rate())`, `hrm.beat(80)`; `cpapi.devices.uart()` with
+  `send(text)` and `received(timeout)`; `cpapi.devices.beacon(data)`; `cpapi.Peripheral(name,
+  [cpapi.GattService(uuid, [cpapi.GattCharacteristic(uuid, ("read", "notify"), value)])])` for
+  any other, with `notify()`, `written(uuid)`, `wait_connected()`, `disconnect()`.
+  `cpapi.Air(a, b)` puts two programs on one air (CLUE to CLUE). The trace has `BLE SCAN`,
+  `BLE REPORT` and `BLE CONNECT ... central`.
+- `tools/cp_mcp.py` serves the same to an agent over MCP (`ble_scan`, `ble_connect`, ...;
+  `ble_device_add`, `ble_device_notify`, `ble_device_written`, `ble_device_remove` for a central).
 
 ## Good evidence for an issue or a PR
 
@@ -85,8 +93,9 @@ with Board.launch("ports/desktop/build-linux/circuitpython", "/tmp/repro/CIRCUIT
 - A board's memory: the heap is 16 MB unless `--ram MB` (`args=["--ram", "1"]`) says less.
 - 64-bit sizes: use the i386 program when `size_t`, pointers or `mp_int_t` may matter.
 - The nRF port's own `_bleio`: BLE here is the HCI host stack the AirLift boards use
-  (`devices/ble_hci`), as a peripheral only (no scanning or connecting from `code.py`, no
-  pairing), at an MTU of 23. A bug of a CLUE's SoftDevice code needs the board. The lab's
+  (`devices/ble_hci`), as a peripheral and as a central, with no pairing, at an MTU of 23.
+  Its devices and other labs answer at once: radio timing, lost packets and a distance are
+  not there. A bug of a CLUE's SoftDevice code needs the board. The lab's
   adapter comes on at its first use, so a program that sets `adapter.enabled = False` and then
   uses it finds it on again, where a CLUE raises.
 
