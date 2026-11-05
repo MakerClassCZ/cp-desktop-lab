@@ -8,6 +8,8 @@
 
 #include "py/runtime.h"
 
+#include "att.h"
+
 #include "shared-bindings/_bleio/__init__.h"
 #include "shared-bindings/_bleio/Descriptor.h"
 #include "shared-bindings/_bleio/Service.h"
@@ -44,11 +46,9 @@ size_t common_hal_bleio_descriptor_get_value(bleio_descriptor_obj_t *self, uint8
     // Do GATT operations only if this descriptor has been registered
     if (self->handle != BLE_GATT_HANDLE_INVALID) {
         if (common_hal_bleio_service_get_is_remote(self->characteristic->service)) {
-            // uint16_t conn_handle = bleio_connection_get_conn_handle(self->characteristic->service->connection);
-            // FIX have att_read_req fill in a buffer
-            // uint8_t rsp[MAX(len, 512)];
-            // return att_read_req(conn_handle, self->handle, rsp, len);
-            return 0;
+            const uint16_t conn_handle = bleio_connection_get_conn_handle(self->characteristic->service->connection);
+            bleio_check_connected(conn_handle);
+            return att_read_value(conn_handle, self->handle, buf, len);
         } else {
             mp_buffer_info_t bufinfo;
             if (!mp_get_buffer(self->value, &bufinfo, MP_BUFFER_READ)) {
@@ -76,9 +76,9 @@ void common_hal_bleio_descriptor_set_value(bleio_descriptor_obj_t *self, mp_buff
     // Do GATT operations only if this descriptor has been registered.
     if (self->handle != BLE_GATT_HANDLE_INVALID) {
         if (common_hal_bleio_service_get_is_remote(self->characteristic->service)) {
-            // FIX
-            // uint16_t conn_handle = bleio_connection_get_conn_handle(self->service->connection);
-            // att_write_req(conn_handle, self->handle, bufinfo->buf, bufinfo->len, rsp);
+            const uint16_t conn_handle = bleio_connection_get_conn_handle(self->characteristic->service->connection);
+            bleio_check_connected(conn_handle);
+            att_write_value(conn_handle, self->handle, bufinfo->buf, bufinfo->len, true);
         } else {
             // Always write the value locally even if no connections are active.
             if (self->fixed_length && bufinfo->len != self->max_length) {

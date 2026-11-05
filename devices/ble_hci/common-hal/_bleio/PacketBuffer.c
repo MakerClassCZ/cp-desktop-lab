@@ -12,6 +12,7 @@
 #include "py/stream.h"
 
 #include "shared-bindings/_bleio/__init__.h"
+#include "shared-bindings/_bleio/Characteristic.h"
 #include "shared-bindings/_bleio/Connection.h"
 #include "shared-bindings/_bleio/PacketBuffer.h"
 #include "supervisor/shared/tick.h"
@@ -99,6 +100,12 @@ void common_hal_bleio_packet_buffer_construct(
     self->max_packet_size = max_packet_size;
 
     bleio_characteristic_set_observer(self->characteristic, self);
+
+    // A client turns the server's notifications (else indications) on, as the nRF port does.
+    if (self->client && incoming) {
+        common_hal_bleio_characteristic_set_cccd(self->characteristic, incoming & CHAR_PROP_NOTIFY,
+            !(incoming & CHAR_PROP_NOTIFY));
+    }
 }
 
 mp_int_t common_hal_bleio_packet_buffer_readinto(bleio_packet_buffer_obj_t *self, uint8_t *data, size_t len) {

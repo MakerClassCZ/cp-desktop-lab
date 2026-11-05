@@ -44,6 +44,8 @@ typedef struct {
     uint16_t conn_interval;
     volatile bool conn_params_updating;
     uint16_t mtu;
+    // The MTU was exchanged, as a client does once, at its first discovery.
+    bool mtu_exchanged;
     // Request that CCCD values for this connection be saved, using sys_attr values.
     volatile bool do_bond_cccds;
     // Request that security key info for this connection be saved.

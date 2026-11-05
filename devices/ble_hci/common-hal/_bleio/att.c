@@ -43,6 +43,7 @@
 #include "hci_include/l2cap_internal.h"
 
 #include "py/obj.h"
+#include "py/runtime.h"
 #include "common-hal/_bleio/Adapter.h"
 #include "common-hal/_bleio/Attribute.h"
 #include "shared-bindings/_bleio/__init__.h"
@@ -68,7 +69,8 @@ static struct {
     uint8_t opcode;             // Expected RSP opcode.
     uint8_t *buffer;            // Pointer to response packet
     uint8_t length;             // Length of response packet.
-} expected_rsp;
+    size_t capacity;            // The buffer's room: a longer response is cut there.
+} expected_rsp = { .conn_handle = 0xffff };
 
 // A characteristic declaration has this data, in this order:
 // See Bluetooth v5.1 spec, section 3.3.1 Characteristic declaration.
@@ -102,9 +104,7 @@ static uint8_t bleio_properties_to_ble_spec_properties(uint8_t bleio_properties)
     return ble_spec_properties;
 }
 
-// FIX not currently used; re-enable when used.
-#if 0
-static uint8_t ble_spec_properties_to_bleio_properties(uint8_t ble_spec_properties) {
+uint8_t att_properties_to_bleio(uint8_t ble_spec_properties) {
     uint8_t bleio_properties = 0;
     if (ble_spec_properties & BT_GATT_CHRC_BROADCAST) {
         bleio_properties |= CHAR_PROP_BROADCAST;
@@ -127,7 +127,6 @@ static uint8_t ble_spec_properties_to_bleio_properties(uint8_t ble_spec_properti
 
     return bleio_properties;
 }
-#endif // #if 0
 
 static void send_error(uint16_t conn_handle, uint8_t opcode, uint16_t handle, uint8_t code) {
     struct __packed {
@@ -194,13 +193,14 @@ static void send_req(uint16_t conn_handle, size_t request_length, uint8_t *reque
     hci_send_acl_pkt(conn_handle, BT_L2CAP_CID_ATT, request_length, request_buffer);
 }
 
-static int send_req_wait_for_rsp(uint16_t conn_handle, size_t request_length, uint8_t *request_buffer, uint8_t response_buffer[]) {
+static int send_req_wait_for_rsp(uint16_t conn_handle, size_t request_length, uint8_t *request_buffer, uint8_t response_buffer[], size_t response_capacity) {
     // We expect a particular kind of response after this request.
     expected_rsp.conn_handle = conn_handle;
     // The response opcode is the request opcode + 1.
     expected_rsp.opcode = request_buffer[0] + 1;
     expected_rsp.buffer = response_buffer;
     expected_rsp.length = 0;
+    expected_rsp.capacity = response_capacity;
 
     send_req(conn_handle, request_length, request_buffer);
 
@@ -229,15 +229,17 @@ static int send_req_wait_for_rsp(uint16_t conn_handle, size_t request_length, ui
 
 // If a response matches what is in expected_rsp, copy the rest of it into the buffer.
 static void check_and_save_expected_rsp(uint16_t conn_handle, uint8_t opcode, uint8_t dlen, uint8_t data[]) {
-    if (conn_handle == expected_rsp.conn_handle && expected_rsp.opcode == opcode) {
+    if (conn_handle == expected_rsp.conn_handle && expected_rsp.opcode == opcode && expected_rsp.capacity > 1) {
+        const size_t n = MIN((size_t)dlen, expected_rsp.capacity - 1);
         expected_rsp.buffer[0] = opcode;
-        memcpy(&expected_rsp.buffer[1], data, dlen);
-        expected_rsp.length = dlen + 1;
+        memcpy(&expected_rsp.buffer[1], data, n);
+        expected_rsp.length = n + 1;
     }
 }
 
 void bleio_att_reset(void) {
     max_mtu = BT_ATT_DEFAULT_LE_MTU;
+    expected_rsp.conn_handle = 0xffff;
     timeout = 5000;
     long_write_handle = BLE_GATT_HANDLE_INVALID;
     long_write_value = NULL;
@@ -253,6 +255,7 @@ void bleio_att_reset(void) {
         bleio_connections[i].is_central = false;
         bleio_connections[i].encrypted = false;
         bleio_connections[i].key_size = 0;
+        bleio_connections[i].mtu_exchanged = false;
     }
 }
 
@@ -575,6 +578,7 @@ void att_add_connection(uint16_t handle, uint8_t role, bt_addr_le_t *peer_addr, 
     bleio_connections[peer_index].key_size = 0;
     bleio_connections[peer_index].mtu = BT_ATT_DEFAULT_LE_MTU;
     bleio_connections[peer_index].conn_interval = interval;
+    bleio_connections[peer_index].mtu_exchanged = false;
     memcpy(&bleio_connections[peer_index].addr, peer_addr, sizeof(bleio_connections[peer_index].addr));
     // Made by discover_remote_services(), on the program's heap.
     bleio_connections[peer_index].remote_service_list = NULL;
@@ -790,7 +794,8 @@ static void process_error(uint16_t conn_handle, uint8_t dlen, uint8_t data[]) {
     }
 
     // expected_rsp.opcode is an RSP opcode. Does it match the REQ opcode in this response?
-    if (expected_rsp.conn_handle == conn_handle && (expected_rsp.opcode - 1) == rsp->request) {
+    if (expected_rsp.conn_handle == conn_handle && (expected_rsp.opcode - 1) == rsp->request &&
+        expected_rsp.capacity > dlen) {
         expected_rsp.buffer[0] = BT_ATT_OP_ERROR_RSP;
         memcpy(&expected_rsp.buffer[1], data, dlen);
         expected_rsp.length = dlen + 1;
@@ -936,7 +941,7 @@ static void process_find_info_req(uint16_t conn_handle, uint16_t mtu, uint8_t dl
     }
 }
 
-static int att_find_info_req(uint16_t conn_handle, uint16_t start_handle, uint16_t end_handle, uint8_t response_buffer[]) {
+int att_find_info_req(uint16_t conn_handle, uint16_t start_handle, uint16_t end_handle, uint8_t response_buffer[], size_t response_capacity) {
     struct __packed req {
         struct bt_att_hdr h;
         struct bt_att_find_info_req r;
@@ -947,7 +952,7 @@ static int att_find_info_req(uint16_t conn_handle, uint16_t start_handle, uint16
                   .end_handle = end_handle,
               }};
 
-    return send_req_wait_for_rsp(conn_handle, sizeof(req), (uint8_t *)&req, response_buffer);
+    return send_req_wait_for_rsp(conn_handle, sizeof(req), (uint8_t *)&req, response_buffer, response_capacity);
 }
 
 static void process_find_info_rsp(uint16_t conn_handle, uint8_t dlen, uint8_t data[]) {
@@ -956,6 +961,32 @@ static void process_find_info_rsp(uint16_t conn_handle, uint8_t dlen, uint8_t da
     }
 
     check_and_save_expected_rsp(conn_handle, BT_ATT_OP_FIND_INFO_RSP, dlen, data);
+}
+
+int att_find_type_req(uint16_t conn_handle, uint16_t start_handle, uint16_t end_handle, uint16_t type, const uint8_t *value, size_t value_len, uint8_t response_buffer[], size_t response_capacity) {
+    typedef struct __packed {
+        struct bt_att_hdr h;
+        struct bt_att_find_type_req r;
+    } req_t;
+
+    uint8_t req_bytes[sizeof(req_t) + 16];
+    req_t *req = (req_t *)req_bytes;
+    value_len = MIN(value_len, 16);
+    req->h.code = BT_ATT_OP_FIND_TYPE_REQ;
+    req->r.start_handle = start_handle;
+    req->r.end_handle = end_handle;
+    req->r.type = type;
+    memcpy(req->r.value, value, value_len);
+
+    return send_req_wait_for_rsp(conn_handle, sizeof(req_t) + value_len, req_bytes, response_buffer, response_capacity);
+}
+
+static void process_find_type_rsp(uint16_t conn_handle, uint8_t dlen, uint8_t data[]) {
+    if (dlen < 4) {
+        return; // invalid, drop
+    }
+
+    check_and_save_expected_rsp(conn_handle, BT_ATT_OP_FIND_TYPE_RSP, dlen, data);
 }
 
 static void process_find_type_req(uint16_t conn_handle, uint16_t mtu, uint8_t dlen, uint8_t data[]) {
@@ -1090,7 +1121,7 @@ static void process_read_group_req(uint16_t conn_handle, uint16_t mtu, uint8_t d
     }
 }
 
-static int att_read_group_req(uint16_t conn_handle, uint16_t start_handle, uint16_t end_handle, uint16_t uuid, uint8_t response_buffer[]) {
+int att_read_group_req(uint16_t conn_handle, uint16_t start_handle, uint16_t end_handle, uint16_t uuid, uint8_t response_buffer[], size_t response_capacity) {
 
     typedef struct __packed {
         struct bt_att_hdr h;
@@ -1106,7 +1137,7 @@ static int att_read_group_req(uint16_t conn_handle, uint16_t start_handle, uint1
     req->r.uuid[0] = uuid & 0xff;
     req->r.uuid[1] = uuid >> 8;
 
-    return send_req_wait_for_rsp(conn_handle, sizeof(req_bytes), req_bytes, response_buffer);
+    return send_req_wait_for_rsp(conn_handle, sizeof(req_bytes), req_bytes, response_buffer, response_capacity);
 }
 
 static void process_read_group_rsp(uint16_t conn_handle, uint8_t dlen, uint8_t data[]) {
@@ -1248,6 +1279,10 @@ static void process_read_or_read_blob_req(uint16_t conn_handle, uint16_t mtu, ui
 
 static void process_read_rsp(uint16_t conn_handle, uint8_t dlen, uint8_t data[]) {
     check_and_save_expected_rsp(conn_handle, BT_ATT_OP_READ_RSP, dlen, data);
+}
+
+static void process_read_blob_rsp(uint16_t conn_handle, uint8_t dlen, uint8_t data[]) {
+    check_and_save_expected_rsp(conn_handle, BT_ATT_OP_READ_BLOB_RSP, dlen, data);
 }
 
 static void process_read_type_req(uint16_t conn_handle, uint16_t mtu, uint8_t dlen, uint8_t data[]) {
@@ -1414,7 +1449,7 @@ static void process_read_type_req(uint16_t conn_handle, uint16_t mtu, uint8_t dl
     }
 }
 
-static int att_read_type_req(uint16_t conn_handle, uint16_t start_handle, uint16_t end_handle, uint16_t type, uint8_t response_buffer[]) {
+int att_read_type_req(uint16_t conn_handle, uint16_t start_handle, uint16_t end_handle, uint16_t type, uint8_t response_buffer[], size_t response_capacity) {
     typedef struct __packed {
         struct bt_att_hdr h;
         struct bt_att_read_type_req r;
@@ -1429,7 +1464,7 @@ static int att_read_type_req(uint16_t conn_handle, uint16_t start_handle, uint16
     req->r.uuid[0] = type & 0xff;
     req->r.uuid[1] = type >> 8;
 
-    return send_req_wait_for_rsp(conn_handle, sizeof(req_bytes), req_bytes, response_buffer);
+    return send_req_wait_for_rsp(conn_handle, sizeof(req_bytes), req_bytes, response_buffer, response_capacity);
 }
 
 static void process_read_type_rsp(uint16_t conn_handle, uint8_t dlen, uint8_t data[]) {
@@ -1686,14 +1721,33 @@ static void process_confirm(uint16_t conn_handle, uint8_t dlen, uint8_t data[]) 
 }
 
 bool att_exchange_mtu(uint16_t conn_handle) {
-    uint8_t response_buffer[max_mtu];
-    struct bt_att_exchange_mtu_req req = {
-        .mtu = max_mtu,
-    };
-    return send_req_wait_for_rsp(conn_handle, sizeof(req), (uint8_t *)&req, response_buffer);
+    uint8_t response_buffer[8];
+    struct __packed {
+        struct bt_att_hdr h;
+        struct bt_att_exchange_mtu_req r;
+    } req = { {
+                  .code = BT_ATT_OP_MTU_REQ,
+              }, {
+                  .mtu = max_mtu,
+              }};
+    return send_req_wait_for_rsp(conn_handle, sizeof(req), (uint8_t *)&req, response_buffer, sizeof(response_buffer));
 }
 
-int att_read_req(uint16_t conn_handle, uint16_t handle, uint8_t response_buffer[]) {
+int att_read_blob_req(uint16_t conn_handle, uint16_t handle, uint16_t offset, uint8_t response_buffer[], size_t response_capacity) {
+    struct __packed {
+        struct bt_att_hdr h;
+        struct bt_att_read_blob_req r;
+    } req = { {
+                  .code = BT_ATT_OP_READ_BLOB_REQ,
+              }, {
+                  .handle = handle,
+                  .offset = offset,
+              }};
+
+    return send_req_wait_for_rsp(conn_handle, sizeof(req), (uint8_t *)&req, response_buffer, response_capacity);
+}
+
+int att_read_req(uint16_t conn_handle, uint16_t handle, uint8_t response_buffer[], size_t response_capacity) {
     struct __packed {
         struct bt_att_hdr h;
         struct bt_att_read_req r;
@@ -1703,10 +1757,10 @@ int att_read_req(uint16_t conn_handle, uint16_t handle, uint8_t response_buffer[
                   .handle = handle,
               }};
 
-    return send_req_wait_for_rsp(conn_handle, sizeof(req), (uint8_t *)&req, response_buffer);
+    return send_req_wait_for_rsp(conn_handle, sizeof(req), (uint8_t *)&req, response_buffer, response_capacity);
 }
 
-int att_write_req(uint16_t conn_handle, uint16_t handle, const uint8_t *data, uint8_t data_len, uint8_t response_buffer[]) {
+int att_write_req(uint16_t conn_handle, uint16_t handle, const uint8_t *data, uint8_t data_len, uint8_t response_buffer[], size_t response_capacity) {
     typedef struct __packed {
         struct bt_att_hdr h;
         struct bt_att_write_req r;
@@ -1718,7 +1772,7 @@ int att_write_req(uint16_t conn_handle, uint16_t handle, const uint8_t *data, ui
     req->r.handle = handle;
     memcpy(req->r.value, data, data_len);
 
-    return send_req_wait_for_rsp(conn_handle, sizeof(req_bytes), req_bytes, response_buffer);
+    return send_req_wait_for_rsp(conn_handle, sizeof(req_bytes), req_bytes, response_buffer, response_capacity);
 }
 
 void att_write_cmd(uint16_t conn_handle, uint16_t handle, const uint8_t *data, uint8_t data_len) {
@@ -1800,6 +1854,10 @@ void att_process_data(uint16_t conn_handle, uint8_t dlen, uint8_t data[]) {
             process_find_type_req(conn_handle, mtu, dlen, data);
             break;
 
+        case BT_ATT_OP_FIND_TYPE_RSP:
+            process_find_type_rsp(conn_handle, dlen, data);
+            break;
+
         case BT_ATT_OP_READ_TYPE_REQ:
             process_read_type_req(conn_handle, mtu, dlen, data);
             break;
@@ -1823,6 +1881,10 @@ void att_process_data(uint16_t conn_handle, uint8_t dlen, uint8_t data[]) {
 
         case BT_ATT_OP_READ_RSP:
             process_read_rsp(conn_handle, dlen, data);
+            break;
+
+        case BT_ATT_OP_READ_BLOB_RSP:
+            process_read_blob_rsp(conn_handle, dlen, data);
             break;
 
         case BT_ATT_OP_WRITE_REQ:
@@ -1863,8 +1925,7 @@ void att_process_data(uint16_t conn_handle, uint8_t dlen, uint8_t data[]) {
     }
 }
 
-// FIX Do we need all of these?
-static void check_att_err(uint8_t err) {
+void att_check_error(uint8_t err) {
     mp_rom_error_text_t msg = NULL;
     switch (err) {
         case 0:
@@ -1935,4 +1996,53 @@ static void check_att_err(uint8_t err) {
     }
 
     mp_raise_bleio_BluetoothError(MP_ERROR_TEXT("Unknown ATT error: 0x%02x"), err);
+}
+
+// The answer to a client request, or what it raises: no answer (the link gone, or not in time),
+// or an Error Response.
+static void check_rsp(uint16_t conn_handle, int len, const uint8_t *rsp) {
+    if (len == 0) {
+        bleio_check_connected(att_handle_is_connected(conn_handle) ? conn_handle : BLE_CONN_HANDLE_INVALID);
+        mp_raise_bleio_BluetoothError(MP_ERROR_TEXT("Timeout waiting for ATT response"));
+    }
+    if (rsp[0] == BT_ATT_OP_ERROR_RSP && len >= 5) {
+        att_check_error(rsp[4]);
+    }
+}
+
+size_t att_read_value(uint16_t conn_handle, uint16_t handle, uint8_t *buf, size_t len) {
+    uint8_t rsp[ATT_CLIENT_RSP_MAX];
+    int n = att_read_req(conn_handle, handle, rsp, sizeof(rsp));
+    check_rsp(conn_handle, n, rsp);
+    size_t got = MIN(len, (size_t)n - 1);
+    memcpy(buf, rsp + 1, got);
+    // A response the MTU filled may have more after it: Read Blob from there, until a shorter one.
+    const size_t full = att_mtu(conn_handle) - 1;
+    for (size_t last = (size_t)n - 1; last == full && got < len;) {
+        n = att_read_blob_req(conn_handle, handle, got, rsp, sizeof(rsp));
+        if (n >= 5 && rsp[0] == BT_ATT_OP_ERROR_RSP &&
+            (rsp[4] == BT_ATT_ERR_INVALID_OFFSET || rsp[4] == BT_ATT_ERR_ATTRIBUTE_NOT_LONG)) {
+            break;
+        }
+        check_rsp(conn_handle, n, rsp);
+        last = (size_t)n - 1;
+        const size_t more = MIN(len - got, last);
+        memcpy(buf + got, rsp + 1, more);
+        got += more;
+    }
+    return got;
+}
+
+void att_write_value(uint16_t conn_handle, uint16_t handle, const uint8_t *data, size_t len, bool with_response) {
+    // One PDU: no long writes (Prepare and Execute Write).
+    if (len > (size_t)att_mtu(conn_handle) - 3) {
+        mp_raise_ValueError(MP_ERROR_TEXT("Value length > max_length"));
+    }
+    if (!with_response) {
+        att_write_cmd(conn_handle, handle, data, len);
+        return;
+    }
+    uint8_t rsp[ATT_CLIENT_RSP_MAX];
+    int n = att_write_req(conn_handle, handle, data, len, rsp, sizeof(rsp));
+    check_rsp(conn_handle, n, rsp);
 }

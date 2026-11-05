@@ -76,13 +76,10 @@ size_t common_hal_bleio_characteristic_get_max_length(bleio_characteristic_obj_t
 size_t common_hal_bleio_characteristic_get_value(bleio_characteristic_obj_t *self, uint8_t *buf, size_t len) {
     // Do GATT operations only if this characteristic has been added to a registered service.
     if (self->handle != BLE_GATT_HANDLE_INVALID) {
-        // FIX uint16_t conn_handle = bleio_connection_get_conn_handle(self->service->connection);
         if (common_hal_bleio_service_get_is_remote(self->service)) {
-            // FIX read remote chars
-            // uint8_t rsp[MAX(len, 512)];
-            // FIX improve att_read_req to write into our requested buffer.
-            // return att_read_req(conn_handle, self->handle, rsp);
-            return 0; // FIX
+            const uint16_t conn_handle = bleio_connection_get_conn_handle(self->service->connection);
+            bleio_check_connected(conn_handle);
+            return att_read_value(conn_handle, self->handle, buf, len);
         } else {
             mp_buffer_info_t bufinfo;
             if (!mp_get_buffer(self->value, &bufinfo, MP_BUFFER_READ)) {
@@ -108,13 +105,12 @@ void common_hal_bleio_characteristic_set_value(bleio_characteristic_obj_t *self,
     // Do GATT operations only if this characteristic has been added to a registered service.
     if (self->handle != BLE_GATT_HANDLE_INVALID) {
         if (common_hal_bleio_service_get_is_remote(self->service)) {
-            // FIX uint16_t conn_handle = bleio_connection_get_conn_handle(self->service->connection);
-            if (self->props & CHAR_PROP_WRITE) {
-                // FIX writing remote chars
-                // uint8_t rsp[sizeof(bt_att_error_rsp)];
-                // att_write_req(conn_handle, self->handle, bufinfo->buf, bufinfo->len, rsp);
-            } else if (self->props & CHAR_PROP_WRITE_NO_RESPONSE) {
-                // att_write_cmd(conn_handle, self->handle, bufinfo->buff, bufinfo->len);
+            const uint16_t conn_handle = bleio_connection_get_conn_handle(self->service->connection);
+            // Without response when the characteristic takes that, as the nRF port writes.
+            if (self->props & (CHAR_PROP_WRITE | CHAR_PROP_WRITE_NO_RESPONSE)) {
+                bleio_check_connected(conn_handle);
+                att_write_value(conn_handle, self->handle, bufinfo->buf, bufinfo->len,
+                    !(self->props & CHAR_PROP_WRITE_NO_RESPONSE));
             } else {
                 mp_raise_bleio_BluetoothError(MP_ERROR_TEXT("Characteristic not writable"));
             }
@@ -186,12 +182,9 @@ void common_hal_bleio_characteristic_set_cccd(bleio_characteristic_obj_t *self, 
         (notify ? CCCD_NOTIFY : 0) |
         (indicate ? CCCD_INDICATE : 0);
 
-    // FIX do remote
-    (void)cccd_value;
-    // uint8_t rsp[sizeof(bt_att_error_rsp)];
-    // if (att_write_req(conn_handle, self->cccd->handle, &cccd_value, sizeof(cccd_value)) == 0) {
-    //     mp_raise_bleio_BluetoothError(MP_ERROR_TEXT("Could not write CCCD"));
-    // }
+    // Little-endian, as ATT carries it.
+    const uint8_t value[2] = { cccd_value & 0xff, cccd_value >> 8 };
+    att_write_value(conn_handle, self->cccd->handle, value, sizeof(value), true);
 }
 
 bool bleio_characteristic_set_local_value(bleio_characteristic_obj_t *self, mp_buffer_info_t *bufinfo) {
