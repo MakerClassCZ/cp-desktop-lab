@@ -54,6 +54,7 @@ typedef struct {
     bool have_peer_irk;
     bool have_peer_identity;
     uint8_t enc_status;             // the Encryption Change's
+    bool refresh;                   // ... on a link encrypted already
     uint16_t ltk_ediv;              // the LE Long Term Key Request waiting for an answer
     uint8_t ltk_rand[8];
     uint64_t last_pdu_ms;           // for the 30 s SMP timeout

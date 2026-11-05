@@ -243,8 +243,17 @@ static bonding_record_t *_link_bond(bleio_connection_internal_t *c) {
     if (c->smp.bond < 0) {
         return NULL;
     }
+    // Still this peer's: the record may have been erased and taken by another bond since.
     bonding_record_t *record = &bonding_store()->records[c->smp.bond];
-    return (record->flags & BONDING_IN_USE) ? record : NULL;
+    // The link keeps the bond's LTK and EDIV (stk, ediv): they tell it from a bond that took its
+    // record since (the record erased, or the least used one replaced).
+    const bool same = (record->flags & BONDING_IN_USE) && record->ediv == c->smp.ediv &&
+        memcmp(record->ltk, c->smp.stk, sizeof(record->ltk)) == 0;
+    if (!same) {
+        c->smp.bond = -1;
+        return NULL;
+    }
+    return record;
 }
 
 // ---- Pairing ----
@@ -278,9 +287,13 @@ static void _pairing_request(bleio_connection_internal_t *c, const uint8_t *pdu,
     // distributed for a bond only: ours as far as the peer asks, its identity as far as it offers.
     s->bonding = (auth & 0x03) == SMP_AUTH_BONDING && !s->no_bond;
     s->send_keys = s->bonding ? pdu[6] & (SMP_DIST_ENC_KEY | SMP_DIST_ID_KEY) : 0;
+    if (_own_identity() == NULL) {
+        s->send_keys &= ~SMP_DIST_ID_KEY;
+    }
     s->take_keys = s->bonding ? pdu[5] & SMP_DIST_ID_KEY : 0;
     s->key_size = max_key_size;
     s->result = SMP_RESULT_NONE;
+    _link_bond(c);      // the link's bond, if still its own (else forgotten), for _complete()
     s->have_peer_irk = s->have_peer_identity = false;
     memcpy(s->preq, pdu, 7);
     s->prsp[0] = SMP_PAIRING_RESPONSE;
@@ -358,7 +371,10 @@ static void _complete(bleio_connection_internal_t *c) {
         memcpy(record.rand, s->rand, sizeof(record.rand));
         record.key_size = s->key_size;
         _snapshot_cccds(&record);
-        s->bond = (int8_t)bonding_add(&record, _link_bond(c));
+        // In place of the bond the link had when this pairing began (checked then: the keys
+        // given since are new).
+        bonding_record_t *replaces = s->bond >= 0 ? &bonding_store()->records[s->bond] : NULL;
+        s->bond = (int8_t)bonding_add(&record, replaces);
         bonding_save();
     }
     s->state = SMP_IDLE;
@@ -415,7 +431,8 @@ static void _identity(bleio_connection_internal_t *c, const uint8_t *pdu, size_t
     if (pdu[0] == SMP_IDENTITY_INFORMATION && len == 17) {
         memcpy(s->peer_irk, pdu + 1, 16);
         s->have_peer_irk = true;
-    } else if (pdu[0] == SMP_IDENTITY_ADDRESS_INFORMATION && len == 8 && s->have_peer_irk) {
+    } else if (pdu[0] == SMP_IDENTITY_ADDRESS_INFORMATION && len == 8 && s->have_peer_irk &&
+               pdu[1] <= BT_ADDR_LE_RANDOM) {
         s->peer_identity.type = pdu[1];
         memcpy(s->peer_identity.a.val, pdu + 2, 6);
         s->have_peer_identity = true;
@@ -495,6 +512,8 @@ static void _ltk_request(bleio_connection_internal_t *c) {
         return;
     }
     s->bond = (int8_t)(record - bonding_store()->records);
+    memcpy(s->stk, record->ltk, sizeof(s->stk));
+    s->ediv = record->ediv;
     c->key_size = record->key_size;
     c->ediv = record->ediv;
     bonding_touch(record);
@@ -517,7 +536,7 @@ static void _encryption(bleio_connection_internal_t *c) {
         return;
     }
     bonding_record_t *record = _link_bond(c);
-    if (record != NULL) {
+    if (record != NULL && !s->refresh) {
         _restore_cccds(c, record);
     }
     s->security_requested = false;
@@ -567,6 +586,8 @@ void smp_on_encryption(uint16_t conn_handle, uint8_t status, bool on) {
     if (c == NULL) {
         return;
     }
+    // A key refresh of a link encrypted already (or a second event before the background ran).
+    c->smp.refresh = c->encrypted && on;
     c->encrypted = status == 0 && on;
     c->smp.enc_status = status;
     c->smp.pending |= PENDING_ENCRYPTION;

@@ -156,14 +156,19 @@ void bonding_touch(bonding_record_t *record) {
 
 size_t bonding_add(const bonding_record_t *record, const bonding_record_t *replaces) {
     bonding_store_t *store = bonding_store();
-    // The same peer's bond (it paired again: it forgot us), or the one given; else a free one;
-    // else the least recently used.
-    size_t at = BONDING_MAX;
-    for (size_t i = 0; i < BONDING_MAX && at == BONDING_MAX; i++) {
-        const bonding_record_t *r = &store->records[i];
-        if (r == replaces || (_ours(r, &record->own) && r->role == record->role &&
-                              _same_address(&r->peer, &record->peer))) {
+    // The one given, else the same peer's bond (it paired again: it forgot us); else a free one;
+    // else the least recently used. Any other bond of the same peer goes: one peer, one bond.
+    size_t at = replaces != NULL ? (size_t)(replaces - store->records) : BONDING_MAX;
+    for (size_t i = 0; i < BONDING_MAX; i++) {
+        bonding_record_t *r = &store->records[i];
+        if (i == at || !_ours(r, &record->own) || r->role != record->role ||
+            !_same_address(&r->peer, &record->peer)) {
+            continue;
+        }
+        if (at == BONDING_MAX) {
             at = i;
+        } else {
+            memset(r, 0, sizeof(*r));
         }
     }
     for (size_t i = 0; i < BONDING_MAX && at == BONDING_MAX; i++) {
