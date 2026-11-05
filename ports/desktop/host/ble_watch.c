@@ -17,6 +17,10 @@
 #include "ble_host.h"
 #include "bus_trace.h"
 
+#ifndef MIN
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
+
 #include "common-hal/_bleio/Adapter.h"
 #include "shared-bindings/_bleio/__init__.h"
 #include "shared-bindings/_bleio/Characteristic.h"
@@ -291,7 +295,7 @@ static size_t _ft_length(const uint8_t *b, size_t have) {
         default:
             return SIZE_MAX;
     }
-    #undef NEED
+#undef NEED
 }
 
 // A whole command (from the phone) or answer (to it) as one trace line; data only counted.
@@ -326,11 +330,15 @@ static void _ft_line(bool to_phone, const uint8_t *b, size_t len) {
             _ft_path(path, sizeof(path), b + 4, len - 4);
             bus_trace_text("BLE FT %s LISTDIR %s", dir, path);
             break;
-        case 0x60:
-            _ft_path(path, sizeof(path), b + 6, _u16(b + 2));
-            _ft_path(other, sizeof(other), b + 6 + _u16(b + 2) + 1, _u16(b + 4));
+        case 0x60: {
+            // Both paths within what the buffer holds (a long first one cuts the second).
+            const size_t old_len = MIN((size_t)_u16(b + 2), len - 6);
+            const size_t new_at = MIN(6 + old_len + 1, len);
+            _ft_path(path, sizeof(path), b + 6, old_len);
+            _ft_path(other, sizeof(other), b + new_at, MIN((size_t)_u16(b + 4), len - new_at));
             bus_trace_text("BLE FT %s MOVE %s %s", dir, path, other);
             break;
+        }
         case 0x11:
             bus_trace_text("BLE FT %s READ_DATA %s %u/%u, %u bytes", dir, _ft_status(b[1]), (unsigned)_u32(b + 4),
                 (unsigned)_u32(b + 8), (unsigned)_u32(b + 12));

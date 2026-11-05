@@ -22,6 +22,7 @@ FT, SERIAL, GUARD = "0000febb", "adaf0001", "adaf0004"
 BIG = bytes(range(256)) * 12  # 3072 bytes: several reads of 512
 FILES = {"lib/neopixel.py": "x = 1\n", "big.bin": BIG, "notes.txt": "hello\n"}
 BONDED = dict(HEADLESS, CIRCUITPY_BLE_BONDED="1")
+SMALL_BUFFERS = dict(HEADLESS, CIRCUITPY_BLE_VIRTUAL_FAULT="small-buffers")
 # The drive in the system's temporary directory: a native file system, where the host's edits are
 # seen at once (a drive under /mnt/c in WSL has no inotify).
 DRIVE = os.path.join(tempfile.mkdtemp(), "CIRCUITPY")
@@ -215,7 +216,9 @@ def file_transfer(b, host):
     r["mkdir with a trailing /"] = {e.name for e in f.listdir("/dir")} == {"sub"}
     f.move("/notes.txt", "/moved.txt")
     names = {e.name for e in f.listdir("/")}
-    r["move"] = "moved.txt" in names and "notes.txt" not in names and host("moved.txt") == b"hello\n"
+    r["move"] = (
+        "moved.txt" in names and "notes.txt" not in names and host("moved.txt") == b"hello\n"
+    )
     f.delete("/dir")
     r["recursive delete"] = "dir" not in {e.name for e in f.listdir("/")}
     try:
@@ -298,7 +301,7 @@ def paced_read():
 # ---- C: the MTU ----
 
 
-def mtu(env=None, name=""):
+def mtu(env=None, name="", expected=247):
     with launch('print("done")\n', files={"big.bin": BIG}, args=ON, env=env) as b:
         seen(b, "done")
         p = b.ble.connect()
@@ -313,10 +316,10 @@ def mtu(env=None, name=""):
 
         p._take = counting
         data = p.files.read("/big.bin")
-    check("the MTU is 247" + name, p.mtu == 247, p.mtu)
+    check("the MTU is %d%s" % (expected, name), p.mtu == expected, p.mtu)
     check(
-        "3 KB read in notifications of up to 244 bytes" + name,
-        data == BIG and sizes and max(sizes) > 200 and max(sizes) <= 244,
+        "3 KB read in notifications of up to %d bytes%s" % (expected - 3, name),
+        data == BIG and sizes and max(sizes) > 200 and max(sizes) <= expected - 3,
         sorted(set(sizes)),
     )
 
@@ -386,6 +389,36 @@ def program_service():
         "... advertises again; the workflow's handles the same",
         again and after == before,
         (before, after),
+    )
+
+
+DISABLES = """import _bleio, supervisor, time
+if supervisor.runtime.run_reason == supervisor.RunReason.STARTUP:
+    _bleio.adapter.enabled = False
+    time.sleep(0.5)
+    _bleio.adapter.enabled = True
+    print("toggled")
+else:
+    print("again")
+while True:
+    time.sleep(0.1)
+"""
+
+
+def program_disables():
+    # The program turns the adapter off and on under the workflow: the workflow stops, and is
+    # back after the reload.
+    with launch(DISABLES, args=ON) as b:
+        toggled = seen(b, "toggled", 8)
+        b.reload()
+        again = seen(b, "again", 8)
+        back = workflow_is(b, "discovery")
+        names = {e.name for e in b.ble.connect().files.listdir("/")}
+        out = b.console(since=0)["data"]
+    check(
+        "the program turns the adapter off and on: the workflow is back after the reload",
+        toggled and again and back and "code.py" in names and "safe mode" not in out,
+        out[-400:],
     )
 
 
@@ -482,7 +515,9 @@ def discover_option():
         b.write("import microcontroller; microcontroller.reset()\r")
         seen(b, "ready", 15)
         erased = workflow_is(b, "discovery") and not state(b)["bonded"]
-    check("--ble-workflow discover erases the bond, advertises publicly", disc and not s["bonded"], s)
+    check(
+        "--ble-workflow discover erases the bond, advertises publicly", disc and not s["bonded"], s
+    )
     check("... and the bond stays erased after a reset", erased)
 
 
@@ -545,10 +580,12 @@ for scenario in (
     remounted,
     paced_read,
     mtu,
-    lambda: mtu(dict(HEADLESS, CIRCUITPY_BLE_VIRTUAL_FAULT="small-buffers"), ", in 27-byte ACL packets"),
+    # 8 buffers of 27 bytes hold a frame of 216: the MTU is 212.
+    lambda: mtu(SMALL_BUFFERS, ", in 27-byte ACL packets", 212),
     reloads,
     between_vms,
     program_service,
+    program_disables,
     disconnect_mid_write,
     host_edit,
     ble_serial,
@@ -559,6 +596,10 @@ for scenario in (
     trace_and_panel,
     discover_off,
 ):
+    # TEST_ONLY=name,name runs those scenarios only.
+    only = os.environ.get("TEST_ONLY")
+    if only and scenario.__name__ not in only.split(","):
+        continue
     try:
         scenario()
     except Exception as e:
