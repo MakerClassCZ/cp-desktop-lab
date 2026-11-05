@@ -178,7 +178,27 @@ TOOLS = [
     (
         "ble_connect",
         "Connect as a phone to what the program advertises, as Bluefruit Connect or nRF Connect "
-        "would; the other ble_ tools then use this connection.",
+        "would; the other ble_ tools then use this connection. bond true: come back as the phone "
+        "of the last ble_pair and encrypt with its keys at once, as a phone does with a board it "
+        "knows. A read or write the program refuses for security pairs by itself, as a phone does.",
+        _schema({"bond": {"type": "boolean"}}),
+    ),
+    (
+        "ble_pair",
+        "Pair with the program as a phone does (LE Legacy, Just Works) and bond: the link is "
+        "encrypted, the bond kept for ble_connect's bond. bond false: encrypted, nothing kept.",
+        _schema({"bond": {"type": "boolean"}}),
+    ),
+    (
+        "ble_bonds",
+        "The program's Bluetooth bonds (its bond store, CIRCUITPY.bonds in the lab): its identity, "
+        "the role, the peer's identity. keys true adds the keys (to decrypt a capture in Wireshark).",
+        _schema({"keys": {"type": "boolean"}}),
+    ),
+    (
+        "ble_erase_bonds",
+        "The program's erase_bonding(): its bonds of this controller's identity go. The phone "
+        "still has its keys: its next encryption fails with Key Missing.",
         _schema(),
     ),
     (
@@ -227,6 +247,8 @@ class Server:
         self.program = program
         self.board = None
         self.peer = None  # ble_connect's phone
+        self.identity = cpapi.Identity()  # the phone's, given away when it pairs
+        self.bond = None  # ble_pair's
         self.drive = None  # the drive's path on this computer
 
     # ---- the board ----
@@ -262,6 +284,8 @@ class Server:
             return fn(*args, **kw)
         except cpapi.ApiError as e:
             raise ToolError("%d %s" % (e.status, e.message))
+        except (cpapi.AttError, cpapi.PairingFailed, cpapi.EncryptError, TimeoutError) as e:
+            raise ToolError(str(e))
         except (ConnectionError, OSError, http.client.HTTPException) as e:
             # A program on its way out closes connections before it has ended.
             if self.board.process is not None:
@@ -532,15 +556,36 @@ class Server:
             indent=1,
         )
 
-    def t_ble_connect(self):
+    def t_ble_connect(self, bond=False):
         if self.peer is not None:
             return "connected already, MTU %d" % self.peer.mtu
+        if bond and self.bond is None:
+            raise ToolError("no bond: ble_pair first")
         board = self._need()
         # A connection left by a connect that did not finish would refuse this one.
         if self._api(board.ble.state).get("connected"):
             self._api(board.request, "POST", "/api/ble/disconnect")
-        self.peer = self._api(board.ble.connect)
+        if bond:
+            self.peer = self._api(board.ble.connect, bond=self.bond)
+            return "connected and encrypted with the bond, MTU %d" % self.peer.mtu
+        self.peer = self._api(board.ble.connect, identity=self.identity)
         return "connected, MTU %d" % self.peer.mtu
+
+    def t_ble_pair(self, bond=True):
+        got = self._api(self._peer().pair, bond=bond)
+        if got.ltk is None:
+            return "paired, encrypted with a %d-byte key; no bond" % got.key_size
+        self.bond = got
+        return "paired and bonded, encrypted with a %d-byte key; the program's identity %s" % (
+            got.key_size,
+            got.identity,
+        )
+
+    def t_ble_bonds(self, keys=False):
+        return json.dumps(self._api(self._need().ble.bonds, keys=keys), indent=1)
+
+    def t_ble_erase_bonds(self):
+        return "erased %d" % self._api(self._need().ble.erase_bonds)
 
     def t_ble_services(self):
         services = self._api(self._peer().services)
