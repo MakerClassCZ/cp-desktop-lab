@@ -783,12 +783,13 @@ static hci_result_t start_advertising(bleio_adapter_obj_t *self,
     }
 
     // The random address this advertisement goes out from, when it is one: anonymous, a new
-    // non-resolvable private address (random, the two top bits 00); else the static one of a
-    // controller without a public address, set again, since an anonymous advertisement before
-    // may have left the controller another.
+    // resolvable private address of our IRK, which a bonded peer resolves (the BLE workflow's
+    // private advertising); without an IRK, a non-resolvable one (random, the two top bits 00).
+    // Else the static one of a controller without a public address, set again, since an
+    // anonymous advertisement before may have left the controller another.
     const uint8_t own_addr_type = anonymous ? BT_ADDR_LE_RANDOM : self->own_addr_type;
     bt_addr_t random_address = self->random_address;
-    if (anonymous) {
+    if (anonymous && !bleio_hci_privacy_new_rpa(random_address.val)) {
         uint8_t rand[8];
         TRY(hci_le_rand(rand));
         memcpy(random_address.val, rand, sizeof(random_address.val));

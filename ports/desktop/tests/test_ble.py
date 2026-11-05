@@ -529,7 +529,8 @@ check(
     by_type,
 )
 
-# anonymous=True advertises from a random address the host set: a non-resolvable private one
+# anonymous=True advertises from a random address the host set: a resolvable private one of the
+# program's IRK (a bonded phone recognises it)
 ANONYMOUS = """
 import _bleio, time
 a = _bleio.adapter
@@ -551,24 +552,28 @@ def adv_address(b, text):
     return s["public"], s["address"]
 
 
+def resolves(address, irk):
+    a = cpapi.address_bytes(address)
+    return a[5] & 0xC0 == 0x40 and cpapi.smp_ah(irk, a[3:]) == a[:3]
+
+
 with launch(ANONYMOUS) as b:
     anonymous = adv_address(b, "anonymous")
+    irk = bytes.fromhex(b.request("GET", "/api/ble/bonds?keys=1").get("irk", ""))
     normal = adv_address(b, "normal")
 with launch(ANONYMOUS, env=dict(HEADLESS, CIRCUITPY_BLE_VIRTUAL_FAULT="no-public-address")) as b:
     anonymous_static = adv_address(b, "anonymous")
     normal_static = adv_address(b, "normal")
 check(
-    "anonymous: a non-resolvable private address the host set",
-    anonymous[0] is False
-    and anonymous[1] != "00:00:00:00:00:00"
-    and int(anonymous[1][:2], 16) < 0x40,
-    anonymous,
+    "anonymous: a resolvable private address of the program's IRK",
+    anonymous[0] is False and len(irk) == 16 and resolves(anonymous[1], irk),
+    (anonymous, irk.hex()),
 )
 check("... then the public one again", normal[0] is True, normal)
 check(
     "anonymous without a public address, then the static one again",
     anonymous_static[0] is False
-    and int(anonymous_static[1][:2], 16) < 0x40
+    and 0x40 <= int(anonymous_static[1][:2], 16) < 0x80
     and normal_static[0] is False
     and int(normal_static[1][:2], 16) >= 0xC0,
     (anonymous_static, normal_static),

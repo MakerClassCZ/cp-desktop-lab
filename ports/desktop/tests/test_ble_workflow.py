@@ -524,6 +524,7 @@ def bonded():
         ok = workflow_is(b, "reconnecting")
         s = state(b)
         adv = b.ble.scan()
+        rpa = cpapi.address_bytes(s["address"])
         p = b.ble.connect(bond=bond)
         names = {e.name for e in p.files.listdir("/")}
         encrypted = state(b)["encrypted"]
@@ -537,6 +538,14 @@ def bonded():
         "... no name, no 0xFEBB",
         adv is not None and adv.name is None and cpapi.uuid(0xFEBB) not in adv.services,
         adv,
+    )
+    check(
+        "... from a resolvable private address of the program's IRK, the bonded phone's to resolve",
+        not s["public"]
+        and rpa[5] & 0xC0 == 0x40
+        and bond.irk is not None
+        and cpapi.smp_ah(bond.irk, rpa[3:]) == rpa[:3],
+        (s["address"], bond.irk),
     )
     check(
         "... the bonded phone comes back encrypted, without pairing, and lists the files",
