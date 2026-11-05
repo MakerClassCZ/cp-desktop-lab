@@ -75,10 +75,7 @@ int ble_host_read(uint8_t *data, size_t len) {
     return n;
 }
 
-static void _workflow_insecure(const uint8_t *h4, size_t len);
-
 int ble_host_write(const uint8_t *data, size_t len) {
-    _workflow_insecure(data, len);
     int n = _real ? serial_host_write(&_serial, data, len, 1000) : ble_controller_write(data, len);
     if (n > 0) {
         ble_host_packet(true, data, (size_t)n);
@@ -152,18 +149,6 @@ bool ble_host_init(void) {
         fprintf(stderr, "circuitpython: --ble-workflow %s needs Bluetooth, and --ble (or the board file) turns it off\n", workflow);
         return false;
     }
-    // Before pairing exists (no SMP), the workflow's characteristics would refuse every phone; a
-    // real radio then serves CIRCUITPY to anyone in range, so only when asked for. Checked before
-    // the port is opened.
-    if (workflow_on && ble_host_port() != NULL && !desktop_options.ble_insecure) {
-        fprintf(stderr, "circuitpython: --ble-workflow with --ble %s needs --ble-insecure: there is no pairing yet, "
-            "so CIRCUITPY would be open to anyone in range\n", ble_host_port());
-        return false;
-    }
-    // Once: not again in the process a reset starts (port_init() has not run yet to say so).
-    if (workflow_on && desktop_options.ble_insecure && getenv("CIRCUITPY_DESKTOP_SAVED_WORD") == NULL) {
-        fprintf(stderr, "circuitpython: BLE workflow without encryption: anyone in range can read and write CIRCUITPY\n");
-    }
     if (off) {
         return true;
     }
@@ -192,32 +177,6 @@ bool ble_host_init(void) {
 // the bonds and advertises publicly, as after reset with the boot button held.
 #define DISCOVERY_WORD (0xbb0000bb | 1 << 8)
 
-// CIRCUITPY_BLE_BONDED=1: the bonded stand-in until pairing exists. The bond store holds a bond of
-// the virtual controller's identity with a central (the virtual phone), so the workflow boots
-// bonded: private advertising, no discovery. Erasing the bonds (discover) clears it for the rest
-// of the process, resets included.
-#define BONDED_ENV "CIRCUITPY_BLE_BONDED"
-static bool _stand_in;
-
-static void _bonded_stand_in(void) {
-    const char *bonded = getenv(BONDED_ENV);
-    if (bonded == NULL || strcmp(bonded, "1") != 0 || _real) {
-        return;
-    }
-    static const uint8_t controller[6] = { 0x01, 0x00, 0x00, 0x00, 0xdc, 0x02 };
-    static const uint8_t phone[6] = { 0x89, 0x37, 0x1c, 0xc9, 0x10, 0x7c };
-    bonding_record_t *record = &bonding_store()->records[0];
-    memset(record, 0, sizeof(*record));
-    record->flags = BONDING_IN_USE;
-    record->role = BONDING_ROLE_PERIPHERAL;
-    record->own.type = BT_ADDR_LE_PUBLIC;
-    memcpy(record->own.a.val, controller, sizeof(controller));
-    record->peer.type = BT_ADDR_LE_RANDOM;
-    memcpy(record->peer.a.val, phone, sizeof(phone));
-    record->key_size = 16;
-    _stand_in = true;
-}
-
 void ble_host_port_init(void) {
     if (!_on) {
         return;
@@ -229,7 +188,6 @@ void ble_host_port_init(void) {
     adapter->hci_transport_ctx = NULL;
     adapter->enabled = false;
     bleio_set_adapter(MP_OBJ_FROM_PTR(adapter));
-    _bonded_stand_in();
     // discover: once per launch; a reset re-runs the process with the same arguments and boots as on.
     if (strcmp(ble_host_workflow_mode(), "discover") == 0 && !desktop_was_reset) {
         port_set_saved_word(DISCOVERY_WORD);
@@ -260,12 +218,6 @@ void ble_host_vm_task(void) {
     }
 }
 
-void ble_host_before_reset(void) {
-    if (_stand_in && !bonding_is_bonded(NULL, BONDING_ROLE_PERIPHERAL)) {
-        platform_set_env(BONDED_ENV, NULL);
-    }
-}
-
 bool ble_host_bonded(void) {
     return _on && common_hal_bleio_adapter_is_bonded_to_central(&common_hal_bleio_adapter_obj);
 }
@@ -285,29 +237,6 @@ const char *ble_host_workflow_state(void) {
         return s.scan_response_len > 0 ? "discovery" : "reconnecting";
     }
     return "on";
-}
-
-// --ble-insecure: before pairing exists, the workflow's characteristics (encrypted, as on a board)
-// opened. Done as advertising starts, so before any phone can connect to a table built anew.
-static void _workflow_insecure(const uint8_t *h4, size_t len) {
-    // LE Set Advertising Enable or LE Set Extended Advertising Enable, turning it on.
-    if (!desktop_options.ble_insecure || len < 5 || h4[0] != 0x01 || h4[4] != 0x01 ||
-        !((h4[1] == 0x0a || h4[1] == 0x39) && h4[2] == 0x20)) {
-        return;
-    }
-    bleio_adapter_obj_t *adapter = &common_hal_bleio_adapter_obj;
-    for (uint16_t i = 1; i < adapter->static_attribute_count; i++) {
-        mp_obj_t attribute = adapter->static_attributes[i];
-        if (mp_obj_is_type(attribute, &bleio_characteristic_type)) {
-            bleio_characteristic_obj_t *c = MP_OBJ_TO_PTR(attribute);
-            c->read_perm = c->read_perm == SECURITY_MODE_ENC_NO_MITM ? SECURITY_MODE_OPEN : c->read_perm;
-            c->write_perm = c->write_perm == SECURITY_MODE_ENC_NO_MITM ? SECURITY_MODE_OPEN : c->write_perm;
-        } else if (mp_obj_is_type(attribute, &bleio_descriptor_type)) {
-            bleio_descriptor_obj_t *desc = MP_OBJ_TO_PTR(attribute);
-            desc->read_perm = desc->read_perm == SECURITY_MODE_ENC_NO_MITM ? SECURITY_MODE_OPEN : desc->read_perm;
-            desc->write_perm = desc->write_perm == SECURITY_MODE_ENC_NO_MITM ? SECURITY_MODE_OPEN : desc->write_perm;
-        }
-    }
 }
 
 const char *ble_host_controller(void) {

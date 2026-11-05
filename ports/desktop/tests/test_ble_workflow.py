@@ -2,15 +2,15 @@
 
 The supervisor's file transfer and serial services (supervisor/shared/bluetooth/) on the virtual
 controller, with the control API's phone speaking their protocols (cpapi's FileTransfer and
-BleConsole). Until pairing exists the phone's link is not encrypted, so the workflow runs with
---ble-insecure; one check shows what it refuses without it. CIRCUITPY_BLE_BONDED=1 stands in for
-a bond. Each scenario is a function: one that raises is a FAIL, and the next one runs.
+BleConsole). The workflow's characteristics need an encrypted link: the phone pairs when it is
+refused (0x05), as a phone does, and bonds; its bond makes the next boot advertise privately. Each
+scenario is a function: one that raises is a FAIL, and the next one runs.
 """
 
 import os, re, shutil, struct, tempfile, time, traceback
 from harness import BIN, HEADLESS, T, check, cpapi, refused, seen
 
-ON = ["--ble-workflow", "on", "--ble-insecure"]
+ON = ["--ble-workflow", "on"]
 READY = 'print("ready")\nimport time\nwhile True:\n    time.sleep(0.1)\n'
 SERVICE = READY.replace(
     'print("ready")',
@@ -21,16 +21,18 @@ SERVICE = READY.replace(
 FT, SERIAL, GUARD = "0000febb", "adaf0001", "adaf0004"
 BIG = bytes(range(256)) * 12  # 3072 bytes: several reads of 512
 FILES = {"lib/neopixel.py": "x = 1\n", "big.bin": BIG, "notes.txt": "hello\n"}
-BONDED = dict(HEADLESS, CIRCUITPY_BLE_BONDED="1")
 SMALL_BUFFERS = dict(HEADLESS, CIRCUITPY_BLE_VIRTUAL_FAULT="small-buffers")
 # The drive in the system's temporary directory: a native file system, where the host's edits are
 # seen at once (a drive under /mnt/c in WSL has no inotify).
 DRIVE = os.path.join(tempfile.mkdtemp(), "CIRCUITPY")
 
 
-def launch(code, files=None, args=(), **kw):
-    """code.py started on a fresh DRIVE with files ({name: str or bytes}): a cpapi.Board."""
+def launch(code, files=None, args=(), keep_bonds=False, **kw):
+    """code.py started on a fresh DRIVE with files ({name: str or bytes}): a cpapi.Board. Its
+    bonds (CIRCUITPY.bonds beside it) go too, unless keep_bonds."""
     shutil.rmtree(DRIVE, ignore_errors=True)
+    if not keep_bonds and os.path.exists(DRIVE + ".bonds"):
+        os.remove(DRIVE + ".bonds")
     os.makedirs(DRIVE)
     for name, text in dict(files or {}, **{"code.py": code}).items():
         os.makedirs(os.path.dirname(os.path.join(DRIVE, name)), exist_ok=True)
@@ -142,30 +144,45 @@ def gatt_table():
     )
 
 
+def att_code(f):
+    try:
+        f()
+        return None
+    except cpapi.AttError as e:
+        return e.code
+
+
 def needs_encryption():
-    # Without --ble-insecure the workflow's characteristics need an encrypted link: none yet.
-    with launch(READY, args=["--ble-workflow", "on"]) as b:
+    # The workflow's characteristics need an encrypted link; the phone that does not pair is
+    # refused, the version stays open; after pairing the same requests work.
+    with launch(READY, args=ON) as b:
         seen(b, "ready")
-        p = b.ble.connect()
-        try:
-            p.subscribe(cpapi.FT_TRANSFER)
-            code = None
-        except cpapi.AttError as e:
-            code = e.code
+        p = b.ble.connect(auto_pair=False)
+        cccd = att_code(lambda: p.subscribe(cpapi.FT_TRANSFER))
+        read = att_code(lambda: p.read(cpapi.FT_TRANSFER))
+        serial = att_code(lambda: p.subscribe(cpapi.SERIAL_TX))
         version = p.files.version()
-    check("without --ble-insecure: the transfer CCCD answers 0x05", code == 0x05, code)
+        p.pair()
+        after = att_code(lambda: p.subscribe(cpapi.FT_TRANSFER))
+        s = state(b)
+    check(
+        "before pairing: the transfer's CCCD and value, the serial CCCD answer 0x05",
+        (cccd, read, serial) == (0x05, 0x05, 0x05),
+        (cccd, read, serial),
+    )
     check("... the version stays open", version == 4, version)
+    check(
+        "after pairing: subscribed, the link encrypted, one bond",
+        after is None and s["encrypted"] and s["bonds"] == 1,
+        (after, s),
+    )
 
 
 def refusals():
     status, out = refused(["--ble", "off", "--ble-workflow", "on"])
     check("--ble off with the workflow: refused", status == 2 and "needs Bluetooth" in out, out)
-    status, out = refused(["--ble", "NOPORT", "--ble-workflow", "on"])
-    check(
-        "--ble PORT with the workflow, no --ble-insecure: refused before the port opens",
-        status == 2 and "--ble-insecure" in out and "cannot open" not in out,
-        out,
-    )
+    status, out = refused(["--ble-workflow", "on", "--ble-insecure"])
+    check("--ble-insecure is gone (pairing exists): refused as unknown", status == 2, out)
     status, out = refused(["--ble-workflow", "maybe"])
     check(
         "--ble-workflow maybe: refused", status == 2 and "expected on, discover or off" in out, out
@@ -382,7 +399,7 @@ def program_service():
         b.reload()
         seen(b, "ready", 8)
         dropped = until(lambda: not state(b)["connected"])
-        again = workflow_is(b, "discovery")
+        again = workflow_is(b, "discovery")  # nothing asked for encryption: no bond
         after = handles(b.ble.connect())
     check("a program's own service: disconnected at its reload", dropped)
     check(
@@ -430,7 +447,8 @@ def disconnect_mid_write():
         f._send(struct.pack("<BBHIQI", 0x20, 0, 6, 0, 0, 2000) + b"/x.bin")
         f._recv(20)
         p.disconnect()
-        readvertised = workflow_is(b, "discovery")
+        # The phone paired for the transfer: bonded, the workflow advertises privately.
+        readvertised = workflow_is(b, "reconnecting")
         names = {e.name for e in b.ble.connect().files.listdir("/")}
         open(os.path.join(DRIVE, "code.py"), "w").write('print("edited")\n')
         edited = seen(b, "edited", 6)
@@ -485,27 +503,46 @@ def ble_ctrl_c():
 # ---- F: bonds and discovery ----
 
 
+def pair_once():
+    """A phone pairs with the workflow and bonds, in discovery mode; the lab ends. Its Bond."""
+    with launch(READY, args=ON) as b:
+        seen(b, "ready")
+        bond = b.ble.connect(pair=True).bond
+    return bond
+
+
 def bonded():
-    with launch(READY, args=ON, env=BONDED) as b:
+    bond = pair_once()
+    with launch(READY, args=ON, keep_bonds=True) as b:
         seen(b, "ready")
         ok = workflow_is(b, "reconnecting")
         s = state(b)
         adv = b.ble.scan()
+        p = b.ble.connect(bond=bond)
+        names = {e.name for e in p.files.listdir("/")}
+        encrypted = state(b)["encrypted"]
+        p.disconnect()
         b.ble.discover()
         seen(b, "ready", 10)
         disc = workflow_is(b, "discovery")
         s2 = state(b)
-    check("bonded (the stand-in): private advertising, reconnecting", ok and s["bonded"], s)
+    check("bonded: private advertising, reconnecting", ok and s["bonded"], s)
     check(
         "... no name, no 0xFEBB",
         adv is not None and adv.name is None and cpapi.uuid(0xFEBB) not in adv.services,
         adv,
     )
+    check(
+        "... the bonded phone comes back encrypted, without pairing, and lists the files",
+        encrypted and "code.py" in names,
+        (encrypted, names),
+    )
     check("POST /api/ble/discover: reset, bonds erased, discovery", disc and not s2["bonded"], s2)
 
 
 def discover_option():
-    with launch(READY, args=["--ble-workflow", "discover", "--ble-insecure"], env=BONDED) as b:
+    pair_once()
+    with launch(READY, args=["--ble-workflow", "discover"], keep_bonds=True) as b:
         seen(b, "ready")
         disc = workflow_is(b, "discovery")
         s = state(b)
@@ -522,7 +559,8 @@ def discover_option():
 
 
 def reset_keeps_bond():
-    with launch(READY, args=ON, env=BONDED) as b:
+    pair_once()
+    with launch(READY, args=ON, keep_bonds=True) as b:
         seen(b, "ready")
         b.write("\x03")
         b.write("\r")

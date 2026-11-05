@@ -121,7 +121,6 @@ void reset_port(void) {
 void reset_cpu(void) {
     // The next process listens on the API's port, with its token.
     control_api_stop();
-    ble_host_before_reset();
     // The next process needs the pins' USB device; not from a fault handler, where libusb's locks
     // may be held.
     if (getenv(FAULTED_ENV) == NULL) {

@@ -26,7 +26,6 @@ typedef struct {
     const char *ble_log;        // --ble-log: the btsnoop file of the HCI, or NULL
     const char *ble_bonds_path; // --ble-bonds: the bond store's file, absolute; default the drive's path + .bonds
     const char *ble_workflow;   // --ble-workflow: "on", "discover", "off", or NULL (the board file's, else off)
-    bool ble_insecure;          // --ble-insecure: the BLE workflow without encryption (no pairing yet)
     const char *code;           // --code: the file on the drive run in place of code.py, or NULL
     const char *gpiochip;       // --gpiochip: the GPIO chip of --board gpiochip
     int i2c_bus;                // --i2c-bus: its /dev/i2c-N

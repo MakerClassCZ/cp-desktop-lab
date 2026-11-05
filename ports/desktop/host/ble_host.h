@@ -29,7 +29,7 @@ bool ble_host_board_workflow(const char *value);
 // The BLE workflow's mode: "on", "discover" or "off" (--ble-workflow, else the board file's).
 const char *ble_host_workflow_mode(void);
 // From port_init(): _bleio.adapter bound to the controller, disabled, kept across reloads (nothing
-// without one); discover's saved word (once per launch); the stand-in bond (CIRCUITPY_BLE_BONDED).
+// without one); discover's saved word (once per launch).
 void ble_host_port_init(void);
 // From board_init(): the workflow switched off unless asked for.
 void ble_host_board_init(void);
@@ -37,8 +37,6 @@ void ble_host_board_init(void);
 void ble_host_vm_task(void);
 // From the API: discovery mode, as reset plus the boot button: false when the workflow is off.
 bool ble_host_request_discovery(void);
-// Before a reset re-executes the process: a stand-in bond erased stays erased.
-void ble_host_before_reset(void);
 // The workflow's state: "off", "discovery", "reconnecting", "connected" or "on".
 const char *ble_host_workflow_state(void);
 // Whether the bond store holds a bond with a central (the workflow's "bonded").
