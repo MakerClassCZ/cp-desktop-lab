@@ -172,6 +172,9 @@ def drive(code, files=None, name="CIRCUITPY"):
     """A fresh drive beside the tests with code.py and files ({name: str or bytes})."""
     d = os.path.join(T, name)
     shutil.rmtree(d, ignore_errors=True)
+    # A fresh drive has no Bluetooth bonds beside it either.
+    if os.path.exists(d + ".bonds"):
+        os.remove(d + ".bonds")
     os.makedirs(d)
     open(os.path.join(d, "code.py"), "w").write(code)
     for n, text in (files or {}).items():
