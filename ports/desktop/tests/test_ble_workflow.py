@@ -36,7 +36,10 @@ def launch(code, files=None, args=(), keep_bonds=False, **kw):
     os.makedirs(DRIVE)
     for name, text in dict(files or {}, **{"code.py": code}).items():
         os.makedirs(os.path.dirname(os.path.join(DRIVE, name)), exist_ok=True)
-        open(os.path.join(DRIVE, name), "wb" if isinstance(text, bytes) else "w").write(text)
+        # Bytes as given, on Windows too (no CRLF): the phone's listing compares sizes.
+        open(os.path.join(DRIVE, name), "wb").write(
+            text if isinstance(text, bytes) else text.encode()
+        )
     return cpapi.Board.launch(BIN, DRIVE, args=args, **kw)
 
 
@@ -270,8 +273,9 @@ def folder():
 
 def image():
     path = os.path.join(T, "workflow.img")
-    if os.path.exists(path):
-        os.remove(path)
+    for leftover in (path, path + ".bonds"):  # a bond of an earlier run: not in discovery
+        if os.path.exists(leftover):
+            os.remove(leftover)
     with cpapi.Board.launch(BIN, path, args=ON) as b:
         seen(b, "\n")
         b.exec(
