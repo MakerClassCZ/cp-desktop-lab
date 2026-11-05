@@ -621,7 +621,8 @@ void att_remove_connection(uint16_t conn_handle, uint8_t reason) {
             peer_index = i;
         }
 
-        if (bleio_connections[i].conn_handle != 0xffff) {
+        // The links to centrals (ours as the peripheral): the CCCDs are theirs.
+        if (bleio_connections[i].conn_handle != 0xffff && !bleio_connections[i].is_central) {
             peer_count++;
         }
     }
@@ -643,7 +644,8 @@ void att_remove_connection(uint16_t conn_handle, uint8_t reason) {
         }
     }
 
-    if (peer_count == 1) {
+    // The last central leaves (a device the program connected to may stay): the CCCDs go.
+    if (peer_count == (bleio_connections[peer_index].is_central ? 0 : 1)) {
 
         // Clear CCCD values on disconnect.
         for (size_t handle = 1; handle <= max_attribute_handle; handle++) {
@@ -751,7 +753,9 @@ bool att_notify(uint16_t handle, const uint8_t *value, int length) {
     int num_notifications = 0;
 
     for (size_t i = 0; i < BLEIO_TOTAL_CONNECTION_COUNT; i++) {
-        if (bleio_connections[i].conn_handle == 0xffff ||
+        // Our GATT server's subscribers are the centrals connected to us: one CCCD value serves
+        // every link, so a device the program connected to (it is the central there) gets none.
+        if (bleio_connections[i].conn_handle == 0xffff || bleio_connections[i].is_central ||
             !att_may_notify(bleio_connections[i].conn_handle, handle)) {
             continue;
         }
@@ -782,7 +786,9 @@ bool att_indicate(uint16_t handle, const uint8_t *value, int length) {
     int num_indications = 0;
 
     for (size_t i = 0; i < BLEIO_TOTAL_CONNECTION_COUNT; i++) {
-        if (bleio_connections[i].conn_handle == 0xffff ||
+        // Our GATT server's subscribers are the centrals connected to us: one CCCD value serves
+        // every link, so a device the program connected to (it is the central there) gets none.
+        if (bleio_connections[i].conn_handle == 0xffff || bleio_connections[i].is_central ||
             !att_may_notify(bleio_connections[i].conn_handle, handle)) {
             continue;
         }

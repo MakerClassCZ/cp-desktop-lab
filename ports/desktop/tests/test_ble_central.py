@@ -995,3 +995,39 @@ check(
 check("cpapi.py air without the token: 64", no_token.returncode == 64, no_token)
 
 print("DONE")
+
+# The program's notifications go to the phone that subscribed, never to a device it is the
+# central of; a phone that leaves takes its subscription along, though the device's link stays.
+NOTIFIER = SETUP + (
+    "s = _bleio.Service(_bleio.UUID(0x1260))\n"
+    "n = _bleio.Characteristic.add_to_service(s, _bleio.UUID(0x1261),\n"
+    "    properties=_bleio.Characteristic.NOTIFY | _bleio.Characteristic.READ, max_length=8)\n"
+    "a.start_advertising(bytes([2, 1, 6]), connectable=True)\n"
+)
+with start() as b, cpapi.Air(b) as air:
+    hrm = air.add(cpapi.devices.heart_rate())
+    ex(b, NOTIFIER)
+    phone = b.ble.connect()
+    linked = ex(b, connect(hrm.address))
+    phone.subscribe(0x1261)
+    n0 = len(air.events[0])
+    ex(b, "n.value = b'one'\ntime.sleep(0.3)")
+    got = phone.notifications(0x1261, 1)
+    to_device = [
+        e
+        for e in air.events[0][n0:]
+        if e["kind"] == "l2cap" and e["peer"] == hrm.address and e["data"][:2] in ("1b", "1d")
+    ]
+    phone.disconnect()
+    ex(b, "time.sleep(0.3)\na.start_advertising(bytes([2, 1, 6]), connectable=True)")
+    phone2 = b.ble.connect()
+    handle = phone2.characteristic(0x1261).handle
+    ex(b, "n.value = b'two'\ntime.sleep(0.3)")
+    phone2._take(1)
+    stale = phone2._notified.get(handle)
+check(
+    "[18] a notification to the phone that subscribed, none to the device the program connected to",
+    "connected True" in linked and got == [b"one"] and to_device == [],
+    (linked, got, to_device),
+)
+check("[18] the next phone has no subscription left by the one that left", not stale, stale)
