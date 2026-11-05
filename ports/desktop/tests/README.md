@@ -26,6 +26,10 @@ Each script takes the program and works in its own directory, so run them from a
   of the control API and cpapi; `CIRCUITPY_BLE_VIRTUAL_FAULT=no-public-address` gives the virtual
   controller no public address, as Zephyr's on an nRF; `CIRCUITPY_LIB`
   (or `frozen/Adafruit_CircuitPython_BLE` fetched) gives it `adafruit_ble`.
+- `test_ble_smp.py`: pairing (LE Legacy, Just Works), bonds and `CIRCUITPY.bonds`, encryption, with
+  cpapi's phone; the crypto on the Bluetooth Core's sample data;
+  `CIRCUITPY_BLE_VIRTUAL_FAULT=no-static-address` gives the virtual controller neither a public
+  nor a static address; `CIRCUITPY_LIB` with `adafruit_ble` adds an HID keyboard.
 - `test_code.py`: `--code FILE` runs a file of the drive in place of `code.py`, from its own
   directory, every run; `cpapi run --code`.
 - `test_closed_file.py`: a closed file on a directory drive fails as on FAT, and a refresh survives it.
