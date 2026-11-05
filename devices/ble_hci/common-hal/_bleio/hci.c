@@ -520,51 +520,62 @@ bool hci_busy(void) {
 }
 
 hci_result_t hci_send_acl_pkt(uint16_t handle, uint8_t cid, uint16_t data_len, uint8_t *data) {
-    // Wait for all backlogged packets to finish, as long as a command's answer may take: a
-    // controller that keeps the credit (gone, or never set up) fails the send, never hangs it.
-    uint64_t start = supervisor_ticks_ms64();
-    while (pending_pkt >= common_hal_bleio_adapter_obj.max_acl_num_buffers) {
-        // The credits come back in Number Of Completed Packets. Read it here as well: a send from
-        // a background task (the BLE workflow's) cannot run the background tasks again.
-        hci_waiting++;
-        hci_poll_for_incoming_pkt();
-        RUN_BACKGROUND_TASKS;
-        hci_waiting--;
-        if (supervisor_ticks_ms64() - start > RESPONSE_TIMEOUT_MSECS) {
-            return HCI_WRITE_TIMEOUT;
-        }
-    }
-
-    // buf_len is size of entire packet including header.
-    const size_t buf_len = sizeof(h4_hci_acl_pkt_t) + sizeof(acl_data_t) + data_len;
-    uint8_t tx_buffer[buf_len];
-
-    h4_hci_acl_pkt_t *acl_pkt = (h4_hci_acl_pkt_t *)tx_buffer;
-    acl_data_t *acl_data = (acl_data_t *)acl_pkt->data;
-    acl_pkt->pkt_type = H4_ACL;
-    acl_pkt->handle = handle;
-    // Host-to-controller LE data must use the non-flushable start flag; NimBLE
-    // controllers (ESP32-C6) silently discard packets with ACL_DATA_PB_FIRST_FLUSH.
-    acl_pkt->pb = ACL_DATA_PB_FIRST_NON_FLUSH;
-    acl_pkt->bc = 0;
-    acl_pkt->data_len = (uint16_t)(sizeof(acl_data_t) + data_len);
+    // The L2CAP frame, its header then the data, goes in ACL packets no longer than the
+    // controller's buffers (LE Read Buffer Size): the first a start, the rest continuations.
+    const size_t frame_len = sizeof(acl_data_t) + data_len;
+    uint8_t frame[frame_len];
+    acl_data_t *acl_data = (acl_data_t *)frame;
     acl_data->acl_data_len = data_len;
     acl_data->cid = cid;
-
     memcpy(&acl_data->acl_data, data, data_len);
+    const size_t max_len = common_hal_bleio_adapter_obj.max_acl_buffer_len > 0
+        ? common_hal_bleio_adapter_obj.max_acl_buffer_len : 27;
 
-    #if HCI_DEBUG
-    dump_acl_pkt(true, buf_len, tx_buffer);
-    #endif
+    for (size_t at = 0; at < frame_len;) {
+        // Wait for a free buffer, as long as a command's answer may take: a controller that
+        // keeps the credit (gone, or never set up) fails the send, never hangs it.
+        uint64_t start = supervisor_ticks_ms64();
+        while (pending_pkt >= common_hal_bleio_adapter_obj.max_acl_num_buffers) {
+            // The credits come back in Number Of Completed Packets. Read it here as well: a send
+            // from a background task (the BLE workflow's) cannot run the background tasks again.
+            hci_waiting++;
+            hci_poll_for_incoming_pkt();
+            RUN_BACKGROUND_TASKS;
+            hci_waiting--;
+            if (supervisor_ticks_ms64() - start > RESPONSE_TIMEOUT_MSECS) {
+                return HCI_WRITE_TIMEOUT;
+            }
+        }
 
-    pending_pkt++;
+        const size_t n = MIN(frame_len - at, max_len);
+        // buf_len is size of entire packet including header.
+        const size_t buf_len = sizeof(h4_hci_acl_pkt_t) + n;
+        uint8_t tx_buffer[buf_len];
+        h4_hci_acl_pkt_t *acl_pkt = (h4_hci_acl_pkt_t *)tx_buffer;
+        acl_pkt->pkt_type = H4_ACL;
+        acl_pkt->handle = handle;
+        // Host-to-controller LE data must use the non-flushable start flag; NimBLE
+        // controllers (ESP32-C6) silently discard packets with ACL_DATA_PB_FIRST_FLUSH.
+        acl_pkt->pb = at == 0 ? ACL_DATA_PB_FIRST_NON_FLUSH : ACL_DATA_PB_MIDDLE;
+        acl_pkt->bc = 0;
+        acl_pkt->data_len = (uint16_t)n;
+        memcpy(acl_pkt->data, frame + at, n);
 
-    hci_result_t result = write_pkt(tx_buffer, buf_len);
-    if (result != HCI_OK) {
-        // Not sent, so not to be completed: its credit is not spent.
-        pending_pkt--;
+        #if HCI_DEBUG
+        dump_acl_pkt(true, buf_len, tx_buffer);
+        #endif
+
+        pending_pkt++;
+
+        hci_result_t result = write_pkt(tx_buffer, buf_len);
+        if (result != HCI_OK) {
+            // Not sent, so not to be completed: its credit is not spent.
+            pending_pkt--;
+            return result;
+        }
+        at += n;
     }
-    return result;
+    return HCI_OK;
 }
 
 hci_result_t hci_reset(void) {

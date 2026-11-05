@@ -298,8 +298,8 @@ def paced_read():
 # ---- C: the MTU ----
 
 
-def mtu():
-    with launch('print("done")\n', files={"big.bin": BIG}, args=ON) as b:
+def mtu(env=None, name=""):
+    with launch('print("done")\n', files={"big.bin": BIG}, args=ON, env=env) as b:
         seen(b, "done")
         p = b.ble.connect()
         handle = p.characteristic(cpapi.FT_TRANSFER).handle
@@ -313,9 +313,9 @@ def mtu():
 
         p._take = counting
         data = p.files.read("/big.bin")
-    check("the MTU is 247", p.mtu == 247, p.mtu)
+    check("the MTU is 247" + name, p.mtu == 247, p.mtu)
     check(
-        "3 KB read in notifications of up to 244 bytes",
+        "3 KB read in notifications of up to 244 bytes" + name,
         data == BIG and sizes and max(sizes) > 200 and max(sizes) <= 244,
         sorted(set(sizes)),
     )
@@ -545,6 +545,7 @@ for scenario in (
     remounted,
     paced_read,
     mtu,
+    lambda: mtu(dict(HEADLESS, CIRCUITPY_BLE_VIRTUAL_FAULT="small-buffers"), ", in 27-byte ACL packets"),
     reloads,
     between_vms,
     program_service,

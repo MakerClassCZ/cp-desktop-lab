@@ -53,7 +53,12 @@
 #include "shared-bindings/_bleio/UUID.h"
 #include "supervisor/shared/tick.h"
 
-static uint16_t max_mtu = BT_ATT_DEFAULT_LE_MTU;  // 23
+// The ATT MTU we take: 247, an LE packet of 251 bytes (the most of a Data Length Extension), so a
+// notification carries 244 bytes. The host's buffers hold that (hci.c: 255).
+#ifndef BLEIO_HCI_MAX_MTU
+#define BLEIO_HCI_MAX_MTU 247
+#endif
+static uint16_t max_mtu = BLEIO_HCI_MAX_MTU;
 static unsigned long timeout = 5000;
 
 static volatile bool confirm;
@@ -238,7 +243,7 @@ static void check_and_save_expected_rsp(uint16_t conn_handle, uint8_t opcode, ui
 }
 
 void bleio_att_reset(void) {
-    max_mtu = BT_ATT_DEFAULT_LE_MTU;
+    max_mtu = BLEIO_HCI_MAX_MTU;
     timeout = 5000;
     long_write_handle = BLE_GATT_HANDLE_INVALID;
     long_write_value = NULL;

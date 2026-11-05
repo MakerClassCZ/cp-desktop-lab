@@ -43,8 +43,10 @@ static size_t _out_head;
 static size_t _out_count;
 
 // CIRCUITPY_BLE_VIRTUAL_FAULT=no-public-address: a controller without a public address, as
-// Zephyr's on an nRF.
+// Zephyr's on an nRF. =small-buffers: ACL buffers of 27 bytes, as a controller without Data
+// Length Extension has, so the host sends a long PDU in fragments.
 static bool _no_public_address;
+static bool _small_buffers;
 
 // The lab's addresses, least significant byte first: 02:dc:00:00:00:01 public, and a static random
 // one for a host that asks for the controller's (Zephyr's vendor command).
@@ -186,8 +188,8 @@ static void _command(uint16_t opcode, const uint8_t *p, uint8_t len) {
             }
             _complete(opcode, ret, 7);
             break;
-        case 0x2002:            // LE Read Buffer Size: 251 bytes, 8 packets
-            ret[1] = 251;
+        case 0x2002:            // LE Read Buffer Size: 251 bytes (or 27), 8 packets
+            ret[1] = _small_buffers ? 27 : 251;
             ret[3] = 8;
             _complete(opcode, ret, 4);
             break;
@@ -278,6 +280,7 @@ void ble_controller_reset(void) {
     _pdu_head = _pdu_count = 0;
     const char *fault = getenv("CIRCUITPY_BLE_VIRTUAL_FAULT");
     _no_public_address = fault != NULL && strcmp(fault, "no-public-address") == 0;
+    _small_buffers = fault != NULL && strcmp(fault, "small-buffers") == 0;
     pthread_mutex_unlock(&_lock);
 }
 

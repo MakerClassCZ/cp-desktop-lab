@@ -506,7 +506,7 @@ with launch(ATT) as b:
         quiet[pdu] = b.request("GET", "/api/ble/att?wait=300")["pdus"]
     unsupported = att(b, "2003000500")  # a Read Multiple Variable Request
     by_type = att(b, "080100ffff3512")  # Read By Type of the 0x1235 value
-check("an MTU request under 23: the server's 23", mtu == "031700", mtu)
+check("an MTU request under 23: the server's own, 247", mtu == "03f700", mtu)
 check(
     "... and a Read Response still carries 22 bytes",
     name is not None and bytes.fromhex(name)[1:] == b"CP-lab with a long name"[:22],
