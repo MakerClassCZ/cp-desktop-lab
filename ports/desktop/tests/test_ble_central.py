@@ -6,7 +6,7 @@ CLUE) through cpapi.Air's relay.
 """
 
 import os, threading, time
-from harness import BIN, HEADLESS, check, cpapi, drive, lib_files
+from harness import BIN, HEADLESS, check, cpapi, drive, lib_files, seen
 
 # The REPL holds the program's variables from one exec to the next, so a test drives the program
 # step by step while the Air's threads play the devices.
@@ -170,6 +170,7 @@ with start() as b, cpapi.Air(b) as air:
     first = ex(b, connect(hrm.address))
     device_sees = hrm.wait_connected()
     interval = ex(b, "print('interval', c.connection_interval)")
+    imported = ex(b, "import _bleio\nprint('still', c.connected, len(_bleio.adapter.connections))")
     links = b.request("GET", "/api/ble")["links"]
     trace = b.trace(since=0)["data"]
     hrm.disconnect()
@@ -196,6 +197,7 @@ check(
     links,
 )
 check("[6] connection_interval from the connection: 7.5 ms", "interval 7.5" in interval, interval)
+check("[6] _bleio imported again keeps the connection", "still True 1" in imported, imported)
 check("[9] the device disconnects: the program sees it", "after False 0" in dropped, dropped)
 check(
     "[9] the program disconnects: the device sees it",
@@ -574,5 +576,148 @@ else:
     check(
         "[16] adafruit_ble's UART client against cpapi.devices.uart", "echo b'HELLO'" in out, out
     )
+
+# ---- two labs on one air: CLUE to CLUE ----
+
+NUS = cpapi.NUS_SERVICE
+ECHO_RADIO = """
+from adafruit_ble import BLERadio
+from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
+from adafruit_ble.services.nordic import UARTService
+ble = BLERadio()
+uart = UARTService()
+ble.start_advertising(ProvideServicesAdvertisement(uart))
+print("ready")
+was = False
+while True:
+    if ble.connected != was:
+        was = ble.connected
+        print("connected" if was else "disconnected")
+    if ble.connected and uart.in_waiting:
+        uart.write(uart.read(uart.in_waiting))
+"""
+# The same with _bleio alone, for a lib without adafruit_ble.
+ECHO_RAW = """
+import _bleio, time
+a = _bleio.adapter
+a.enabled = True
+C = _bleio.Characteristic
+s = _bleio.Service(_bleio.UUID(%r))
+rx = C.add_to_service(s, _bleio.UUID(%r), properties=C.WRITE | C.WRITE_NO_RESPONSE, max_length=20)
+tx = C.add_to_service(s, _bleio.UUID(%r), properties=C.NOTIFY, max_length=20)
+buf = _bleio.CharacteristicBuffer(rx, buffer_size=64)
+a.start_advertising(bytes([2, 1, 6, 17, 7]) + bytes(_bleio.UUID(%r).uuid128), connectable=True)
+print("ready")
+was = False
+while True:
+    if a.connected != was:
+        was = a.connected
+        print("connected" if was else "disconnected")
+    if buf.in_waiting:
+        tx.value = buf.read(buf.in_waiting)
+    time.sleep(0.01)
+""" % (NUS, cpapi.NUS_RX, cpapi.NUS_TX, NUS)
+CLIENT_RAW = (
+    SETUP
+    + """
+U = _bleio.UUID(%r)
+for e in a.start_scan(timeout=5):
+    if e.connectable and bytes(U.uuid128) in bytes(e.advertisement_bytes):
+        break
+a.stop_scan()
+c = a.connect(e.address, timeout=3)
+s = c.discover_remote_services([U])[0]
+ch = {x.uuid: x for x in s.characteristics}
+tx = ch[_bleio.UUID(%r)]
+buf = _bleio.CharacteristicBuffer(tx, buffer_size=64)
+tx.set_cccd(notify=True)
+ch[_bleio.UUID(%r)].value = b"hello"
+t = time.monotonic()
+while buf.in_waiting < 5 and time.monotonic() - t < 3:
+    time.sleep(0.01)
+print("echo", buf.read(5))
+"""
+    % (NUS, cpapi.NUS_TX, cpapi.NUS_RX)
+)
+CLIENT_RADIO = UART_CLIENT
+
+radio = lib_files("adafruit_ble") is not None
+files = lib_files("adafruit_ble") if radio else None
+with start("CLUEA", ECHO_RADIO if radio else ECHO_RAW, files=files) as A, start("CLUEB", files=files) as B:
+    A.wait("ready", timeout=15)
+    with cpapi.Air(A, B):
+        out = ex(B, CLIENT_RADIO if radio else CLIENT_RAW, timeout=30)
+        a_connected = seen(A, "connected", 5)
+        left = ex(
+            B, "import _bleio\nfor x in _bleio.adapter.connections:\n    x.disconnect()\nprint('left')"
+        )
+        a_disconnected = seen(A, "disconnected", 5)
+    trace_a, trace_b = A.trace(since=0)["data"], B.trace(since=0)["data"]
+    address_a = A.request("GET", "/api/ble")["address"]
+    console_a = A.console(since=0)["data"]
+check(
+    "[17] CLUE to CLUE: B scans, connects, writes hello, reads it back%s" % (" (adafruit_ble)" if radio else " (_bleio)"),
+    "echo b'hello'" in out,
+    out,
+)
+check("[17] A sees the connection come and go", a_connected and a_disconnected, (left, console_a[-300:]))
+connects_a = [x for x in trace_a.splitlines() if "BLE CONNECT " in x]
+check(
+    "[17] the traces: B central to A, A the peripheral",
+    ("BLE CONNECT %s central" % address_a) in trace_b
+    and len(connects_a) == 1
+    and not connects_a[0].endswith("central"),
+    (connects_a, trace_b[-400:]),
+)
+
+# Two scanners, one advertiser: three labs on one air.
+ADVERTISE = SETUP + "a.start_advertising(bytes([2, 1, 6, 5, 9]) + b'Lamp', connectable=True)\nprint('ready')\nwhile True:\n    time.sleep(0.1)\n"
+with start("LABA", ADVERTISE) as A, start("LABB") as B, start("LABC") as Cc:
+    A.wait("ready", timeout=15)
+    address_a = A.request("GET", "/api/ble")["address"]
+    with cpapi.Air(A, B, Cc):
+        ex(B, SETUP)
+        ex(Cc, SETUP)
+        seen_b = entries(ex(B, SCAN % "timeout=1"))
+        seen_c = entries(ex(Cc, SCAN % "timeout=1"))
+check(
+    "[18] two scanners see one advertiser",
+    address_a in [e[0] for e in seen_b] and address_a in [e[0] for e in seen_c],
+    (address_a, seen_b, seen_c),
+)
+
+# ---- robustness ----
+
+RELOADED = """
+import _bleio, gc, time
+a = _bleio.adapter
+a.enabled = True
+addr = _bleio.Address(bytes(reversed(bytes.fromhex(%r))), _bleio.Address.RANDOM_STATIC)
+c = a.connect(addr, timeout=3)
+gc.collect()
+print("connected", c.connected, gc.mem_free())
+while True:
+    time.sleep(0.1)
+"""
+with cpapi.Board.launch(BIN, drive(RELOADED % "c7:00:00:00:00:01".replace(":", ""), None, "RELOAD"), env=HEADLESS) as b:
+    with cpapi.Air(b) as air:
+        hrm = air.add(cpapi.devices.heart_rate(address="c7:00:00:00:00:01"))
+        runs = []
+        for i in range(6):
+            seen(b, "connected", 10)
+            seen(b, "\n", 2)
+            line = b.console(since=0)["data"].split("connected ")[-1].split()
+            linked = hrm.wait_connected(True)
+            runs.append((line[0] if line else None, int(line[1]) if len(line) > 1 else None, linked))
+            if i < 5:
+                b.reload()
+                runs[-1] += (hrm.wait_connected(False),)
+check(
+    "[20] five reloads during a central connection: each ends the link, each run connects",
+    len(runs) == 6 and all(r[0] == "True" and r[2] for r in runs) and all(r[3] for r in runs[:5]),
+    runs,
+)
+frees = [r[1] for r in runs[1:] if r[1] is not None]
+check("[20] memory within 1 KB over the runs", len(frees) == 5 and max(frees) - min(frees) <= 1024, frees)
 
 print("DONE")
