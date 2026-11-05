@@ -17,6 +17,10 @@
 #include "ble_host.h"
 #include "bus_trace.h"
 
+#include "common-hal/_bleio/Adapter.h"
+#include "shared-bindings/_bleio/__init__.h"
+#include "shared-bindings/_bleio/Characteristic.h"
+
 static pthread_mutex_t _lock = PTHREAD_MUTEX_INITIALIZER;
 static ble_host_state_t _state;
 static uint8_t _public_address[6];
@@ -136,6 +140,9 @@ static const char *_att_name(uint8_t op) {
     }
 }
 
+static uint16_t _ft_handle(void);
+static void _ft_bytes(bool to_phone, const uint8_t *data, size_t len);
+
 // An ATT PDU as a trace line: its name, the handle where it has one, the rest in hex and, when
 // it is text, as text too.
 static void _trace_att(bool to_phone, const uint8_t *pdu, size_t len) {
@@ -166,10 +173,227 @@ static void _trace_att(bool to_phone, const uint8_t *pdu, size_t len) {
         text[2 + n] = '"';
         text[3 + n] = '\0';
     }
+    // The file transfer's PDUs are traced as its commands and answers.
+    const uint16_t handle = handled && len >= 3 ? (uint16_t)(pdu[1] | pdu[2] << 8) : 0;
+    if ((pdu[0] == 0x52 || pdu[0] == 0x1b) && handle != 0 && handle == _ft_handle()) {
+        _ft_bytes(to_phone, pdu + 3, len - 3);
+        return;
+    }
     if (handled && len >= 3) {
-        bus_trace_text("BLE ATT %s %s 0x%04x %s%s", to_phone ? "->" : "<-", name, pdu[1] | pdu[2] << 8, hex, text);
+        bus_trace_text("BLE ATT %s %s 0x%04x %s%s", to_phone ? "->" : "<-", name, handle, hex, text);
     } else {
         bus_trace_text("BLE ATT %s %s %s%s", to_phone ? "->" : "<-", name, hex, text);
+    }
+}
+
+// ---- the BLE workflow's file transfer, decoded (supervisor/shared/bluetooth/file_transfer_protocol.h) ----
+
+// The transfer characteristic's value handle: adaf0200-4669-6c65-5472-616e73666572, in the
+// attribute table's static part (the supervisor's); 0 when it is not there.
+static uint16_t _ft_handle(void) {
+    static const uint8_t uuid[16] = { 0x72, 0x65, 0x66, 0x73, 0x6e, 0x61, 0x72, 0x54, 0x65, 0x6c, 0x69, 0x46, 0x00, 0x02, 0xaf, 0xad };
+    bleio_adapter_obj_t *adapter = &common_hal_bleio_adapter_obj;
+    if (!adapter->enabled) {
+        return 0;
+    }
+    for (uint16_t i = 1; i < adapter->static_attribute_count; i++) {
+        mp_obj_t a = adapter->static_attributes[i];
+        if (mp_obj_is_type(a, &bleio_characteristic_type)) {
+            bleio_characteristic_obj_t *c = MP_OBJ_TO_PTR(a);
+            if (c->handle == i && c->uuid->size == 128 && memcmp(c->uuid->uuid128, uuid, 16) == 0) {
+                return i;
+            }
+        }
+    }
+    return 0;
+}
+
+static const char *_ft_status(uint8_t status) {
+    switch (status) {
+        case 0x01:
+            return "ok";
+        case 0x02:
+            return "error";
+        case 0x03:
+            return "error_no_file";
+        case 0x04:
+            return "error_protocol";
+        case 0x05:
+            return "error_readonly";
+        default:
+            return "?";
+    }
+}
+
+static uint32_t _u32(const uint8_t *p) {
+    return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+
+static uint16_t _u16(const uint8_t *p) {
+    return (uint16_t)(p[0] | p[1] << 8);
+}
+
+// One direction's stream: the bytes of a command or an answer gathered until it is whole.
+typedef struct {
+    uint8_t buf[1100];
+    size_t have;
+    size_t skip;                // payload bytes still to pass over (a long path, data)
+} ft_stream_t;
+static ft_stream_t _ft_in, _ft_out;
+static uint32_t _ft_write_total;
+
+// A path of n bytes at p, as text.
+static void _ft_path(char *out, size_t cap, const uint8_t *p, size_t n) {
+    n = n < cap - 1 ? n : cap - 1;
+    memcpy(out, p, n);
+    out[n] = '\0';
+}
+
+// How long the command or answer at the stream's start is: its header and what follows it; 0
+// while the header is not all there, SIZE_MAX for an opcode the protocol does not have.
+static size_t _ft_length(const uint8_t *b, size_t have) {
+    #define NEED(n) if (have < (n)) return 0
+    switch (b[0]) {
+        case 0x10:              // READ: path
+            NEED(12);
+            return 12 + _u16(b + 2);
+        case 0x12:              // READ_PACING
+            return 12;
+        case 0x20:              // WRITE: path
+            NEED(20);
+            return 20 + _u16(b + 2);
+        case 0x22:              // WRITE_DATA: data
+            NEED(12);
+            return 12 + _u32(b + 8);
+        case 0x30:              // DELETE, LISTDIR: path
+        case 0x50:
+            NEED(4);
+            return 4 + _u16(b + 2);
+        case 0x40:              // MKDIR: path
+            NEED(16);
+            return 16 + _u16(b + 2);
+        case 0x60:              // MOVE: two paths and a byte between them
+            NEED(6);
+            return 6 + _u16(b + 2) + 1 + _u16(b + 4);
+        case 0x11:              // READ_DATA: data
+            NEED(16);
+            return 16 + _u32(b + 12);
+        case 0x21:              // WRITE_PACING
+            return 20;
+        case 0x31:              // DELETE_STATUS, MOVE_STATUS
+        case 0x61:
+            return 2;
+        case 0x41:              // MKDIR_STATUS
+            return 16;
+        case 0x51:              // LISTDIR_ENTRY: name
+            NEED(28);
+            return 28 + _u16(b + 2);
+        default:
+            return SIZE_MAX;
+    }
+    #undef NEED
+}
+
+// A whole command (from the phone) or answer (to it) as one trace line; data only counted.
+static void _ft_line(bool to_phone, const uint8_t *b, size_t len) {
+    char path[96], other[96];
+    const char *dir = to_phone ? "->" : "<-";
+    switch (b[0]) {
+        case 0x10:
+            _ft_path(path, sizeof(path), b + 12, len - 12);
+            bus_trace_text("BLE FT %s READ %s at %u, %u bytes", dir, path, (unsigned)_u32(b + 4), (unsigned)_u32(b + 8));
+            break;
+        case 0x12:
+            bus_trace_text("BLE FT %s READ_PACING at %u, %u bytes", dir, (unsigned)_u32(b + 4), (unsigned)_u32(b + 8));
+            break;
+        case 0x20:
+            _ft_write_total = _u32(b + 16);
+            _ft_path(path, sizeof(path), b + 20, len - 20);
+            bus_trace_text("BLE FT %s WRITE %s %u bytes", dir, path, (unsigned)_ft_write_total);
+            break;
+        case 0x22:
+            bus_trace_text("BLE FT %s WRITE_DATA at %u, %u bytes", dir, (unsigned)_u32(b + 4), (unsigned)_u32(b + 8));
+            break;
+        case 0x30:
+            _ft_path(path, sizeof(path), b + 4, len - 4);
+            bus_trace_text("BLE FT %s DELETE %s", dir, path);
+            break;
+        case 0x40:
+            _ft_path(path, sizeof(path), b + 16, len - 16);
+            bus_trace_text("BLE FT %s MKDIR %s", dir, path);
+            break;
+        case 0x50:
+            _ft_path(path, sizeof(path), b + 4, len - 4);
+            bus_trace_text("BLE FT %s LISTDIR %s", dir, path);
+            break;
+        case 0x60:
+            _ft_path(path, sizeof(path), b + 6, _u16(b + 2));
+            _ft_path(other, sizeof(other), b + 6 + _u16(b + 2) + 1, _u16(b + 4));
+            bus_trace_text("BLE FT %s MOVE %s %s", dir, path, other);
+            break;
+        case 0x11:
+            bus_trace_text("BLE FT %s READ_DATA %s %u/%u, %u bytes", dir, _ft_status(b[1]), (unsigned)_u32(b + 4),
+                (unsigned)_u32(b + 8), (unsigned)_u32(b + 12));
+            break;
+        case 0x21:
+            bus_trace_text("BLE FT %s WRITE_PACING %s %u/%u", dir, _ft_status(b[1]), (unsigned)_u32(b + 4),
+                (unsigned)_ft_write_total);
+            break;
+        case 0x31:
+            bus_trace_text("BLE FT %s DELETE_STATUS %s", dir, _ft_status(b[1]));
+            break;
+        case 0x41:
+            bus_trace_text("BLE FT %s MKDIR_STATUS %s", dir, _ft_status(b[1]));
+            break;
+        case 0x61:
+            bus_trace_text("BLE FT %s MOVE_STATUS %s", dir, _ft_status(b[1]));
+            break;
+        case 0x51:
+            if (b[1] != 0x01 || _u32(b + 4) >= _u32(b + 8)) {
+                bus_trace_text("BLE FT %s LISTDIR_ENTRY %s %u/%u", dir, _ft_status(b[1]), (unsigned)_u32(b + 4),
+                    (unsigned)_u32(b + 8));
+            } else {
+                _ft_path(path, sizeof(path), b + 28, len - 28);
+                bus_trace_text("BLE FT %s LISTDIR_ENTRY %u/%u %s%s %u", dir, (unsigned)_u32(b + 4), (unsigned)_u32(b + 8),
+                    path, _u32(b + 12) & 1 ? "/" : "", (unsigned)_u32(b + 24));
+            }
+            break;
+    }
+}
+
+// What a PDU carries on the transfer characteristic, into its direction's stream.
+static void _ft_bytes(bool to_phone, const uint8_t *data, size_t len) {
+    ft_stream_t *s = to_phone ? &_ft_out : &_ft_in;
+    while (len > 0) {
+        if (s->skip > 0) {
+            size_t n = len < s->skip ? len : s->skip;
+            s->skip -= n;
+            data += n;
+            len -= n;
+            continue;
+        }
+        size_t n = sizeof(s->buf) - s->have < len ? sizeof(s->buf) - s->have : len;
+        memcpy(s->buf + s->have, data, n);
+        s->have += n;
+        data += n;
+        len -= n;
+        while (s->have > 0) {
+            size_t whole = _ft_length(s->buf, s->have);
+            if (whole == SIZE_MAX) {
+                s->have = 0;    // not the protocol (a long path's rest): dropped
+            } else if (whole == 0 || (whole > s->have && whole <= sizeof(s->buf))) {
+                break;
+            } else if (whole > sizeof(s->buf)) {
+                // Longer than the buffer: the header's line now, the rest passed over.
+                _ft_line(to_phone, s->buf, s->have);
+                s->skip = whole - s->have;
+                s->have = 0;
+            } else {
+                _ft_line(to_phone, s->buf, whole);
+                memmove(s->buf, s->buf + whole, s->have - whole);
+                s->have -= whole;
+            }
+        }
     }
 }
 
@@ -257,6 +481,7 @@ static void _event(const uint8_t *h4, size_t len) {
             memmove(link, link + 1, (size_t)(end - (link + 1)) * sizeof(*link));
         }
         _state.connected = _state.link_count > 0;
+        _ft_in.have = _ft_out.have = _ft_in.skip = _ft_out.skip = 0;
         bus_trace_text("BLE DISCONNECT 0x%02x", p[3]);
     } else if ((h4[1] == 0x08 && n >= 4) || (h4[1] == 0x30 && n >= 3)) {
         // Encryption Change (its on or off), Encryption Key Refresh Complete (on).

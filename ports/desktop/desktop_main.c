@@ -68,6 +68,9 @@ static void usage(const char *prog) {
         "  --ble PORT        _bleio's Bluetooth controller on this serial port (a Pico 2 W bridge,\n"
         "                    Zephyr's hci_uart); off for none; default the virtual one\n"
         "  --ble-log PATH    write every Bluetooth HCI packet to PATH as btsnoop (Wireshark)\n"
+        "  --ble-workflow M  the BLE workflow (files and the REPL over Bluetooth, as on a CLUE): on,\n"
+        "                    discover (bonds erased, advertised as CIRCUITPY, once) or off (default)\n"
+        "  --ble-insecure    the BLE workflow without encryption, as --ble PORT needs until pairing\n"
         "  --code FILE       run FILE on the drive (games/snake.py) in place of code.py, every run\n"
         "  --gpiochip PATH   --board gpiochip: the GPIO chip (default /dev/gpiochip0)\n"
         "  --i2c-bus N       --board gpiochip: /dev/i2c-N (default 1)\n"
@@ -148,6 +151,10 @@ int main(int argc, char **argv) {
             desktop_options.ble = argv[++i];
         } else if (strcmp(argv[i], "--ble-log") == 0 && i + 1 < argc) {
             desktop_options.ble_log = argv[++i];
+        } else if (strcmp(argv[i], "--ble-workflow") == 0 && i + 1 < argc) {
+            desktop_options.ble_workflow = argv[++i];
+        } else if (strcmp(argv[i], "--ble-insecure") == 0) {
+            desktop_options.ble_insecure = true;
         } else if (strcmp(argv[i], "--code") == 0 && i + 1 < argc) {
             desktop_options.code = argv[++i];
         } else if (strcmp(argv[i], "--board-file") == 0 && i + 1 < argc) {

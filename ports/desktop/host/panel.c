@@ -235,11 +235,27 @@ static const char *_ble_status(ble_host_state_t *s) {
     return !_ble_row() ? "off" : s->connected ? "connected" : s->advertising ? "advertising" : "on";
 }
 
+// The BLE workflow's Discover button, at the row's right while the workflow is on.
+#define DISCOVER_X (WIDTH - PAD - 110)
+#define DISCOVER_W 110
+
+static bool _workflow_on(void) {
+    return strcmp(ble_host_workflow_state(), "off") != 0;
+}
+
 static void _draw_ble(int y) {
     ble_host_state_t s;
     const char *status = _ble_status(&s);
+    const char *workflow = ble_host_workflow_state();
     char value[64];
-    if (s.advertising) {
+    if (strcmp(workflow, "off") != 0) {
+        // The workflow's state, and the name while it advertises it.
+        if (s.advertising && s.name[0] != '\0') {
+            snprintf(value, sizeof(value), "workflow: %s \"%s\"", workflow, s.name);
+        } else {
+            snprintf(value, sizeof(value), "workflow: %s", workflow);
+        }
+    } else if (s.advertising) {
         snprintf(value, sizeof(value), "%s \"%s\"", status, s.name);
     } else {
         snprintf(value, sizeof(value), "%s", status);
@@ -247,6 +263,10 @@ static void _draw_ble(int y) {
     _text(PAD, y + 4, "BLE", 0xd0d0d0);
     _fill(CTRL_X, y + 4, 24, 24, s.connected ? 0x3080e0 : s.advertising ? 0x205090 : 0x303030);
     _text(CTRL_X + 36, y + 8, value, 0xd0d0d0);
+    if (strcmp(workflow, "off") != 0) {
+        _fill(DISCOVER_X, y + 4, DISCOVER_W, 24, 0x404040);
+        _text(DISCOVER_X + 8, y + 8, "Discover", 0xd0d0d0);
+    }
 }
 
 static int _height(void) {
@@ -762,7 +782,8 @@ void panel_state_json(api_buf_t *b) {
     api_buf_printf(b, "{\"panel\": \"%s\", ", _hidden ? "hidden" : _window != NULL ? "shown" : "none");
     ble_host_state_t ble;
     const char *ble_status = _ble_status(&ble);
-    api_buf_printf(b, "\"ble\": {\"state\": \"%s\", \"name\": ", ble_status);
+    api_buf_printf(b, "\"ble\": {\"state\": \"%s\", \"workflow\": \"%s\", \"name\": ", ble_status,
+        ble_host_workflow_state());
     api_buf_json_string(b, ble.name, strlen(ble.name));
     api_buf_add(b, "}, ", 3);
     api_buf_add(b, "\"parts\": [", 10);
@@ -862,6 +883,13 @@ bool panel_event(const SDL_Event *e) {
             if (button >= 0) {
                 _held_button = button;
                 gamepad_press(button, true);
+                return true;
+            }
+            // The BLE row's Discover: the lab resets into discovery mode, as with the boot button.
+            int ble_y = _parts_top + parts_count() * ROW;
+            if (_ble_row() && _workflow_on() && e->button.y >= ble_y + 4 && e->button.y < ble_y + 28
+                && e->button.x >= DISCOVER_X && e->button.x < DISCOVER_X + DISCOVER_W) {
+                ble_host_request_discovery();
                 return true;
             }
             part_t *p = _part_at(e->button.y);

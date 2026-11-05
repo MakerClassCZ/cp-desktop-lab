@@ -59,6 +59,6 @@ void board_init(void) {
     }
     // A 320x240 picture, or the board file's, in a window twice its size.
     sdl_framebuffer_autoconstruct(desktop_display_width, desktop_display_height, 2, false);
-    ble_host_attach_adapter();
+    ble_host_board_init();
     _code_file();
 }

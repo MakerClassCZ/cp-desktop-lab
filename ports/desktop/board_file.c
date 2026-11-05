@@ -389,6 +389,7 @@ static bool _load(const char *path) {
             // machine: os.uname().machine as the real board names it.
             // display: the size of the real board's display.
             // ble: off for a board without Bluetooth.
+            // ble_workflow: on, discover or off, as --ble-workflow (which wins).
             if (strcmp(key, "platform") == 0) {
                 ok = desktop_set_platform(value);
             } else if (strcmp(key, "machine") == 0) {
@@ -397,8 +398,10 @@ static bool _load(const char *path) {
                 ok = desktop_set_display(value);
             } else if (strcmp(key, "ble") == 0) {
                 ok = ble_host_board_setting(value);
+            } else if (strcmp(key, "ble_workflow") == 0) {
+                ok = ble_host_board_workflow(value);
             } else {
-                fprintf(stderr, "circuitpython: %s: unknown [board] setting %s (platform, machine, display or ble)\n", where, key);
+                fprintf(stderr, "circuitpython: %s: unknown [board] setting %s (platform, machine, display, ble or ble_workflow)\n", where, key);
                 ok = false;
             }
         } else if (section == SPI) {

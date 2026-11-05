@@ -6,6 +6,7 @@
 
 #include "supervisor/port.h"
 
+#include "ble_host.h"
 #include "control_api.h"
 
 #if CIRCUITPY_SDL
@@ -31,6 +32,7 @@ void port_background_tick(void) {
 
 void port_background_task(void) {
     control_api_vm_task();
+    ble_host_vm_task();
     #if CIRCUITPY_WATCHDOG
     desktop_watchdog_check();
     #endif

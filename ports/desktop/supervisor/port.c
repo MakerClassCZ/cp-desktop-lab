@@ -37,6 +37,7 @@
 #include "common-hal/alarm/__init__.h"
 #endif
 
+#include "ble_host.h"
 #include "control_api.h"
 #include "desktop_pins.h"
 #include "desktop_port.h"
@@ -90,6 +91,9 @@ safe_mode_t port_init(void) {
     desktop_alarm_init();
     #endif
 
+    // _bleio.adapter is there before the BLE workflow's first look at it (supervisor_bluetooth_init()).
+    ble_host_port_init();
+
     // A crash is the host's hard fault: a backtrace on stderr, then a restart into safe mode.
     platform_catch_faults(_fault_restart);
 
@@ -117,6 +121,7 @@ void reset_port(void) {
 void reset_cpu(void) {
     // The next process listens on the API's port, with its token.
     control_api_stop();
+    ble_host_before_reset();
     // The next process needs the pins' USB device; not from a fault handler, where libusb's locks
     // may be held.
     if (getenv(FAULTED_ENV) == NULL) {
