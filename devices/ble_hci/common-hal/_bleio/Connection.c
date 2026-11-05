@@ -405,7 +405,7 @@ static bool discovery_rsp(bleio_connection_internal_t *connection, int len, cons
     return rsp[0] == expected;
 }
 
-static bleio_service_obj_t *new_remote_service(bleio_connection_internal_t *connection,
+static bleio_service_obj_t *new_remote_service(bleio_connection_internal_t *connection, mp_obj_list_t *found,
     uint16_t start, uint16_t end, bleio_uuid_obj_t *uuid) {
     bleio_service_obj_t *service = mp_obj_malloc(bleio_service_obj_t, &bleio_service_type);
     bleio_service_from_connection(service, bleio_connection_new_from_internal(connection));
@@ -413,12 +413,12 @@ static bleio_service_obj_t *new_remote_service(bleio_connection_internal_t *conn
     service->end_handle = end;
     service->handle = start;
     service->uuid = uuid;
-    mp_obj_list_append(MP_OBJ_FROM_PTR(connection->remote_service_list), MP_OBJ_FROM_PTR(service));
+    mp_obj_list_append(MP_OBJ_FROM_PTR(found), MP_OBJ_FROM_PTR(service));
     return service;
 }
 
 // All primary services: Read By Group Type over the whole range.
-static void discover_all_services(bleio_connection_internal_t *connection) {
+static void discover_all_services(bleio_connection_internal_t *connection, mp_obj_list_t *found) {
     uint8_t rsp[ATT_CLIENT_RSP_MAX];
     for (uint32_t start = 0x0001; start <= 0xffff;) {
         int len = att_read_group_req(connection->conn_handle, start, 0xffff, BLE_UUID_SERVICE_PRIMARY, rsp, sizeof(rsp));
@@ -431,7 +431,7 @@ static void discover_all_services(bleio_connection_internal_t *connection) {
             const uint16_t s = rsp[i] | rsp[i + 1] << 8;
             end = rsp[i + 2] | rsp[i + 3] << 8;
             if (entry == 6 || entry == 20) {
-                new_remote_service(connection, s, end, uuid_from_att(rsp + i + 4, entry - 4));
+                new_remote_service(connection, found, s, end, uuid_from_att(rsp + i + 4, entry - 4));
             }
         }
         if (end < start) {
@@ -442,7 +442,7 @@ static void discover_all_services(bleio_connection_internal_t *connection) {
 }
 
 // The primary services of one UUID: Find By Type Value.
-static void discover_services_of(bleio_connection_internal_t *connection, bleio_uuid_obj_t *uuid) {
+static void discover_services_of(bleio_connection_internal_t *connection, mp_obj_list_t *found, bleio_uuid_obj_t *uuid) {
     uint8_t value[16];
     const size_t value_len = common_hal_bleio_uuid_get_size(uuid) / 8;
     common_hal_bleio_uuid_pack_into(uuid, value);
@@ -456,7 +456,7 @@ static void discover_services_of(bleio_connection_internal_t *connection, bleio_
         for (size_t i = 1; i + 4 <= (size_t)len; i += 4) {
             const uint16_t s = rsp[i] | rsp[i + 1] << 8;
             end = rsp[i + 2] | rsp[i + 3] << 8;
-            new_remote_service(connection, s, end, uuid);
+            new_remote_service(connection, found, s, end, uuid);
         }
         if (len < 5 || end < start) {
             return;
@@ -540,18 +540,16 @@ static void discover_descriptors(bleio_connection_internal_t *connection, bleio_
     }
 }
 
-static void discover_remote_services(bleio_connection_internal_t *self, mp_obj_t service_uuids_whitelist) {
+static mp_obj_list_t *discover_remote_services(bleio_connection_internal_t *self, mp_obj_t service_uuids_whitelist) {
     // The MTU is exchanged once, at the first discovery, as a client starts: both sides then use
     // the smaller of the two.
     if (!self->mtu_exchanged) {
         self->mtu_exchanged = true;
         att_exchange_mtu(self->conn_handle);
     }
-    // Start over with an empty list; it stays with the connection, where notifications find
-    // their characteristics (att.c).
-    self->remote_service_list = mp_obj_new_list(0, NULL);
+    mp_obj_list_t *found = MP_OBJ_TO_PTR(mp_obj_new_list(0, NULL));
     if (service_uuids_whitelist == mp_const_none) {
-        discover_all_services(self);
+        discover_all_services(self, found);
     } else {
         mp_obj_iter_buf_t iter_buf;
         mp_obj_t iterable = mp_getiter(service_uuids_whitelist, &iter_buf);
@@ -560,11 +558,11 @@ static void discover_remote_services(bleio_connection_internal_t *self, mp_obj_t
             if (!mp_obj_is_type(uuid_obj, &bleio_uuid_type)) {
                 mp_raise_TypeError(MP_ERROR_TEXT("non-UUID found in service_uuids_whitelist"));
             }
-            discover_services_of(self, MP_OBJ_TO_PTR(uuid_obj));
+            discover_services_of(self, found, MP_OBJ_TO_PTR(uuid_obj));
         }
     }
-    for (size_t i = 0; i < self->remote_service_list->len; i++) {
-        bleio_service_obj_t *service = MP_OBJ_TO_PTR(self->remote_service_list->items[i]);
+    for (size_t i = 0; i < found->len; i++) {
+        bleio_service_obj_t *service = MP_OBJ_TO_PTR(found->items[i]);
         discover_characteristics(self, service);
         const size_t count = service->characteristic_list->len;
         for (size_t j = 0; j < count; j++) {
@@ -575,16 +573,37 @@ static void discover_remote_services(bleio_connection_internal_t *self, mp_obj_t
             discover_descriptors(self, characteristic, end);
         }
     }
+
+    // The services found join the ones the connection knows, where notifications and indications
+    // find their characteristics (att.c): a program discovers one service and then another
+    // (adafruit_ble's connection[Service]), and the first keeps its notifications. A service
+    // found again replaces the one it was.
+    if (self->remote_service_list == NULL) {
+        self->remote_service_list = MP_OBJ_TO_PTR(mp_obj_new_list(0, NULL));
+    }
+    mp_obj_list_t *known = self->remote_service_list;
+    for (size_t i = 0; i < found->len; i++) {
+        const bleio_service_obj_t *service = MP_OBJ_TO_PTR(found->items[i]);
+        size_t j = 0;
+        while (j < known->len &&
+               ((bleio_service_obj_t *)MP_OBJ_TO_PTR(known->items[j]))->start_handle != service->start_handle) {
+            j++;
+        }
+        if (j < known->len) {
+            known->items[j] = found->items[i];
+        } else {
+            mp_obj_list_append(MP_OBJ_FROM_PTR(known), found->items[i]);
+        }
+    }
+    return found;
 }
 
 mp_obj_tuple_t *common_hal_bleio_connection_discover_remote_services(bleio_connection_obj_t *self, mp_obj_t service_uuids_whitelist) {
     bleio_connection_ensure_connected(self);
-    // The list is made here, on the program's heap, as nordic makes it: never in the event
-    // handler that adds the connection, which may run between two VMs. It stays with the
-    // connection (not cleared, as nordic's is): notifications find their characteristic in it.
-    discover_remote_services(self->connection, service_uuids_whitelist);
-    return mp_obj_new_tuple(self->connection->remote_service_list->len,
-        self->connection->remote_service_list->items);
+    // The lists are made here, on the program's heap, as nordic makes them: never in the event
+    // handler that adds the connection, which may run between two VMs.
+    mp_obj_list_t *found = discover_remote_services(self->connection, service_uuids_whitelist);
+    return mp_obj_new_tuple(found->len, found->items);
 }
 
 uint16_t bleio_connection_get_conn_handle(bleio_connection_obj_t *self) {

@@ -222,6 +222,11 @@ static void process_le_extended_advertising_report(const uint8_t *params, size_t
             return;
         }
         const uint16_t type = info->evt_type;
+        // Data status (bits 5-6): only a complete advertisement, not a fragment or a cut one.
+        if ((type >> 5) & 0x3) {
+            at = data_at + info->length;
+            continue;
+        }
         bleio_adapter_scan_report(&common_hal_bleio_adapter_obj, type & BT_HCI_LE_ADV_EVT_TYPE_CONN,
             type & BT_HCI_LE_ADV_EVT_TYPE_SCAN_RSP, info->rssi, &info->addr, params + data_at, info->length);
         at = data_at + info->length;

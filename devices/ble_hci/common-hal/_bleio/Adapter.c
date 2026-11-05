@@ -604,6 +604,10 @@ mp_obj_t common_hal_bleio_adapter_connect(bleio_adapter_obj_t *self, bleio_addre
             }
         }
     }
+    if (mp_hal_is_interrupted()) {
+        // Ctrl-C: the KeyboardInterrupt comes when this returns.
+        return mp_const_none;
+    }
     const uint16_t conn_handle = self->connect_status == 0 ? att_conn_handle(&peer) : BLE_CONN_HANDLE_INVALID;
     for (size_t i = 0; i < BLEIO_TOTAL_CONNECTION_COUNT; i++) {
         bleio_connection_internal_t *connection = &bleio_connections[i];
