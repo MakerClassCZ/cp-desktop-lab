@@ -35,6 +35,12 @@
 #include "hci_include/att.h"
 #include "hci_include/att_internal.h"
 
+// The ATT MTU we take: 247, an LE packet of 251 bytes (the most of a Data Length Extension), so a
+// notification carries 244 bytes. The host's buffers hold that (hci.c: 255).
+#ifndef BLEIO_HCI_MAX_MTU
+#define BLEIO_HCI_MAX_MTU 247
+#endif
+
 void bleio_att_reset(void);
 
 // FIX void att_set_event_handler(BLEDeviceEvent event, BLEDeviceEventHandler eventHandler);
@@ -77,5 +83,7 @@ void att_remove_connection(uint16_t conn_handle, uint8_t reason);
 void att_set_max_mtu(uint16_t max_mtu);
 // The MTU taken from now on: BLEIO_HCI_MAX_MTU, or limit when smaller (never under 23).
 void att_cap_max_mtu(uint16_t limit);
+// An ATT request waits for its answer, or an indication for its confirmation.
+bool att_busy(void);
 void att_set_timeout(unsigned long timeout);
 void att_write_cmd(uint16_t conn_handle, uint16_t handle, const uint8_t *data, uint8_t data_len);

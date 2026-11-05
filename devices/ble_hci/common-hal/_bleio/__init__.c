@@ -70,9 +70,14 @@ static bool workflow_running(void) {
 // connection, its MTU and CCCDs stay, and no HCI Reset is sent. Otherwise a full reset.
 void bleio_user_reset(void) {
     bleio_adapter_obj_t *adapter = &common_hal_bleio_adapter_obj;
-    // What the program wrote last to its packet buffers goes out before they go.
+    // What the program wrote last to its packet buffers goes out before they go; a send that
+    // fails raises, and between two VMs no one would catch it.
     if (adapter->enabled) {
-        bleio_packet_buffer_background();
+        nlr_buf_t flush;
+        if (nlr_push(&flush) == 0) {
+            bleio_packet_buffer_background();
+            nlr_pop();
+        }
     }
     if (!workflow_running()) {
         bleio_reset();
@@ -199,6 +204,9 @@ void bleio_hci_background(void) {
     // The BLE workflow's file commands, and its advertising again after a disconnect.
     supervisor_bluetooth_background();
     #endif
-    // What the packet buffers gathered in this pass, sent.
-    bleio_packet_buffer_background();
+    // What the packet buffers gathered in this pass, sent; not inside an ATT wait, whose answer
+    // or confirmation a flush's own would take.
+    if (!att_busy()) {
+        bleio_packet_buffer_background();
+    }
 }

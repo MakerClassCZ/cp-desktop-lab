@@ -93,7 +93,13 @@ void bleio_packet_buffer_background(void) {
         bleio_characteristic_obj_t *characteristic = MP_OBJ_TO_PTR(attribute);
         if (handle == characteristic->handle &&
             mp_obj_is_type(characteristic->observer, &bleio_packet_buffer_type)) {
-            send_pending(MP_OBJ_TO_PTR(characteristic->observer));
+            // From the background: an error (a write the peer refuses, a link gone) drops the
+            // packet; nothing here could catch it.
+            nlr_buf_t nlr;
+            if (nlr_push(&nlr) == 0) {
+                send_pending(MP_OBJ_TO_PTR(characteristic->observer));
+                nlr_pop();
+            }
         }
     }
 }

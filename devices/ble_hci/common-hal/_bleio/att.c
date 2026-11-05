@@ -55,11 +55,6 @@
 #include "shared-bindings/_bleio/UUID.h"
 #include "supervisor/shared/tick.h"
 
-// The ATT MTU we take: 247, an LE packet of 251 bytes (the most of a Data Length Extension), so a
-// notification carries 244 bytes. The host's buffers hold that (hci.c: 255).
-#ifndef BLEIO_HCI_MAX_MTU
-#define BLEIO_HCI_MAX_MTU 247
-#endif
 static uint16_t max_mtu = BLEIO_HCI_MAX_MTU;
 static unsigned long timeout = 5000;
 
@@ -200,6 +195,23 @@ static void send_req(uint16_t conn_handle, size_t request_length, uint8_t *reque
     hci_send_acl_pkt(conn_handle, BT_L2CAP_CID_ATT, request_length, request_buffer);
 }
 
+// ATT waits under way (an answer, a confirmation): a packet buffer's flush from the background
+// waits for none to end (att_busy()), as it would take the answer or the confirmation for its own.
+static volatile uint8_t att_waits;
+
+bool att_busy(void) {
+    return att_waits > 0;
+}
+
+// One pass of an ATT wait: the background, and the controller read here too, since a wait from
+// inside a background task (a packet buffer's flush) does not run the background again.
+static void att_wait_pass(void) {
+    att_waits++;
+    RUN_BACKGROUND_TASKS;
+    hci_poll_for_incoming_pkt();
+    att_waits--;
+}
+
 static int send_req_wait_for_rsp(uint16_t conn_handle, size_t request_length, uint8_t *request_buffer, uint8_t response_buffer[], size_t response_capacity) {
     // We expect a particular kind of response after this request.
     expected_rsp.conn_handle = conn_handle;
@@ -217,8 +229,7 @@ static int send_req_wait_for_rsp(uint16_t conn_handle, size_t request_length, ui
     }
 
     for (uint64_t start = supervisor_ticks_ms64(); supervisor_ticks_ms64() - start < timeout;) {
-        // RUN_BACKGROUND_TASKS includes hci_poll_for_incoming_pkt();
-        RUN_BACKGROUND_TASKS;
+        att_wait_pass();
 
         if (!att_handle_is_connected(conn_handle)) {
             break;
@@ -795,9 +806,9 @@ bool att_indicate(uint16_t handle, const uint8_t *value, int length) {
         hci_send_acl_pkt(bleio_connections[i].conn_handle, BT_L2CAP_CID_ATT,
             sizeof(indicate_bytes), indicate_bytes);
 
-        while (!confirm) {
-            // RUN_BACKGROUND_TASKS includes hci_poll_for_incoming_pkt();
-            RUN_BACKGROUND_TASKS;
+        // Waited for as long as an answer is: a peer that never confirms fails it, never hangs it.
+        for (uint64_t start = supervisor_ticks_ms64(); !confirm && supervisor_ticks_ms64() - start < timeout;) {
+            att_wait_pass();
 
             if (!att_address_is_connected(&bleio_connections[i].addr)) {
                 break;

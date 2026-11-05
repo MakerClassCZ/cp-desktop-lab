@@ -708,3 +708,37 @@ check(
 )
 
 print("DONE")
+
+
+# A PacketBuffer on an indicate-only characteristic: its packets go out from the background, and
+# each indication's confirmation is read there too (the VM goes on writing).
+INDICATING = """
+import _bleio, time
+C = _bleio.Characteristic
+s = _bleio.Service(_bleio.UUID(0x1250))
+ch = C.add_to_service(s, _bleio.UUID(0x1251), properties=C.INDICATE, max_length=20)
+pb = _bleio.PacketBuffer(ch, buffer_size=4)
+_bleio.adapter.start_advertising(bytes([2, 1, 6]), connectable=True)
+print("ready")
+n = 0
+while True:
+    if pb.write(b"i%d" % n) > 0:
+        print("sent", n)
+        n += 1
+    time.sleep(0.3)
+"""
+with launch(INDICATING) as b:
+    seen(b, "ready")
+    p = b.ble.connect()
+    c = p.characteristic(0x1251)
+    p._request(b"\x12" + struct.pack("<HH", c.cccd, 2), 0x13)  # indications on
+    end = time.time() + 4
+    while time.time() < end:
+        p._take(0.3)  # each indication confirmed
+    sent = b.console(since=0)["data"]
+    got = p._notified.get(c.handle, [])
+check(
+    "a PacketBuffer's indications, confirmed: the program goes on writing",
+    "sent 3" in sent and len(got) >= 3,
+    (sent[-200:], got),
+)
