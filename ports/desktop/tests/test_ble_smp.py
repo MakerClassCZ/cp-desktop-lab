@@ -462,6 +462,48 @@ check(
     after_forgot,
 )
 
+
+def connect_from(b, address, timeout=5):
+    """The phone connects from address once the program advertises again."""
+    end = time.time() + timeout
+    while True:
+        try:
+            return b.request(
+                "POST",
+                "/api/ble/connect",
+                {"address": cpapi.address_text(address), "type": "random"},
+            )
+        except cpapi.ApiError:
+            if time.time() > end:
+                raise
+            time.sleep(0.05)
+
+
+# A phone bonded twice (once with its identity, once from an address without it) that pairs again
+# on the second bond's link, giving its identity: one bond left, not two.
+with launch(SECURE) as b:
+    seen(b, "ready")
+    phone = cpapi.Identity()
+    p = b.ble.connect(identity=phone, auto_pair=False)
+    p.pair()
+    p.disconnect()
+    seen(b, "paired False")
+    rpa = phone.rpa()
+    connect_from(b, rpa)
+    p = cpapi.Peer(b, address=rpa, auto_pair=False)
+    plain = p.pair()
+    p.disconnect()
+    seen(b, "paired False")
+    connect_from(b, rpa)
+    p = cpapi.Peer(b, address=rpa, identity=phone, bond=plain, auto_pair=False)
+    p.pair()
+    peers = [x["peer"] for x in b.ble.bonds()]
+check(
+    "a peer's two bonds become one when it pairs again with its identity",
+    peers == [cpapi.address_text(phone.address)],
+    peers,
+)
+
 # A ninth bond takes the place of the least recently used.
 with launch(SECURE) as b:
     seen(b, "ready")

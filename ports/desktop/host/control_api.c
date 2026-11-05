@@ -1059,7 +1059,7 @@ static void _ble_l2cap_send(request_t *r) {
         n = _unhex(data, strlen(data), pdu, sizeof(pdu));
     }
     free(data);
-    if (n < 0) {
+    if (n <= 0) {
         _error(r, 400, "the body is {\"cid\": N, \"data\": hex}");
     } else if (!ble_controller_l2cap_send((uint16_t)cid, pdu, (size_t)n)) {
         _error(r, 409, "no phone is connected");
