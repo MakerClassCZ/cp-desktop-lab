@@ -56,5 +56,7 @@ void att_add_connection(uint16_t handle, uint8_t role, bt_addr_le_t *peer_addr, 
 void att_process_data(uint16_t conn_handle, uint8_t dlen, uint8_t data[]);
 void att_remove_connection(uint16_t conn_handle, uint8_t reason);
 void att_set_max_mtu(uint16_t max_mtu);
+// The MTU taken from now on: BLEIO_HCI_MAX_MTU, or limit when smaller (never under 23).
+void att_cap_max_mtu(uint16_t limit);
 void att_set_timeout(unsigned long timeout);
 void att_write_cmd(uint16_t conn_handle, uint16_t handle, const uint8_t *data, uint8_t data_len);

@@ -387,6 +387,9 @@ static void bleio_adapter_hci_init(bleio_adapter_obj_t *self) {
     if (hci_le_read_buffer_size(&le_max_len, &le_max_num) == HCI_OK) {
         self->max_acl_buffer_len = le_max_len;
         self->max_acl_num_buffers = le_max_num;
+        // A frame is sent whole, in at most all the controller's buffers (hci_send_acl_pkt()): the
+        // MTU is no larger than they hold.
+        att_cap_max_mtu(le_max_len * le_max_num - 4);
     } else {
         // LE Read Buffer Size not available; use the general Read Buffer Size.
         uint16_t acl_max_len;

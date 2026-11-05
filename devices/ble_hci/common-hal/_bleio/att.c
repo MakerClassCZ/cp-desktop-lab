@@ -547,6 +547,10 @@ void att_set_max_mtu(uint16_t max_mtu_in) {
     max_mtu = max_mtu_in;
 }
 
+void att_cap_max_mtu(uint16_t limit) {
+    max_mtu = MAX(BT_ATT_DEFAULT_LE_MTU, MIN(BLEIO_HCI_MAX_MTU, limit));
+}
+
 void att_set_timeout(unsigned long timeout_in) {
     timeout = timeout_in;
 }

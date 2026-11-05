@@ -531,21 +531,27 @@ hci_result_t hci_send_acl_pkt(uint16_t handle, uint8_t cid, uint16_t data_len, u
     const size_t max_len = common_hal_bleio_adapter_obj.max_acl_buffer_len > 0
         ? common_hal_bleio_adapter_obj.max_acl_buffer_len : 27;
 
-    for (size_t at = 0; at < frame_len;) {
-        // Wait for a free buffer, as long as a command's answer may take: a controller that
-        // keeps the credit (gone, or never set up) fails the send, never hangs it.
-        uint64_t start = supervisor_ticks_ms64();
-        while (pending_pkt >= common_hal_bleio_adapter_obj.max_acl_num_buffers) {
-            // The credits come back in Number Of Completed Packets. Read it here as well: a send
-            // from a background task (the BLE workflow's) cannot run the background tasks again.
-            hci_waiting++;
-            hci_poll_for_incoming_pkt();
-            RUN_BACKGROUND_TASKS;
-            hci_waiting--;
-            if (supervisor_ticks_ms64() - start > RESPONSE_TIMEOUT_MSECS) {
-                return HCI_WRITE_TIMEOUT;
-            }
+    // Buffers for all the fragments first, so the frame goes out whole: no other frame (an ATT
+    // answer to what a poll reads) may come between its fragments. The MTU keeps a frame within
+    // the controller's buffers (att_cap_max_mtu()). Waited for as long as a command's answer may
+    // take: a controller that keeps the credits (gone, or never set up) fails the send, never
+    // hangs it.
+    const size_t fragments = (frame_len + max_len - 1) / max_len;
+    const size_t buffers = common_hal_bleio_adapter_obj.max_acl_num_buffers;
+    uint64_t start = supervisor_ticks_ms64();
+    while (pending_pkt + MIN(fragments, buffers) > buffers) {
+        // The credits come back in Number Of Completed Packets. Read it here as well: a send from
+        // a background task (the BLE workflow's) cannot run the background tasks again.
+        hci_waiting++;
+        hci_poll_for_incoming_pkt();
+        RUN_BACKGROUND_TASKS;
+        hci_waiting--;
+        if (supervisor_ticks_ms64() - start > RESPONSE_TIMEOUT_MSECS) {
+            return HCI_WRITE_TIMEOUT;
         }
+    }
+
+    for (size_t at = 0; at < frame_len;) {
 
         const size_t n = MIN(frame_len - at, max_len);
         // buf_len is size of entire packet including header.
