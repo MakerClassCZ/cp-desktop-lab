@@ -90,5 +90,18 @@ bool bonding_is_bonded(const bt_addr_le_t *own, uint8_t role);
 // The bonds of our identity own (NULL: every bond) erased and the store saved when there were
 // any; our IRK and static address stay. Their number.
 size_t bonding_erase(const bt_addr_le_t *own);
-// The bond of our identity own with the peer of identity address peer, or NULL.
+// The bond of our identity own with the peer of address peer: its identity address, or a
+// resolvable private address of its IRK. NULL when there is none.
 bonding_record_t *bonding_find_peer(const bt_addr_le_t *own, const bt_addr_le_t *peer);
+// The bond of our identity own, in role, whose LTK has this EDIV and Rand; NULL when none has.
+bonding_record_t *bonding_find_ediv(const bt_addr_le_t *own, uint8_t role, uint16_t ediv,
+    const uint8_t rand[8]);
+// A new bond, in place of the same peer's (or of replaces, when not NULL), else in a free record,
+// else in place of the least recently used one; marked as used now. Its index. Not saved.
+size_t bonding_add(const bonding_record_t *record, const bonding_record_t *replaces);
+// A bond marked as used now (the least recently used one goes first). Not saved.
+void bonding_touch(bonding_record_t *record);
+// The number of bonds of our identity own (NULL: every bond).
+size_t bonding_count(const bt_addr_le_t *own);
+// CRC-32 (as zlib's) of data, on from crc (0 to start).
+uint32_t bonding_crc32(uint32_t crc, const uint8_t *data, size_t len);

@@ -10,6 +10,8 @@
 
 #include "py/mpconfig.h"
 
+#include "smp_crypto.h"
+
 static const char _magic[4] = { 'C', 'P', 'B', 'D' };
 
 static bonding_store_t _store;
@@ -27,8 +29,8 @@ MP_WEAK bool bleio_hci_bonding_storage_write(const uint8_t *buf, size_t len) {
     return true;
 }
 
-static uint32_t _crc32(const uint8_t *data, size_t len) {
-    uint32_t crc = 0xffffffff;
+uint32_t bonding_crc32(uint32_t crc, const uint8_t *data, size_t len) {
+    crc = ~crc;
     for (size_t i = 0; i < len; i++) {
         crc ^= data[i];
         for (int bit = 0; bit < 8; bit++) {
@@ -41,7 +43,7 @@ static uint32_t _crc32(const uint8_t *data, size_t len) {
 // What the CRC covers: everything after the field.
 static uint32_t _store_crc(const bonding_store_t *store) {
     const size_t from = offsetof(bonding_header_t, crc) + sizeof(store->header.crc);
-    return _crc32((const uint8_t *)store + from, sizeof(*store) - from);
+    return bonding_crc32(0, (const uint8_t *)store + from, sizeof(*store) - from);
 }
 
 static void _empty(void) {
@@ -102,12 +104,92 @@ size_t bonding_erase(const bt_addr_le_t *own) {
     return erased;
 }
 
+// Whether a resolvable private address (random, its two top bits 01) is one of irk's.
+static bool _resolves(const bt_addr_le_t *address, const uint8_t irk[16]) {
+    if (address->type != BT_ADDR_LE_RANDOM || (address->a.val[5] & 0xc0) != 0x40) {
+        return false;
+    }
+    uint8_t hash[3];
+    smp_ah(irk, address->a.val + 3, hash);
+    return memcmp(hash, address->a.val, sizeof(hash)) == 0;
+}
+
 bonding_record_t *bonding_find_peer(const bt_addr_le_t *own, const bt_addr_le_t *peer) {
     bonding_store_t *store = bonding_store();
     for (size_t i = 0; i < BONDING_MAX; i++) {
-        if (_ours(&store->records[i], own) && _same_address(&store->records[i].peer, peer)) {
-            return &store->records[i];
+        bonding_record_t *record = &store->records[i];
+        if (_ours(record, own) && (_same_address(&record->peer, peer) ||
+                                   ((record->flags & BONDING_PEER_IRK) && _resolves(peer, record->peer_irk)))) {
+            return record;
         }
     }
     return NULL;
+}
+
+bonding_record_t *bonding_find_ediv(const bt_addr_le_t *own, uint8_t role, uint16_t ediv,
+    const uint8_t rand[8]) {
+    bonding_store_t *store = bonding_store();
+    for (size_t i = 0; i < BONDING_MAX; i++) {
+        bonding_record_t *record = &store->records[i];
+        if (_ours(record, own) && record->role == role && record->ediv == ediv &&
+            memcmp(record->rand, rand, sizeof(record->rand)) == 0) {
+            return record;
+        }
+    }
+    return NULL;
+}
+
+static uint32_t _next_use(void) {
+    bonding_store_t *store = bonding_store();
+    uint32_t use = 0;
+    for (size_t i = 0; i < BONDING_MAX; i++) {
+        if ((store->records[i].flags & BONDING_IN_USE) && store->records[i].use > use) {
+            use = store->records[i].use;
+        }
+    }
+    return use + 1;
+}
+
+void bonding_touch(bonding_record_t *record) {
+    record->use = _next_use();
+}
+
+size_t bonding_add(const bonding_record_t *record, const bonding_record_t *replaces) {
+    bonding_store_t *store = bonding_store();
+    // The same peer's bond (it paired again: it forgot us), or the one given; else a free one;
+    // else the least recently used.
+    size_t at = BONDING_MAX;
+    for (size_t i = 0; i < BONDING_MAX && at == BONDING_MAX; i++) {
+        const bonding_record_t *r = &store->records[i];
+        if (r == replaces || (_ours(r, &record->own) && r->role == record->role &&
+                              _same_address(&r->peer, &record->peer))) {
+            at = i;
+        }
+    }
+    for (size_t i = 0; i < BONDING_MAX && at == BONDING_MAX; i++) {
+        if (!(store->records[i].flags & BONDING_IN_USE)) {
+            at = i;
+        }
+    }
+    if (at == BONDING_MAX) {
+        at = 0;
+        for (size_t i = 1; i < BONDING_MAX; i++) {
+            if (store->records[i].use < store->records[at].use) {
+                at = i;
+            }
+        }
+    }
+    const uint32_t use = _next_use();
+    store->records[at] = *record;
+    store->records[at].use = use;
+    return at;
+}
+
+size_t bonding_count(const bt_addr_le_t *own) {
+    bonding_store_t *store = bonding_store();
+    size_t n = 0;
+    for (size_t i = 0; i < BONDING_MAX; i++) {
+        n += _ours(&store->records[i], own);
+    }
+    return n;
 }
