@@ -264,9 +264,11 @@ for s in services:
 print("discovered", len(services))
 """
 
-LONG = bytes(range(60))
+LONG = bytes(range(256)) + bytes(range(44))  # 300 bytes: more than an MTU of 247 reads at once
 with start() as b, cpapi.Air(b) as air:
-    hrm = air.add(cpapi.devices.heart_rate(address="c6:00:00:00:00:01"))
+    hrm = cpapi.devices.heart_rate(address="c6:00:00:00:00:01")
+    hrm.MTU = 100  # a device's MTU smaller than the program's 247
+    air.add(hrm)
     extra = cpapi.Peripheral(
         "Extra",
         [
@@ -306,7 +308,9 @@ with start() as b, cpapi.Air(b) as air:
     ex(b, DISCOVER % "")
     ex(b, "ch = {x.uuid: x for s in services for x in s.characteristics}\nU = _bleio.UUID\n")
     long_read = ex(
-        b, "print('long', ch[U(0x1235)].value == bytes(range(60)), len(ch[U(0x1235)].value))"
+        b,
+        "print('long', ch[U(0x1235)].value == bytes(range(256)) + bytes(range(44)), "
+        "len(ch[U(0x1235)].value))",
     )
     trace_long = b.follow("trace")[0]
     refused = ex(b, "ch[U(0x1236)].value")
@@ -315,7 +319,9 @@ with start() as b, cpapi.Air(b) as air:
     trace_writes = b.follow("trace")[0]
     read_only = ex(b, "ch[U(0x1239)].value = b'x'")
     write_refused = ex(b, "ch[U(0x123A)].value = b'x'")
-    too_long = ex(b, "ch[U(0x1237)].value = bytes(21)")
+    too_long = ex(b, "ch[U(0x1237)].value = bytes(245)")
+    ex(b, "ch[U(0x1237)].value = bytes(range(244))\ntime.sleep(0.2)")
+    full = extra.written(0x1237)
 check(
     "[11] discovery: GAP, GATT and Heart Rate, their characteristics and properties",
     "service UUID(0x1800) True" in found
@@ -329,8 +335,8 @@ check(
     found,
 )
 check(
-    "[11] the client's MTU exchange: the smaller of 23 and the device's 247",
-    "MTU_REQ" in trace and "packet 20" in mtu,
+    "[11] the client's MTU exchange: the smaller of the program's 247 and the device's 100",
+    "MTU_REQ" in trace and "packet 97" in mtu,
     (mtu, trace[-300:]),
 )
 check(
@@ -343,8 +349,8 @@ check(
 )
 check("[13] read: the body sensor location", "location b'\\x01'" in read, read)
 check(
-    "[13] a 60-byte value, by Read Blob",
-    "long True 60" in long_read and "READ_BLOB_REQ" in trace_long,
+    "[13] a 300-byte value, by Read Blob",
+    "long True 300" in long_read and "READ_BLOB_REQ" in trace_long,
     (long_read, trace_long[-300:]),
 )
 check("[13] a read not permitted raises", "Read not permitted" in refused, refused)
@@ -361,6 +367,11 @@ check(
     "[14] a write the device refuses raises", "Write not permitted" in write_refused, write_refused
 )
 check("[14] a value longer than MTU - 3 raises ValueError", "ValueError" in too_long, too_long)
+check(
+    "[14] a value of MTU - 3 bytes (244) is written whole",
+    full[-1:] == [bytes(range(244))],
+    [len(v) for v in full],
+)
 
 # Notifications and indications, into a CharacteristicBuffer and a PacketBuffer.
 with start() as b, cpapi.Air(b) as air:

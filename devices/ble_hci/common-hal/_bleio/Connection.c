@@ -223,7 +223,7 @@ static void discover_characteristics(bleio_connection_internal_t *connection, bl
             bleio_characteristic_obj_t *characteristic = mp_obj_malloc(bleio_characteristic_obj_t, &bleio_characteristic_type);
             common_hal_bleio_characteristic_construct(characteristic, service, value,
                 uuid_from_att(rsp + i + 5, entry - 5), att_properties_to_bleio(props),
-                SECURITY_MODE_OPEN, SECURITY_MODE_OPEN, GATT_MAX_DATA_LENGTH, false, &empty, NULL);
+                SECURITY_MODE_OPEN, SECURITY_MODE_OPEN, BLE_GATTS_VAR_ATTR_LEN_MAX, false, &empty, NULL);
             characteristic->decl_handle = decl;
             mp_obj_list_append(MP_OBJ_FROM_PTR(service->characteristic_list), MP_OBJ_FROM_PTR(characteristic));
             last = value;
