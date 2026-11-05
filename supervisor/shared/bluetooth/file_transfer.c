@@ -220,7 +220,8 @@ static uint8_t _process_read_pacing(const uint8_t *raw_buf, size_t command_len) 
         common_hal_bleio_packet_buffer_write(&_transfer_packet_buffer, (const uint8_t *)&data, quantity_read, NULL, 0);
         chunk_offset += quantity_read;
     }
-    if ((chunk_offset + chunk_size) >= total_length) {
+    // The file ends with this chunk: at its offset, not at the bytes sent of it.
+    if ((command->chunk_offset + chunk_size) >= total_length) {
         supervisor_vfs_close_file(&active_file);
         return ANY_COMMAND;
     }
@@ -654,6 +655,11 @@ void supervisor_bluetooth_file_transfer_background(void) {
 }
 
 void supervisor_bluetooth_file_transfer_disconnected(void) {
+    // A write cut off by the disconnect holds the filesystem lock: give it back, else the
+    // drive stays locked (and a host edit no longer reloads) until the next write.
+    if (next_command == WRITE_DATA || (next_command == THIS_COMMAND && current_command[0] == WRITE_DATA)) {
+        filesystem_unlock(active_mount);
+    }
     next_command = ANY_COMMAND;
     current_offset = 0;
     supervisor_vfs_close_file(&active_file);
