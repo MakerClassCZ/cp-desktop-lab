@@ -17,6 +17,8 @@
 #include "supervisor/filesystem.h"
 #include "supervisor/shared/reload.h"
 #include "supervisor/shared/bluetooth/file_transfer.h"
+// A Windows build (the desktop port) has <windows.h>'s DELETE from the file system headers.
+#undef DELETE
 #include "supervisor/shared/bluetooth/file_transfer_protocol.h"
 #include "supervisor/shared/workflow.h"
 
