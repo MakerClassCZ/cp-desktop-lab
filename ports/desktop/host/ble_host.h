@@ -35,6 +35,7 @@ typedef struct {
     uint16_t handle;
     bool central;               // the program's role on it: central, else peripheral
     bool encrypted;
+    uint8_t key_size;           // of its encryption
     uint8_t peer[6];            // least significant byte first
 } ble_host_link_t;
 
@@ -53,6 +54,7 @@ typedef struct {
     uint8_t scan_response_len;
     ble_host_link_t links[BLE_HOST_LINKS];  // the open connections, in the order they came
     uint8_t link_count;
+    uint8_t bonds;              // in the bond store, of the controller's identity
 } ble_host_state_t;
 
 // Every complete H4 packet, to_controller or from it: the state, the trace, the log.
@@ -60,3 +62,6 @@ void ble_host_packet(bool to_controller, const uint8_t *h4, size_t len);
 void ble_host_state(ble_host_state_t *state);
 // --ble-log PATH: every packet as btsnoop; false (the cause printed) when it does not open.
 bool ble_host_open_log(const char *path);
+// The bond store's blob as it was read or written (VM thread): its bonds of the controller's
+// identity counted for the state, and in the trace what changed since the last one.
+void ble_host_bonds_stored(const uint8_t *blob, size_t len, bool written);

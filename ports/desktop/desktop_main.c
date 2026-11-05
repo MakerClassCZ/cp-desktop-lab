@@ -68,6 +68,7 @@ static void usage(const char *prog) {
         "  --ble PORT        _bleio's Bluetooth controller on this serial port (a Pico 2 W bridge,\n"
         "                    Zephyr's hci_uart); off for none; default the virtual one\n"
         "  --ble-log PATH    write every Bluetooth HCI packet to PATH as btsnoop (Wireshark)\n"
+        "  --ble-bonds PATH  the Bluetooth bonds' file (default the drive's path + .bonds, beside it)\n"
         "  --code FILE       run FILE on the drive (games/snake.py) in place of code.py, every run\n"
         "  --gpiochip PATH   --board gpiochip: the GPIO chip (default /dev/gpiochip0)\n"
         "  --i2c-bus N       --board gpiochip: /dev/i2c-N (default 1)\n"
@@ -93,6 +94,25 @@ static int optional_port(int argc, char **argv, int *i, int fallback) {
         return atoi(argv[++*i]);
     }
     return fallback;
+}
+
+// A file's path: given (relative to the start directory), else the drive's path and ext beside
+// it. False when it does not fit.
+static bool beside_drive(char *out, size_t cap, const char *given, const char *ext, const char *drive_path,
+    const char *start_dir) {
+    int len;
+    if (given == NULL) {
+        int n = (int)strlen(drive_path);
+        while (n > 1 && (drive_path[n - 1] == '/' || drive_path[n - 1] == '\\')) {
+            n--;
+        }
+        len = snprintf(out, cap, "%.*s%s", n, drive_path, ext);
+    } else {
+        len = platform_is_absolute(given)
+            ? snprintf(out, cap, "%s", given)
+            : snprintf(out, cap, "%s/%s", start_dir, given);
+    }
+    return len >= 0 && (size_t)len < cap;
 }
 
 // Real hardware (another board, a serial port, the computer's microphone) needs real time.
@@ -148,6 +168,8 @@ int main(int argc, char **argv) {
             desktop_options.ble = argv[++i];
         } else if (strcmp(argv[i], "--ble-log") == 0 && i + 1 < argc) {
             desktop_options.ble_log = argv[++i];
+        } else if (strcmp(argv[i], "--ble-bonds") == 0 && i + 1 < argc) {
+            desktop_options.ble_bonds_path = argv[++i];
         } else if (strcmp(argv[i], "--code") == 0 && i + 1 < argc) {
             desktop_options.code = argv[++i];
         } else if (strcmp(argv[i], "--board-file") == 0 && i + 1 < argc) {
@@ -234,24 +256,16 @@ int main(int argc, char **argv) {
         return 2;
     }
     desktop_options.drive_path = drive_path;
-    // microcontroller.nvm: beside the drive, never on it (CIRCUITPY/ makes CIRCUITPY.nvm too).
-    static char nvm_path[PATH_MAX];
-    if (desktop_options.nvm_path == NULL) {
-        int n = len;
-        while (n > 1 && (drive_path[n - 1] == '/' || drive_path[n - 1] == '\\')) {
-            n--;
-        }
-        len = snprintf(nvm_path, sizeof(nvm_path), "%.*s.nvm", n, drive_path);
-    } else {
-        len = platform_is_absolute(desktop_options.nvm_path)
-            ? snprintf(nvm_path, sizeof(nvm_path), "%s", desktop_options.nvm_path)
-            : snprintf(nvm_path, sizeof(nvm_path), "%s/%s", start_dir, desktop_options.nvm_path);
-    }
-    if (len < 0 || (size_t)len >= sizeof(nvm_path)) {
-        fprintf(stderr, "circuitpython: nvm path too long\n");
+    // microcontroller.nvm and the Bluetooth bonds: beside the drive, never on it (CIRCUITPY/
+    // makes CIRCUITPY.nvm and CIRCUITPY.bonds too).
+    static char nvm_path[PATH_MAX], bonds_path[PATH_MAX];
+    if (!beside_drive(nvm_path, sizeof(nvm_path), desktop_options.nvm_path, ".nvm", drive_path, start_dir) ||
+        !beside_drive(bonds_path, sizeof(bonds_path), desktop_options.ble_bonds_path, ".bonds", drive_path, start_dir)) {
+        fprintf(stderr, "circuitpython: nvm or bonds path too long\n");
         return 2;
     }
     desktop_options.nvm_path = nvm_path;
+    desktop_options.ble_bonds_path = bonds_path;
     // A drive that is not there is made, empty but for code.py: said, as a typo in the path makes one too.
     struct stat st;
     if (stat(drive_path, &st) != 0) {

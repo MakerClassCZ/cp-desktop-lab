@@ -10,6 +10,11 @@
 // link of its own (its handle, the program's role, the peer, encryption, its reassembly), so more
 // than one can be open. It has no time of its own: nothing happens until the host or the phone
 // does something.
+//
+// Encryption goes as a link layer does it, without ciphering anything (there is no air to protect):
+// the phone starts it with a key, EDIV and Rand; the host is asked for its key (LE Long Term Key
+// Request); the same key turns the link encrypted, another ends it (MIC failure), none leaves it
+// as it was and the phone hears Key Missing.
 
 #include "ble_controller.h"
 
@@ -17,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "common-hal/_bleio/smp_crypto.h"
 #include "shared-bindings/os/__init__.h"
 
 #define H4_COMMAND 0x01
@@ -24,16 +30,22 @@
 #define H4_EVENT 0x04
 
 #define EVT_DISCONNECTION_COMPLETE 0x05
+#define EVT_ENCRYPTION_CHANGE 0x08
 #define EVT_COMMAND_COMPLETE 0x0e
 #define EVT_COMMAND_STATUS 0x0f
 #define EVT_NUMBER_OF_COMPLETED_PACKETS 0x13
+#define EVT_ENCRYPTION_KEY_REFRESH 0x30
 #define EVT_LE_META 0x3e
 #define EVT_VENDOR 0xff
 
 #define L2CAP_CID_ATT 0x0004
+#define L2CAP_CID_SMP 0x0006
 
 #define ERR_UNKNOWN_COMMAND 0x01
 #define ERR_UNKNOWN_CONNECTION 0x02
+#define ERR_PIN_OR_KEY_MISSING 0x06
+#define ERR_COMMAND_DISALLOWED 0x0c
+#define ERR_MIC_FAILURE 0x3d
 
 static pthread_mutex_t _lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -43,8 +55,9 @@ static size_t _out_head;
 static size_t _out_count;
 
 // CIRCUITPY_BLE_VIRTUAL_FAULT=no-public-address: a controller without a public address, as
-// Zephyr's on an nRF.
+// Zephyr's on an nRF; no-static-address: nor a static one of its own to give.
 static bool _no_public_address;
+static bool _no_static_address;
 
 // The lab's addresses, least significant byte first: 02:dc:00:00:00:01 public, and a static random
 // one for a host that asks for the controller's (Zephyr's vendor command).
@@ -72,18 +85,50 @@ typedef struct {
     uint8_t peer[6];
     uint8_t peer_type;          // 0 public, 1 random
     bool encrypted;
+    bool encrypting;            // the peer asked to encrypt with ltk: the host's key is due
+    uint8_t ltk[16];
     uint8_t frame[PDU_MAX + 4]; // the L2CAP frame from the host being reassembled
     size_t frame_have;
 } link_t;
 static link_t _links[LINK_COUNT];
 static int _phone = -1;         // the phone's link, or -1
 
-// ATT PDUs the program sent the phone, oldest first.
-#define PDU_COUNT 256
-static uint8_t _pdus[PDU_COUNT][PDU_MAX];
-static uint16_t _pdu_len[PDU_COUNT];
-static size_t _pdu_head;
-static size_t _pdu_count;
+// The phone's last encryption: -1 while the host's answer is due (or none was asked), else its
+// result: 0, Key Missing, MIC failure, or the reason its link ended.
+static int _encrypt_result = -1;
+
+// L2CAP frames the program sent the phone, oldest first: one queue for ATT, one for SMP, one for
+// every other channel.
+#define FRAME_COUNT 256
+typedef struct {
+    uint16_t cid[FRAME_COUNT];
+    uint16_t len[FRAME_COUNT];
+    uint8_t data[FRAME_COUNT][PDU_MAX];
+    size_t head;
+    size_t count;
+} queue_t;
+static queue_t _att, _smp, _other;
+
+static queue_t *_queue_of(uint16_t cid) {
+    return cid == L2CAP_CID_ATT ? &_att : cid == L2CAP_CID_SMP ? &_smp : &_other;
+}
+
+static void _queue_put(uint16_t cid, const uint8_t *data, size_t len) {
+    queue_t *q = _queue_of(cid);
+    if (len > PDU_MAX || q->count == FRAME_COUNT) {
+        return;
+    }
+    size_t slot = (q->head + q->count++) % FRAME_COUNT;
+    q->cid[slot] = cid;
+    q->len[slot] = (uint16_t)len;
+    memcpy(q->data[slot], data, len);
+}
+
+static void _queues_clear(void) {
+    _att.head = _att.count = 0;
+    _smp.head = _smp.count = 0;
+    _other.head = _other.count = 0;
+}
 
 static void _put(const uint8_t *data, size_t len) {
     for (size_t i = 0; i < len && _out_count < sizeof(_out); i++) {
@@ -141,6 +186,9 @@ static void _link_close(int i, uint8_t reason) {
     _links[i].open = false;
     if (i == _phone) {
         _phone = -1;
+        if (_links[i].encrypting) {
+            _encrypt_result = reason;
+        }
     }
     uint8_t params[4] = { 0, LINK_HANDLE(i) & 0xff, LINK_HANDLE(i) >> 8, reason };
     _event(EVT_DISCONNECTION_COMPLETE, params, sizeof(params));
@@ -156,8 +204,59 @@ static void _ok(uint16_t opcode) {
     _complete(opcode, &status, 1);
 }
 
+// The host's answer to an LE Long Term Key Request on link i: its key (NULL: none). The same key
+// as the peer's encrypts the link; another fails as a link layer's MIC check does.
+static void _ltk_answer(uint16_t opcode, uint16_t handle, const uint8_t *ltk) {
+    int i = _link_of(handle);
+    uint8_t ret[3] = { 0, handle & 0xff, handle >> 8 };
+    if (i < 0 || !_links[i].encrypting) {
+        ret[0] = i < 0 ? ERR_UNKNOWN_CONNECTION : ERR_COMMAND_DISALLOWED;
+        _complete(opcode, ret, sizeof(ret));
+        return;
+    }
+    link_t *link = &_links[i];
+    _complete(opcode, ret, sizeof(ret));
+    link->encrypting = false;
+    if (ltk == NULL) {
+        if (i == _phone) {
+            _encrypt_result = ERR_PIN_OR_KEY_MISSING;
+        }
+        return;
+    }
+    if (memcmp(ltk, link->ltk, 16) != 0) {
+        if (i == _phone) {
+            _encrypt_result = ERR_MIC_FAILURE;
+        }
+        _link_close(i, ERR_MIC_FAILURE);
+        return;
+    }
+    if (link->encrypted) {
+        uint8_t params[3] = { 0, handle & 0xff, handle >> 8 };
+        _event(EVT_ENCRYPTION_KEY_REFRESH, params, sizeof(params));
+    } else {
+        uint8_t params[4] = { 0, handle & 0xff, handle >> 8, 0x01 };
+        _event(EVT_ENCRYPTION_CHANGE, params, sizeof(params));
+    }
+    link->encrypted = true;
+    if (i == _phone) {
+        _encrypt_result = 0;
+    }
+}
+
+// Read Local Supported Commands: the bit of each command answered here (Core Vol 4 Part E 6.27).
+static const uint8_t _commands[][2] = {
+    { 0, 5 },                   // Disconnect
+    { 5, 6 }, { 5, 7 },         // Set Event Mask, Reset
+    { 14, 3 },                  // Read Local Version Information
+    { 15, 1 },                  // Read BD_ADDR
+    { 25, 0 }, { 25, 1 }, { 25, 2 }, { 25, 4 }, { 25, 5 }, { 25, 7 },   // LE: event mask .. advertising data
+    { 26, 0 }, { 26, 1 }, { 26, 2 }, { 26, 3 },     // scan response data .. scan enable
+    { 27, 6 }, { 27, 7 },       // LE Encrypt, LE Rand
+    { 28, 0 }, { 28, 1 }, { 28, 2 },    // LE Start Encryption, LTK Request Reply and Negative Reply
+};
+
 static void _command(uint16_t opcode, const uint8_t *p, uint8_t len) {
-    uint8_t ret[32] = { 0 };
+    uint8_t ret[65] = { 0 };
     switch (opcode) {
         case 0x0c03:            // Reset
             _advertising = false;
@@ -179,6 +278,12 @@ static void _command(uint16_t opcode, const uint8_t *p, uint8_t len) {
             ret[5] = 0xff;
             ret[6] = 0xff;
             _complete(opcode, ret, 9);
+            break;
+        case 0x1002:            // Read Local Supported Commands
+            for (size_t i = 0; i < sizeof(_commands) / sizeof(_commands[0]); i++) {
+                ret[1 + _commands[i][0]] |= 1 << _commands[i][1];
+            }
+            _complete(opcode, ret, 65);
             break;
         case 0x1009:            // Read BD_ADDR
             if (!_no_public_address) {
@@ -204,7 +309,7 @@ static void _command(uint16_t opcode, const uint8_t *p, uint8_t len) {
         case 0x200a:            // LE Set Advertising Enable
             if (len >= 1 && p[0] == 0 && !_advertising && _phone >= 0) {
                 // Stopping what a connection already stopped: Command Disallowed, as a CYW43439
-                uint8_t status = 0x0c;
+                uint8_t status = ERR_COMMAND_DISALLOWED;
                 _complete(opcode, &status, 1);
                 break;
             }
@@ -217,11 +322,39 @@ static void _command(uint16_t opcode, const uint8_t *p, uint8_t len) {
             _link_close(i, 0x16);
             break;
         }
+        case 0x2017:            // LE Encrypt: AES-128 of the key and data, least significant first
+            if (len >= 32) {
+                smp_e(p, p + 16, ret + 1);
+            } else {
+                ret[0] = 0x12;  // invalid parameters
+            }
+            _complete(opcode, ret, 17);
+            break;
         case 0x2018:            // LE Rand
             common_hal_os_urandom(ret + 1, 8);
             _complete(opcode, ret, 9);
             break;
+        case 0x2019: {          // LE Start Encryption: a central's; on the phone's link we are not
+            int i = len >= 2 ? _link_of((uint16_t)(p[0] | p[1] << 8) & 0x0fff) : -1;
+            _status(opcode, i < 0 ? ERR_UNKNOWN_CONNECTION : ERR_COMMAND_DISALLOWED);
+            break;
+        }
+        case 0x201a:            // LE Long Term Key Request Reply
+            if (len >= 18) {
+                _ltk_answer(opcode, (uint16_t)(p[0] | p[1] << 8) & 0x0fff, p + 2);
+            }
+            break;
+        case 0x201b:            // LE Long Term Key Request Negative Reply
+            if (len >= 2) {
+                _ltk_answer(opcode, (uint16_t)(p[0] | p[1] << 8) & 0x0fff, NULL);
+            }
+            break;
         case 0xfc09:            // Zephyr's Read Static Addresses: one, with a zero identity root
+            if (_no_static_address) {
+                ret[0] = ERR_UNKNOWN_COMMAND;
+                _complete(opcode, ret, 1);
+                break;
+            }
             ret[1] = 1;
             memcpy(ret + 2, _static_address, 6);
             _complete(opcode, ret, 2 + 6 + 16);
@@ -233,8 +366,8 @@ static void _command(uint16_t opcode, const uint8_t *p, uint8_t len) {
     }
 }
 
-// ACL data from the host on a link: an L2CAP frame, maybe in fragments; an ATT one on the
-// phone's link goes to the phone's queue. Each packet is acknowledged on its handle, so the
+// ACL data from the host on a link: an L2CAP frame, maybe in fragments; on the phone's link it
+// goes to the phone's queue of its channel. Each packet is acknowledged on its handle, so the
 // host's credit comes back.
 static void _acl(const uint8_t *p, size_t len) {
     uint16_t handle = (uint16_t)(p[1] | p[2] << 8) & 0x0fff;
@@ -262,10 +395,8 @@ static void _acl(const uint8_t *p, size_t len) {
     if (link->frame_have < 4 + frame_len) {
         return;
     }
-    if (i == _phone && cid == L2CAP_CID_ATT && frame_len <= PDU_MAX && _pdu_count < PDU_COUNT) {
-        size_t slot = (_pdu_head + _pdu_count++) % PDU_COUNT;
-        memcpy(_pdus[slot], link->frame + 4, frame_len);
-        _pdu_len[slot] = (uint16_t)frame_len;
+    if (i == _phone) {
+        _queue_put(cid, link->frame + 4, frame_len);
     }
     link->frame_have = 0;
 }
@@ -275,9 +406,11 @@ void ble_controller_reset(void) {
     _out_head = _out_count = 0;
     _advertising = false;
     _links_reset();
-    _pdu_head = _pdu_count = 0;
+    _queues_clear();
+    _encrypt_result = -1;
     const char *fault = getenv("CIRCUITPY_BLE_VIRTUAL_FAULT");
-    _no_public_address = fault != NULL && strcmp(fault, "no-public-address") == 0;
+    _no_static_address = fault != NULL && strcmp(fault, "no-static-address") == 0;
+    _no_public_address = _no_static_address || (fault != NULL && strcmp(fault, "no-public-address") == 0);
     pthread_mutex_unlock(&_lock);
 }
 
@@ -311,17 +444,19 @@ int ble_controller_write(const uint8_t *packet, size_t len) {
     return (int)len;
 }
 
-int ble_controller_connect(void) {
+int ble_controller_connect(const uint8_t *address, uint8_t type) {
     pthread_mutex_lock(&_lock);
     int result = -1;
     int i = -1;
     if (_advertising && (_adv_type == 0x00 || _adv_type == 0x01) && _phone < 0) {
-        i = _link_open(ROLE_PERIPHERAL, _phone_address, 0x01);
+        i = address != NULL ? _link_open(ROLE_PERIPHERAL, address, type)
+            : _link_open(ROLE_PERIPHERAL, _phone_address, 0x01);
     }
     if (i >= 0) {
         _advertising = false;
         _phone = i;
-        _pdu_head = _pdu_count = 0;
+        _queues_clear();
+        _encrypt_result = -1;
         uint16_t handle = LINK_HANDLE(i);
         // LE Connection Complete: the lab is the peripheral, the phone the central; a 30 ms
         // interval, no latency, a 2 s supervision timeout.
@@ -345,13 +480,13 @@ void ble_controller_disconnect(uint8_t reason) {
     pthread_mutex_unlock(&_lock);
 }
 
-bool ble_controller_att_send(const uint8_t *pdu, size_t len) {
+bool ble_controller_l2cap_send(uint16_t cid, const uint8_t *pdu, size_t len) {
     pthread_mutex_lock(&_lock);
     bool ok = _phone >= 0 && len <= PDU_MAX;
     if (ok) {
-        // An L2CAP frame on the ATT channel, in ACL packets of at most 251 bytes, as LE's are:
-        // the first flagged as a start, the rest as continuations.
-        uint8_t frame[4 + PDU_MAX] = { (uint8_t)len, (uint8_t)(len >> 8), L2CAP_CID_ATT & 0xff, L2CAP_CID_ATT >> 8 };
+        // An L2CAP frame, in ACL packets of at most 251 bytes, as LE's are: the first flagged as
+        // a start, the rest as continuations.
+        uint8_t frame[4 + PDU_MAX] = { (uint8_t)len, (uint8_t)(len >> 8), cid & 0xff, cid >> 8 };
         memcpy(frame + 4, pdu, len);
         for (size_t at = 0; at < len + 4; at += 251) {
             size_t n = len + 4 - at < 251 ? len + 4 - at : 251;
@@ -365,18 +500,58 @@ bool ble_controller_att_send(const uint8_t *pdu, size_t len) {
     return ok;
 }
 
-size_t ble_controller_att_take(uint8_t *pdu, size_t max) {
+bool ble_controller_att_send(const uint8_t *pdu, size_t len) {
+    return ble_controller_l2cap_send(L2CAP_CID_ATT, pdu, len);
+}
+
+size_t ble_controller_l2cap_take(uint16_t cid, uint16_t *got_cid, uint8_t *pdu, size_t max) {
     pthread_mutex_lock(&_lock);
+    queue_t *q = _queue_of(cid);
     size_t len = 0;
-    if (_pdu_count > 0) {
-        len = _pdu_len[_pdu_head];
+    if (q->count > 0) {
+        len = q->len[q->head];
         if (len > max) {
             len = max;
         }
-        memcpy(pdu, _pdus[_pdu_head], len);
-        _pdu_head = (_pdu_head + 1) % PDU_COUNT;
-        _pdu_count--;
+        memcpy(pdu, q->data[q->head], len);
+        if (got_cid != NULL) {
+            *got_cid = q->cid[q->head];
+        }
+        q->head = (q->head + 1) % FRAME_COUNT;
+        q->count--;
     }
     pthread_mutex_unlock(&_lock);
     return len;
+}
+
+size_t ble_controller_att_take(uint8_t *pdu, size_t max) {
+    return ble_controller_l2cap_take(L2CAP_CID_ATT, NULL, pdu, max);
+}
+
+int ble_controller_encrypt(const uint8_t ltk[16], uint16_t ediv, const uint8_t rand[8]) {
+    pthread_mutex_lock(&_lock);
+    int result = -1;
+    if (_phone >= 0) {
+        link_t *link = &_links[_phone];
+        link->encrypting = true;
+        memcpy(link->ltk, ltk, 16);
+        _encrypt_result = -1;
+        // LE Long Term Key Request: the handle, the Rand, the EDIV.
+        uint16_t handle = LINK_HANDLE(_phone);
+        uint8_t params[13] = { 0x05, handle & 0xff, handle >> 8 };
+        memcpy(params + 3, rand, 8);
+        params[11] = ediv & 0xff;
+        params[12] = ediv >> 8;
+        _event(EVT_LE_META, params, sizeof(params));
+        result = 0;
+    }
+    pthread_mutex_unlock(&_lock);
+    return result;
+}
+
+int ble_controller_encrypt_result(void) {
+    pthread_mutex_lock(&_lock);
+    int result = _encrypt_result;
+    pthread_mutex_unlock(&_lock);
+    return result;
 }
