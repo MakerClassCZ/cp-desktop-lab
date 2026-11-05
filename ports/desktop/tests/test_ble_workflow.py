@@ -7,7 +7,7 @@ refused (0x05), as a phone does, and bonds; its bond makes the next boot adverti
 scenario is a function: one that raises is a FAIL, and the next one runs.
 """
 
-import os, re, shutil, struct, tempfile, time, traceback
+import os, re, shutil, struct, tempfile, time, traceback, zlib
 from harness import BIN, HEADLESS, T, check, cpapi, refused, seen
 
 ON = ["--ble-workflow", "on"]
@@ -659,6 +659,29 @@ def trace_and_panel():
     check("the panel's BLE row: the workflow's state", panel.get("workflow") == "connected", panel)
 
 
+def as_central_bond(path):
+    """CIRCUITPY.bonds with its first bond's role made central (as the program's own bond with a
+    peripheral would be), its CRC-32 made again: bonding.h's layout, a 36-byte header first."""
+    data = bytearray(open(path, "rb").read())
+    data[36 + 1] = 0  # the first record's role: BONDING_ROLE_CENTRAL
+    data[8:12] = struct.pack("<I", zlib.crc32(bytes(data[12:])))
+    open(path, "wb").write(bytes(data))
+
+
+def off_keeps_bonds():
+    # The workflow off: no boot erases a bond unasked, though the lab has no USB and no bond with a
+    # central (the supervisor's discovery would erase the rest).
+    pair_once()
+    as_central_bond(DRIVE + ".bonds")
+    with launch(READY, keep_bonds=True) as b:
+        seen(b, "ready")
+        before = [x["role"] for x in b.ble.bonds()]
+    with launch(READY, keep_bonds=True) as b:
+        seen(b, "ready")
+        after = [x["role"] for x in b.ble.bonds()]
+    check("--ble-workflow off: a bond kept over two boots", before == after == ["central"], (before, after))
+
+
 def discover_off():
     with launch(READY) as b:
         try:
@@ -697,6 +720,7 @@ for scenario in (
     reset_keeps_bond,
     trace_and_panel,
     discover_off,
+    off_keeps_bonds,
 ):
     # TEST_ONLY=name,name runs those scenarios only.
     only = os.environ.get("TEST_ONLY")

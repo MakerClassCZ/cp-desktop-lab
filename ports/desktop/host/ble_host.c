@@ -178,6 +178,11 @@ bool ble_host_init(void) {
 #define DISCOVERY_WORD (0xbb0000bb | 1 << 8)
 
 void ble_host_port_init(void) {
+    // The workflow off from the start, before supervisor_bluetooth_init(): its discovery logic would
+    // erase the bonds unasked at a boot without USB (board_init() turns it off again).
+    if (!_on || strcmp(ble_host_workflow_mode(), "off") == 0) {
+        supervisor_bluetooth_disable_workflow();
+    }
     if (!_on) {
         return;
     }

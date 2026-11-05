@@ -206,6 +206,12 @@ void supervisor_bluetooth_init(void) {
     }
     #endif // CIRCUITPY_SETTINGS_TOML
 
+    // A port that switched the workflow off before this (port_init()) gets none of what follows:
+    // without USB and without a bond, discovery mode would erase the bonds at every boot.
+    if (workflow_state == WORKFLOW_DISABLED) {
+        return;
+    }
+
     uint32_t reset_state = port_get_saved_word();
     uint32_t ble_mode = 0;
     if ((reset_state & BLE_DISCOVERY_DATA_GUARD_MASK) == BLE_DISCOVERY_DATA_GUARD) {
