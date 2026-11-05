@@ -572,6 +572,8 @@ void att_add_connection(uint16_t handle, uint8_t role, bt_addr_le_t *peer_addr, 
     common_hal_bleio_adapter_obj.connection_objs = NULL;
     bleio_connections[peer_index].role = role;
     bleio_connections[peer_index].is_central = role == BT_HCI_ROLE_MASTER;
+    // hci.c says when it came from the program's own advertising.
+    bleio_connections[peer_index].user_owned = role == BT_HCI_ROLE_MASTER;
     // Encryption starts later, with pairing or a bond's key.
     bleio_connections[peer_index].encrypted = false;
     bleio_connections[peer_index].key_size = 0;
@@ -643,6 +645,7 @@ void att_remove_connection(uint16_t conn_handle, uint8_t reason) {
     bleio_connections[peer_index].conn_handle = 0xffff;
     bleio_connections[peer_index].role = 0x00;
     bleio_connections[peer_index].is_central = false;
+    bleio_connections[peer_index].user_owned = false;
     bleio_connections[peer_index].encrypted = false;
     bleio_connections[peer_index].key_size = 0;
     memset(&bleio_connections[peer_index].addr, 0x00, sizeof(bleio_connections[peer_index].addr));

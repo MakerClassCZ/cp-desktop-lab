@@ -29,6 +29,9 @@ typedef struct {
     uint16_t conn_handle;
     // Our role on the link: central (we connected) or peripheral (a central connected to us).
     bool is_central;
+    // The program's link (from its own advertising or connect()): its end ends the link. Others
+    // (the BLE workflow's) go on from one VM to the next.
+    bool user_owned;
     // The link is encrypted, with a key of key_size bytes. Attributes whose security mode needs
     // encryption are refused on a link that is not.
     bool encrypted;

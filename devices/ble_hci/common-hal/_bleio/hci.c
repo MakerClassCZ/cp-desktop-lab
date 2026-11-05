@@ -308,6 +308,9 @@ static void process_evt_pkt(size_t pkt_len, uint8_t pkt_data[]) {
                 // We don't tell the adapter to stop, because stopping advertising
                 // when it's already stopped seems to exercise a bug in the ESP32 HCI code:
                 // It doesn't return a response.
+                // The program's link when it came from the program's own advertising.
+                const bool program_advertising = common_hal_bleio_adapter_obj.now_advertising &&
+                    !common_hal_bleio_adapter_obj.circuitpython_advertising;
                 if (le_conn_complete->role == BT_HCI_ROLE_SLAVE) {
                     bleio_adapter_advertising_was_stopped(&common_hal_bleio_adapter_obj);
                 }
@@ -321,6 +324,11 @@ static void process_evt_pkt(size_t pkt_len, uint8_t pkt_data[]) {
                         le_conn_complete->latency,
                         le_conn_complete->supv_timeout,
                         le_conn_complete->clock_accuracy);
+                    bleio_connection_internal_t *connection =
+                        bleio_conn_handle_to_connection(le_conn_complete->handle);
+                    if (connection != NULL && program_advertising) {
+                        connection->user_owned = true;
+                    }
 
                 }
             } else if (meta_evt->subevent == BT_HCI_EVT_LE_ADVERTISING_REPORT) {

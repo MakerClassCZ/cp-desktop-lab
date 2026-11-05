@@ -45,30 +45,97 @@ void common_hal_bleio_init(void) {
     // Create a UUID object for all CCCD's.
     cccd_uuid.base.type = &bleio_uuid_type;
     common_hal_bleio_uuid_construct(&cccd_uuid, BLE_UUID_CCCD, NULL);
-    bleio_hci_reset();
+    // An adapter already on (a port's own, with the BLE workflow's connection) keeps its links.
+    if (!common_hal_bleio_adapter_obj.enabled) {
+        bleio_hci_reset();
+    }
 }
 
+// The BLE workflow is on and has the adapter: its services, its connection and their state go on
+// from one VM to the next, as on nordic.
+static bool workflow_running(void) {
+    #if CIRCUITPY_BLE_FILE_SERVICE || CIRCUITPY_BLE_SERIAL_SERVICE
+    return supervisor_bluetooth_workflow_is_enabled() && common_hal_bleio_adapter_obj.enabled;
+    #else
+    return false;
+    #endif
+}
+
+// The VM ends, its heap still there. With the BLE workflow running, nordic's shape: the program's
+// advertising and links end, and what it added to the attribute table goes; the workflow's
+// connection, its MTU and CCCDs stay, and no HCI Reset is sent. Otherwise a full reset.
 void bleio_user_reset(void) {
-    // HCI doesn't support the BLE workflow so just do a full reset.
-    bleio_reset();
+    bleio_adapter_obj_t *adapter = &common_hal_bleio_adapter_obj;
+    if (!workflow_running()) {
+        bleio_reset();
+        return;
+    }
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        if (adapter->now_advertising && !adapter->circuitpython_advertising) {
+            common_hal_bleio_adapter_stop_advertising(adapter);
+        }
+        for (size_t i = 0; i < BLEIO_TOTAL_CONNECTION_COUNT; i++) {
+            bleio_connection_internal_t *connection = &bleio_connections[i];
+            if (connection->conn_handle != BLE_CONN_HANDLE_INVALID && connection->user_owned) {
+                common_hal_bleio_connection_disconnect(connection);
+            }
+        }
+        nlr_pop();
+    }
+    // Nothing may point into the heap that is about to go.
+    for (size_t i = 0; i < BLEIO_TOTAL_CONNECTION_COUNT; i++) {
+        bleio_connections[i].connection_obj = mp_const_none;
+        bleio_connections[i].remote_service_list = NULL;
+    }
+    adapter->connection_objs = NULL;
+    adapter->scan_results = NULL;
+    bleio_adapter_cut_attributes(adapter);
 }
 
-// Turn off BLE on a reset or reload.
+// After the VM (between two VMs: no heap). With the BLE workflow running and no services of the
+// program's, nothing changes: the phone stays connected. Services of the program's restart the
+// stack (an HCI Reset drops the phone), as on a CLUE, and the workflow starts again with the same
+// handles; so does a reset with the workflow on.
 void bleio_reset(void) {
+    bleio_adapter_obj_t *adapter = &common_hal_bleio_adapter_obj;
+    if (workflow_running() && !vm_used_ble) {
+        return;
+    }
+    #if CIRCUITPY_BLE_FILE_SERVICE || CIRCUITPY_BLE_SERIAL_SERVICE
+    const bool restart = supervisor_bluetooth_workflow_is_enabled() && adapter->persistent;
+    if (restart && adapter->enabled) {
+        supervisor_stop_bluetooth();
+    }
+    #endif
+
     bleio_hci_reset();
 
-    if (common_hal_bleio_adapter_obj.persistent) {
+    if (adapter->persistent) {
         // Left disabled, allocated and bound; what it had on the VM's heap is gone with the heap
         // (also after an enable that failed), and enabling it again builds that anew.
-        bleio_adapter_obj_t *adapter = &common_hal_bleio_adapter_obj;
         bleio_adapter_reset(adapter);
-        adapter->name = NULL;
         adapter->attributes = NULL;
         adapter->scan_results = NULL;
         adapter->connection_objs = NULL;
         adapter->device_name_characteristic = NULL;
         adapter->appearance_characteristic = NULL;
         adapter->service_changed_characteristic = NULL;
+        vm_used_ble = false;
+        #if CIRCUITPY_BLE_FILE_SERVICE || CIRCUITPY_BLE_SERIAL_SERVICE
+        if (restart) {
+            // Enabling may raise (a controller that does not answer): between two VMs there is no
+            // one to catch it, so the workflow stays off.
+            nlr_buf_t nlr;
+            if (nlr_push(&nlr) == 0) {
+                supervisor_start_bluetooth();
+                nlr_pop();
+            } else {
+                mp_printf(&mp_plat_print, "BLE workflow: the controller does not answer\n");
+                supervisor_bluetooth_disable_workflow();
+            }
+        }
+        #endif
         return;
     }
     if (!common_hal_bleio_adapter_get_enabled(&common_hal_bleio_adapter_obj)) {
