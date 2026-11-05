@@ -32,3 +32,9 @@ typedef struct {
 typedef void *ble_event_handler_t;
 
 void bleio_packet_buffer_update(bleio_packet_buffer_obj_t *self, mp_buffer_info_t *bufinfo);
+// A peer wrote the characteristic or its CCCD: a server's notifications go to it.
+void bleio_packet_buffer_peer(bleio_packet_buffer_obj_t *self, uint16_t conn_handle);
+// The link of conn_handle is gone: a server buffer that notified it stops, its pending data too.
+void bleio_packet_buffer_disconnected(bleio_packet_buffer_obj_t *self, uint16_t conn_handle);
+// What any packet buffer of the table has pending, sent: the HCI background's last step.
+void bleio_packet_buffer_background(void);

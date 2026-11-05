@@ -14,6 +14,7 @@
 #include "shared-bindings/_bleio/Characteristic.h"
 #include "shared-bindings/_bleio/Connection.h"
 #include "shared-bindings/_bleio/Descriptor.h"
+#include "shared-bindings/_bleio/PacketBuffer.h"
 #include "shared-bindings/_bleio/Service.h"
 #include "shared-bindings/_bleio/UUID.h"
 #include "supervisor/shared/bluetooth/bluetooth.h"
@@ -114,4 +115,14 @@ void common_hal_bleio_gc_collect(void) {
 
 void bleio_hci_background(void) {
     bleio_adapter_background(&common_hal_bleio_adapter_obj);
+    if (hci_busy()) {
+        // Inside a command or a send (their waits run the background): nothing else sends now.
+        return;
+    }
+    #if CIRCUITPY_BLE_FILE_SERVICE || CIRCUITPY_BLE_SERIAL_SERVICE
+    // The BLE workflow's file commands, and its advertising again after a disconnect.
+    supervisor_bluetooth_background();
+    #endif
+    // What the packet buffers gathered in this pass, sent.
+    bleio_packet_buffer_background();
 }

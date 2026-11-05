@@ -48,6 +48,7 @@
 #include "shared-bindings/_bleio/__init__.h"
 #include "shared-bindings/_bleio/Characteristic.h"
 #include "shared-bindings/_bleio/Descriptor.h"
+#include "shared-bindings/_bleio/PacketBuffer.h"
 #include "shared-bindings/_bleio/Service.h"
 #include "shared-bindings/_bleio/UUID.h"
 #include "supervisor/shared/tick.h"
@@ -603,10 +604,21 @@ void att_remove_connection(uint16_t conn_handle, uint8_t reason) {
         return;
     }
 
+    // Packet buffers that notified this peer stop.
+    size_t max_attribute_handle = bleio_adapter_max_attribute_handle(&common_hal_bleio_adapter_obj);
+    for (size_t handle = 1; handle <= max_attribute_handle; handle++) {
+        mp_obj_t attribute_obj = bleio_adapter_get_attribute(&common_hal_bleio_adapter_obj, handle);
+        if (mp_obj_is_type(attribute_obj, &bleio_characteristic_type)) {
+            bleio_characteristic_obj_t *characteristic = MP_OBJ_TO_PTR(attribute_obj);
+            if (mp_obj_is_type(characteristic->observer, &bleio_packet_buffer_type)) {
+                bleio_packet_buffer_disconnected(MP_OBJ_TO_PTR(characteristic->observer), conn_handle);
+            }
+        }
+    }
+
     if (peer_count == 1) {
 
         // Clear CCCD values on disconnect.
-        size_t max_attribute_handle = bleio_adapter_max_attribute_handle(&common_hal_bleio_adapter_obj);
         for (size_t handle = 1; handle <= max_attribute_handle; handle++) {
             mp_obj_t attribute_obj = bleio_adapter_get_attribute(&common_hal_bleio_adapter_obj, handle);
 
@@ -619,7 +631,7 @@ void att_remove_connection(uint16_t conn_handle, uint8_t reason) {
             if (mp_obj_is_type(attribute_obj, &bleio_descriptor_type)) {
                 bleio_descriptor_obj_t *descriptor = MP_OBJ_TO_PTR(attribute_obj);
                 if (bleio_uuid_get_uuid16_or_unknown(descriptor->uuid) == BLE_UUID_CCCD) {
-                    common_hal_bleio_descriptor_set_value(descriptor, &zero_cccd_value);
+                    bleio_descriptor_set_local_value(descriptor, &zero_cccd_value);
                 }
             }
         }
@@ -1493,6 +1505,7 @@ static void process_write_req_or_cmd(uint16_t conn_handle, uint16_t mtu, uint8_t
 
         // Just change the local value. Don't fire off notifications, etc.
         bleio_characteristic_set_local_value(characteristic, &bufinfo);
+        bleio_characteristic_peer(characteristic, conn_handle);
 
     } else if (mp_obj_is_type(attribute_obj, &bleio_descriptor_type)) {
         bleio_descriptor_obj_t *descriptor = MP_OBJ_TO_PTR(attribute_obj);
@@ -1512,7 +1525,14 @@ static void process_write_req_or_cmd(uint16_t conn_handle, uint16_t mtu, uint8_t
             return;
         }
 
-        common_hal_bleio_descriptor_set_value(descriptor, &bufinfo);
+        // A CCCD is two bytes: anything else changes nothing (and raises nothing, here).
+        if (!bleio_descriptor_set_local_value(descriptor, &bufinfo)) {
+            if (with_response) {
+                send_error(conn_handle, BT_ATT_OP_WRITE_REQ, req->handle, BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+            }
+            return;
+        }
+        bleio_characteristic_peer(descriptor->characteristic, conn_handle);
     }
 
     if (with_response) {

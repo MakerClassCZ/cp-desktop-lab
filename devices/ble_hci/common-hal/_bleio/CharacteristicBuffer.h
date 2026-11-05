@@ -15,6 +15,8 @@ typedef struct {
     uint32_t timeout_ms;
     // Ring buffer storing consecutive incoming values.
     ringbuf_t ringbuf;
+    // Ctrl-C in what comes in interrupts the program instead (the BLE workflow's serial).
+    bool watch_for_interrupt_char;
 } bleio_characteristic_buffer_obj_t;
 
 void bleio_characteristic_buffer_update(bleio_characteristic_buffer_obj_t *self, mp_buffer_info_t *bufinfo);

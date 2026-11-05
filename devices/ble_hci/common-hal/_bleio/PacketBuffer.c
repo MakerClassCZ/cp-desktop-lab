@@ -12,6 +12,8 @@
 #include "py/stream.h"
 
 #include "shared-bindings/_bleio/__init__.h"
+#include "shared-bindings/_bleio/Adapter.h"
+#include "shared-bindings/_bleio/Characteristic.h"
 #include "shared-bindings/_bleio/Connection.h"
 #include "shared-bindings/_bleio/PacketBuffer.h"
 #include "supervisor/shared/tick.h"
@@ -35,33 +37,74 @@ static void write_to_ringbuf(bleio_packet_buffer_obj_t *self, uint8_t *data, uin
     ringbuf_put_n(&self->ringbuf, data, len);
 }
 
-static uint32_t queue_next_write(bleio_packet_buffer_obj_t *self) {
-    // Queue up the next outgoing buffer. We use two, one that has been passed to the SD for
-    // transmission (when packet_queued is true) and the other is `pending` and can still be
-    // modified. By primarily appending to the `pending` buffer we can reduce the protocol overhead
-    // of the lower level link and ATT layers.
-    self->packet_queued = false;
-    if (self->pending_size > 0) {
-        mp_buffer_info_t bufinfo = {
-            .buf = self->outgoing[self->pending_index],
-            .len = self->pending_size,
-        };
-        common_hal_bleio_characteristic_set_value(self->characteristic, &bufinfo);
+// Whether any packet buffer holds data not yet sent: the background then sends it.
+static bool _pending;
 
-        self->pending_size = 0;
-        self->pending_index = (self->pending_index + 1) % 2;
-        self->packet_queued = true;
+// The pending outgoing buffer sent now, as one notification (or a write, as a client), and the
+// other one made pending. An HCI send hands the bytes to the controller before it returns, so a
+// buffer is free again at once; what pending gathers between two sends goes out in one packet.
+static void send_pending(bleio_packet_buffer_obj_t *self) {
+    if (self->pending_size == 0) {
+        return;
     }
-    return 0;
+    mp_buffer_info_t bufinfo = {
+        .buf = self->outgoing[self->pending_index],
+        .len = self->pending_size,
+    };
+    self->pending_size = 0;
+    self->pending_index = (self->pending_index + 1) % 2;
+    if (self->conn_handle != BLE_CONN_HANDLE_INVALID) {
+        common_hal_bleio_characteristic_set_value(self->characteristic, &bufinfo);
+    }
 }
 
 void bleio_packet_buffer_update(bleio_packet_buffer_obj_t *self, mp_buffer_info_t *bufinfo) {
     write_to_ringbuf(self, bufinfo->buf, bufinfo->len);
 }
 
-void common_hal_bleio_packet_buffer_construct(
+void bleio_packet_buffer_peer(bleio_packet_buffer_obj_t *self, uint16_t conn_handle) {
+    if (!self->client) {
+        self->conn_handle = conn_handle;
+    }
+}
+
+void bleio_packet_buffer_disconnected(bleio_packet_buffer_obj_t *self, uint16_t conn_handle) {
+    if (self->conn_handle == conn_handle) {
+        self->conn_handle = BLE_CONN_HANDLE_INVALID;
+        self->pending_size = 0;
+    }
+}
+
+void bleio_packet_buffer_background(void) {
+    if (!_pending) {
+        return;
+    }
+    _pending = false;
+    bleio_adapter_obj_t *adapter = &common_hal_bleio_adapter_obj;
+    if (!adapter->enabled) {
+        return;
+    }
+    const uint16_t max_handle = bleio_adapter_max_attribute_handle(adapter);
+    for (uint16_t handle = 1; handle <= max_handle; handle++) {
+        mp_obj_t attribute = bleio_adapter_get_attribute(adapter, handle);
+        if (!mp_obj_is_type(attribute, &bleio_characteristic_type)) {
+            continue;
+        }
+        bleio_characteristic_obj_t *characteristic = MP_OBJ_TO_PTR(attribute);
+        if (handle == characteristic->handle &&
+            mp_obj_is_type(characteristic->observer, &bleio_packet_buffer_type)) {
+            send_pending(MP_OBJ_TO_PTR(characteristic->observer));
+        }
+    }
+}
+
+// Buffers the caller gives (the BLE workflow's, static), so nothing is allocated.
+void _common_hal_bleio_packet_buffer_construct(
     bleio_packet_buffer_obj_t *self, bleio_characteristic_obj_t *characteristic,
-    size_t buffer_size, size_t max_packet_size) {
+    uint32_t *incoming_buffer, size_t incoming_buffer_size,
+    uint32_t *outgoing_buffer1, uint32_t *outgoing_buffer2, size_t max_packet_size,
+    ble_event_handler_t *static_handler_entry) {
+    (void)static_handler_entry;
 
     self->characteristic = characteristic;
     self->client = self->characteristic->service->is_remote;
@@ -77,21 +120,22 @@ void common_hal_bleio_packet_buffer_construct(
         outgoing = temp;
         self->conn_handle = bleio_connection_get_conn_handle(MP_OBJ_TO_PTR(self->characteristic->service->connection));
     } else {
+        // The peer that writes the characteristic or its CCCD (bleio_packet_buffer_peer()).
         self->conn_handle = BLE_CONN_HANDLE_INVALID;
     }
 
-    if (incoming) {
-        if (!ringbuf_alloc(&self->ringbuf, buffer_size * (sizeof(uint16_t) + max_packet_size))) {
-            mp_raise_ValueError(MP_ERROR_TEXT("Buffer too large and unable to allocate"));
-        }
+    if (incoming && incoming_buffer != NULL) {
+        ringbuf_init(&self->ringbuf, (uint8_t *)incoming_buffer, incoming_buffer_size);
+    } else {
+        ringbuf_init(&self->ringbuf, NULL, 0);
     }
 
+    self->packet_queued = false;
+    self->pending_index = 0;
+    self->pending_size = 0;
     if (outgoing) {
-        self->packet_queued = false;
-        self->pending_index = 0;
-        self->pending_size = 0;
-        self->outgoing[0] = m_malloc(max_packet_size);
-        self->outgoing[1] = m_malloc(max_packet_size);
+        self->outgoing[0] = (uint8_t *)outgoing_buffer1;
+        self->outgoing[1] = (uint8_t *)outgoing_buffer2;
     } else {
         self->outgoing[0] = NULL;
         self->outgoing[1] = NULL;
@@ -99,6 +143,20 @@ void common_hal_bleio_packet_buffer_construct(
     self->max_packet_size = max_packet_size;
 
     bleio_characteristic_set_observer(self->characteristic, self);
+}
+
+void common_hal_bleio_packet_buffer_construct(
+    bleio_packet_buffer_obj_t *self, bleio_characteristic_obj_t *characteristic,
+    size_t buffer_size, size_t max_packet_size) {
+    const size_t incoming_size = buffer_size * (sizeof(uint16_t) + max_packet_size);
+    uint32_t *incoming = m_malloc_maybe((incoming_size + 3) / 4 * 4);
+    if (incoming == NULL) {
+        mp_raise_ValueError(MP_ERROR_TEXT("Buffer too large and unable to allocate"));
+    }
+    uint32_t *outgoing1 = m_malloc((max_packet_size + 3) / 4 * 4);
+    uint32_t *outgoing2 = m_malloc((max_packet_size + 3) / 4 * 4);
+    _common_hal_bleio_packet_buffer_construct(self, characteristic, incoming, incoming_size,
+        outgoing1, outgoing2, max_packet_size, NULL);
 }
 
 mp_int_t common_hal_bleio_packet_buffer_readinto(bleio_packet_buffer_obj_t *self, uint8_t *data, size_t len) {
@@ -144,11 +202,8 @@ mp_int_t common_hal_bleio_packet_buffer_write(bleio_packet_buffer_obj_t *self,
     }
 
     if (len + self->pending_size > outgoing_packet_length) {
-        // No room to append len bytes to packet. Wait until we get a free buffer,
-        // and keep checking that we haven't been disconnected.
-        while (self->pending_size != 0 && self->conn_handle != BLE_CONN_HANDLE_INVALID) {
-            RUN_BACKGROUND_TASKS;
-        }
+        // No room to append len bytes to the packet: what it holds goes out first.
+        send_pending(self);
     }
     if (self->conn_handle == BLE_CONN_HANDLE_INVALID) {
         return -1;
@@ -167,11 +222,15 @@ mp_int_t common_hal_bleio_packet_buffer_write(bleio_packet_buffer_obj_t *self,
     self->pending_size += len;
     num_bytes_written += len;
 
-    // If no writes are queued then sneak in this data.
-    if (!self->packet_queued) {
-        queue_next_write(self);
-    }
+    // Sent when the next write does not fit, at a flush, or by the background soon after.
+    _pending = true;
     return num_bytes_written;
+}
+
+void common_hal_bleio_packet_buffer_flush(bleio_packet_buffer_obj_t *self) {
+    if (!common_hal_bleio_packet_buffer_deinited(self) && self->outgoing[0] != NULL) {
+        send_pending(self);
+    }
 }
 
 mp_int_t common_hal_bleio_packet_buffer_get_incoming_packet_length(bleio_packet_buffer_obj_t *self) {
@@ -245,6 +304,7 @@ void common_hal_bleio_packet_buffer_deinit(bleio_packet_buffer_obj_t *self) {
     if (!common_hal_bleio_packet_buffer_deinited(self)) {
         bleio_characteristic_clear_observer(self->characteristic);
         ringbuf_deinit(&self->ringbuf);
+        self->pending_size = 0;
         // Mark as deinited, so common_hal_bleio_packet_buffer_deinited() reports it.
         self->characteristic = NULL;
     }

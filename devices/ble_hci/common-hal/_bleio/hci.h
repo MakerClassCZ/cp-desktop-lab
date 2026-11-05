@@ -81,6 +81,9 @@ hci_result_t hci_le_set_scan_parameters(uint8_t scan_type, uint16_t interval, ui
 hci_result_t hci_le_set_scan_response_data(uint8_t length, uint8_t data[]);
 
 hci_result_t hci_poll_for_incoming_pkt(void);
+// A command waits for its answer or a send for the controller's buffer: the background runs
+// nothing that would send in between.
+bool hci_busy(void);
 
 hci_result_t hci_read_bd_addr(bt_addr_t *addr);
 hci_result_t hci_read_buffer_size(uint16_t *acl_max_len, uint8_t *sco_max_len, uint16_t *acl_max_num, uint16_t *sco_max_num);

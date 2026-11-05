@@ -36,5 +36,7 @@ typedef struct _bleio_characteristic_obj {
 
 bool bleio_characteristic_set_local_value(bleio_characteristic_obj_t *self, mp_buffer_info_t *bufinfo);
 
+// A peer wrote the value or the CCCD: the observer's notifications go to it.
+void bleio_characteristic_peer(bleio_characteristic_obj_t *self, uint16_t conn_handle);
 void bleio_characteristic_set_observer(bleio_characteristic_obj_t *self, mp_obj_t observer);
 void bleio_characteristic_clear_observer(bleio_characteristic_obj_t *self);

@@ -119,6 +119,9 @@ static uint8_t *cmd_response_data;
 
 static volatile bool hci_poll_in_progress = false;
 
+// A command waits for its answer, or a send for a buffer: hci_busy().
+static volatile int hci_waiting;
+
 
 //////////////////////////////////////////////////////////////////////
 
@@ -339,6 +342,7 @@ void bleio_hci_reset(void) {
     rx_idx = 0;
     pending_pkt = 0;
     hci_poll_in_progress = false;
+    hci_waiting = 0;
     bleio_att_reset();
 }
 
@@ -482,20 +486,29 @@ static hci_result_t send_command(uint16_t opcode, uint8_t params_len, void *para
     // Wait for a response. Note that other packets may be received that are not
     // command responses.
     uint64_t start = supervisor_ticks_ms64();
+    hci_waiting++;
     while (supervisor_ticks_ms64() - start < RESPONSE_TIMEOUT_MSECS) {
-        // RUN_BACKGROUND_TASKS includes hci_poll_for_incoming_pkt();
+        // The answer is read here as well: a command from a background task (the BLE workflow's
+        // advertising) cannot run the background tasks again.
+        hci_poll_for_incoming_pkt();
         RUN_BACKGROUND_TASKS;
         if (cmd_response_received && cmd_response_opcode == opcode) {
             // If this is definitely a response to the command that was sent,
             // return the status value, which will will be
             // BT_HCI_ERR_SUCCESS (0x00) if the command succeeded,
             // or a BT_HCI_ERR_x value (> 0x00) if there was a problem.
+            hci_waiting--;
             return cmd_response_status;
         }
     }
+    hci_waiting--;
 
     // No I/O error, but no response sent back in time.
     return HCI_RESPONSE_TIMEOUT;
+}
+
+bool hci_busy(void) {
+    return hci_waiting > 0;
 }
 
 hci_result_t hci_send_acl_pkt(uint16_t handle, uint8_t cid, uint16_t data_len, uint8_t *data) {
@@ -503,8 +516,12 @@ hci_result_t hci_send_acl_pkt(uint16_t handle, uint8_t cid, uint16_t data_len, u
     // controller that keeps the credit (gone, or never set up) fails the send, never hangs it.
     uint64_t start = supervisor_ticks_ms64();
     while (pending_pkt >= common_hal_bleio_adapter_obj.max_acl_num_buffers) {
-        // RUN_BACKGROUND_TASKS includes hci_poll_for_incoming_pkt();
+        // The credits come back in Number Of Completed Packets. Read it here as well: a send from
+        // a background task (the BLE workflow's) cannot run the background tasks again.
+        hci_waiting++;
+        hci_poll_for_incoming_pkt();
         RUN_BACKGROUND_TASKS;
+        hci_waiting--;
         if (supervisor_ticks_ms64() - start > RESPONSE_TIMEOUT_MSECS) {
             return HCI_WRITE_TIMEOUT;
         }

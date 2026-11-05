@@ -122,8 +122,9 @@ void common_hal_bleio_characteristic_set_value(bleio_characteristic_obj_t *self,
                 mp_raise_bleio_BluetoothError(MP_ERROR_TEXT("Characteristic not writable"));
             }
         } else {
-            // Always write the value locally even if no connections are active.
-            bleio_characteristic_set_local_value(self, bufinfo);
+            // Always write the value locally even if no connections are active. Only the value: an
+            // observer (a PacketBuffer) takes what a peer writes, not what it sends itself.
+            bleio_attribute_value_set(self->value, bufinfo->buf, bufinfo->len);
             // Notify or indicate all active connections.
 
             uint16_t cccd_value = 0;
@@ -197,6 +198,7 @@ void common_hal_bleio_characteristic_set_cccd(bleio_characteristic_obj_t *self, 
     // }
 }
 
+// A peer wrote the value: the observer gets it too.
 bool bleio_characteristic_set_local_value(bleio_characteristic_obj_t *self, mp_buffer_info_t *bufinfo) {
     if (self->fixed_length && bufinfo->len != self->max_length) {
         return false;
@@ -215,6 +217,12 @@ bool bleio_characteristic_set_local_value(bleio_characteristic_obj_t *self, mp_b
         return false;
     }
     return true;
+}
+
+void bleio_characteristic_peer(bleio_characteristic_obj_t *self, uint16_t conn_handle) {
+    if (mp_obj_is_type(self->observer, &bleio_packet_buffer_type)) {
+        bleio_packet_buffer_peer(MP_OBJ_TO_PTR(self->observer), conn_handle);
+    }
 }
 
 void bleio_characteristic_set_observer(bleio_characteristic_obj_t *self, mp_obj_t observer) {
