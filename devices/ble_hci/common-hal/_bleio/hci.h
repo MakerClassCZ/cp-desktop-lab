@@ -75,10 +75,18 @@ hci_result_t hci_le_set_extended_advertising_parameters(uint8_t handle, uint16_t
 hci_result_t hci_le_set_extended_scan_response_data(uint8_t handle, uint8_t op, uint8_t frag_pref, uint8_t len, uint8_t data[]);
 
 hci_result_t hci_le_rand(uint8_t rand[8]);
+hci_result_t hci_le_set_event_mask(uint64_t event_mask);
+hci_result_t hci_read_local_supported_commands(uint8_t commands[64]);
+// The LE Long Term Key Request's answers: the key, or none (the peer then sees PIN or Key Missing).
+hci_result_t hci_le_ltk_request_reply(uint16_t handle, const uint8_t ltk[16]);
+hci_result_t hci_le_ltk_request_negative_reply(uint16_t handle);
+// A central's encryption of a link with a bond's key (LE Start Encryption): the answer is a
+// Command Status, the result an Encryption Change.
+hci_result_t hci_le_start_encryption(uint16_t handle, const uint8_t rand[8], uint16_t ediv,
+    const uint8_t ltk[16]);
 hci_result_t hci_le_set_random_address(uint8_t addr[6]);
 hci_result_t hci_le_set_advertising_set_random_address(uint8_t handle, uint8_t addr[6]);
 hci_result_t hci_vs_read_static_address(bt_addr_t *addr);
-hci_result_t hci_le_set_event_mask(uint64_t event_mask);
 hci_result_t hci_le_set_extended_scan_enable(uint8_t enable, uint8_t filter_dup);
 hci_result_t hci_le_set_extended_scan_parameters(uint8_t own_addr_type, uint8_t scan_type, uint16_t interval, uint16_t window);
 hci_result_t hci_le_set_scan_enable(uint8_t enable, uint8_t filter_dup);
@@ -86,11 +94,9 @@ hci_result_t hci_le_set_scan_parameters(uint8_t scan_type, uint16_t interval, ui
 hci_result_t hci_le_set_scan_response_data(uint8_t length, uint8_t data[]);
 
 hci_result_t hci_poll_for_incoming_pkt(void);
-// A command is waiting for its answer: what runs in the background then sends none of its own.
-bool hci_command_in_progress(void);
-// Commands sent while on are not waited for: the background sends its own so, since background
-// tasks do not run inside it, and an answer waited for there would never come.
-void hci_commands_unanswered(bool on);
+// A command's answer or ACL credits are being waited for, or a packet is being handled: what runs
+// in the background sends no command of its own now (its answer would be taken for the other's).
+bool hci_busy(void);
 
 hci_result_t hci_read_bd_addr(bt_addr_t *addr);
 hci_result_t hci_read_buffer_size(uint16_t *acl_max_len, uint8_t *sco_max_len, uint16_t *acl_max_num, uint16_t *sco_max_num);

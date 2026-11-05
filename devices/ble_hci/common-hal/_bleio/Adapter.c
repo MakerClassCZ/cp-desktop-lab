@@ -14,6 +14,7 @@
 #include "att.h"
 #include "bonding.h"
 #include "hci.h"
+#include "smp.h"
 
 #include "py/gc.h"
 #include "shared/runtime/interrupt_char.h"
@@ -289,9 +290,20 @@ static void bleio_adapter_hci_init(bleio_adapter_obj_t *self) {
     if (have_public_address &&
         memcmp(public_address.val, no_address.val, sizeof(no_address.val)) == 0) {
         if (hci_vs_read_static_address(&self->random_address) != HCI_OK) {
-            uint8_t rand[8];
-            hci_check_error(hci_le_rand(rand));
-            memcpy(self->random_address.val, rand, sizeof(self->random_address.val));
+            // Made once and kept in the bond store: a new one at every enable would be a new
+            // device to a phone each time, and its bond of no use.
+            bonding_store_t *store = bonding_store();
+            if (store->header.flags & BONDING_HAVE_STATIC_ADDRESS) {
+                self->random_address = store->header.static_address;
+            } else {
+                uint8_t rand[8];
+                hci_check_error(hci_le_rand(rand));
+                memcpy(self->random_address.val, rand, sizeof(self->random_address.val));
+                self->random_address.val[5] |= 0xc0;
+                store->header.static_address = self->random_address;
+                store->header.flags |= BONDING_HAVE_STATIC_ADDRESS;
+                bonding_save();
+            }
         }
         // A static address has its two top bits set.
         self->random_address.val[5] |= 0xc0;
@@ -308,16 +320,26 @@ static void bleio_adapter_hci_init(bleio_adapter_obj_t *self) {
     if (hci_set_event_mask(0x3FFFFFFFFFFFFFFF) != HCI_OK) {
         mp_raise_bleio_BluetoothError(MP_ERROR_TEXT("Could not set event mask"));
     }
-    // The default events for LE are:
-    // BT_EVT_MASK_LE_CONN_COMPLETE,  BT_EVT_MASK_LE_ADVERTISING_REPORT,
-    // BT_EVT_MASK_LE_CONN_UPDATE_COMPLETE, BT_EVT_MASK_LE_REMOTE_FEAT_COMPLETE
-    // BT_EVT_MASK_LE_LTK_REQUEST.
-    // A controller with extended advertising is scanned and connected with the extended
-    // commands, whose events (LE Enhanced Connection Complete, LE Extended Advertising Report) it
-    // sends only when they are unmasked.
-    if (adapter_uses_extended_advertising(self) &&
-        hci_le_set_event_mask(0x1f | 1u << 9 | 1u << 12) != HCI_OK) {
+    // The default LE events (connection complete, advertising report, connection update, remote
+    // features, LTK request) and the two LE Secure Connections will want: the local P-256 public
+    // key and the DHKey. A controller that refuses keeps its default, which is enough, except
+    // with extended advertising: it is scanned and connected with the extended commands, whose
+    // events (LE Enhanced Connection Complete, LE Extended Advertising Report) it sends only when
+    // they are unmasked.
+    const bool extended = adapter_uses_extended_advertising(self);
+    uint64_t le_events = BT_EVT_MASK_LE_CONN_COMPLETE | BT_EVT_MASK_LE_ADVERTISING_REPORT |
+        BT_EVT_MASK_LE_CONN_UPDATE_COMPLETE | BT_EVT_MASK_LE_REMOTE_FEAT_COMPLETE |
+        BT_EVT_MASK_LE_LTK_REQUEST | BT_EVT_MASK_LE_P256_PUBLIC_KEY_COMPLETE |
+        BT_EVT_MASK_LE_GENERATE_DHKEY_COMPLETE;
+    if (extended) {
+        le_events |= BT_EVT_MASK_LE_ENH_CONN_COMPLETE | BT_EVT_MASK_LE_EXT_ADVERTISING_REPORT;
+    }
+    if (hci_le_set_event_mask(le_events) != HCI_OK && extended) {
         mp_raise_bleio_BluetoothError(MP_ERROR_TEXT("Could not set event mask"));
+    }
+    // Which commands the controller has: Secure Connections will ask it for the P-256 ones.
+    if (hci_read_local_supported_commands(self->supported_commands) != HCI_OK) {
+        memset(self->supported_commands, 0, sizeof(self->supported_commands));
     }
 
     // Get ACL buffer info.
@@ -686,6 +708,10 @@ uint32_t _common_hal_bleio_adapter_start_advertising(bleio_adapter_obj_t *self,
         random_address.val[5] &= 0x3f;
     }
 
+    // Ours on the link a central makes to this advertising (pairing's c1 takes it).
+    self->advertising_address.type = own_addr_type;
+    self->advertising_address.a = own_addr_type == BT_ADDR_LE_RANDOM ? random_address : self->identity.a;
+
     if (adapter_uses_extended_advertising(self)) {
         // Use legacy PDUs (ADV_IND etc.) so that 4.x centrals still see us and the
         // 31-byte data limit applies unchanged; only the HCI command set is extended.
@@ -1025,10 +1051,10 @@ void bleio_adapter_background(bleio_adapter_obj_t *adapter) {
         return;
     }
 
-    // Timeouts send commands: not from inside another command's wait for its answer, and not
-    // waiting for their own (it would never come: background tasks do not nest).
-    if (!hci_command_in_progress()) {
-        hci_commands_unanswered(true);
+    // Timeouts send commands: not from inside another command's wait for its answer (it would be
+    // taken for theirs). Their own answers send_command() reads itself, as background tasks do
+    // not nest.
+    if (!hci_busy()) {
         if (adapter->advertising_timeout_msecs > 0 &&
             supervisor_ticks_ms64() - adapter->advertising_start_ticks > adapter->advertising_timeout_msecs) {
             adapter->advertising_timeout_msecs = 0;
@@ -1039,11 +1065,12 @@ void bleio_adapter_background(bleio_adapter_obj_t *adapter) {
             adapter->scan_timeout_msecs = 0;
             common_hal_bleio_adapter_stop_scan(adapter);
         }
-        hci_commands_unanswered(false);
     }
 
     hci_result_t result = hci_poll_for_incoming_pkt();
     if (result != HCI_OK) {
         mp_printf(&mp_plat_print, "bad hci_poll_for_incoming_pkt() result in background: %d\n", result);
     }
+    // What the packets left for the Security Manager: its answers and commands, sent from here.
+    smp_background();
 }

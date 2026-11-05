@@ -661,6 +661,8 @@ SRC_DEVICES_HAL += \
 	_bleio/bonding.c \
 	_bleio/hci.c \
 	_bleio/hci_uart_transport.c \
+	_bleio/smp.c \
+	_bleio/smp_crypto.c \
     _bleio/Adapter.c \
 	_bleio/Attribute.c \
 	_bleio/Characteristic.c \
@@ -1131,6 +1133,12 @@ $(filter $(SRC_PATTERNS), \
 	displayio/display_core.c \
 	usb/utf16le.c \
 )
+
+# AES-128 for the HCI host stack's Security Manager (devices/ble_hci smp_crypto.c), with or without
+# aesio; when aesio is on too, the sort below keeps one.
+ifeq ($(CIRCUITPY_BLEIO_HCI),1)
+SRC_SHARED_MODULE_INTERNAL += aesio/aes.c
+endif
 
 ifeq ($(INTERNAL_LIBM),1)
 SRC_LIBM = \

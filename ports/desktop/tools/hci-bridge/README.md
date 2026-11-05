@@ -50,3 +50,19 @@ chip's static random one (EC:AC:… on the one tried), the same at every start.
 
 Either way, a board that opens its serial ports itself, such as a board manager, holds the port:
 let it go first.
+
+## Pairing with a real phone: what to try by hand
+
+The lab's tests pair the virtual controller with `cpapi`'s phone. With a real controller and real
+phones, before anything else: check that the controller answers LE Long Term Key Request Reply and
+sends Encryption Change (`--ble-log` shows them; Zephyr's `hci_uart` has them with
+`CONFIG_BT_CTLR_LE_ENC=y`, its default), and note what its Read Local Supported Commands says of
+the P-256 commands (LE Secure Connections would need them). Then:
+
+- Windows, Settings, "Add a device", to a program with `adafruit_ble`'s `HIDService` keyboard:
+  it pairs, types; sleep and wake the PC; restart the lab; it reconnects without pairing.
+- Windows, `bleak`: `await client.pair()`, then a read of an `ENCRYPT_NO_MITM` characteristic.
+- An iPhone and an Android phone with the HID program (media keys): pair, use, come back after the
+  phone's address changed (15 minutes or more); reload `code.py` with changed services and see
+  that the phone discovers again; `erase_bonding()` and what the phone then shows, until it is
+  removed there too.

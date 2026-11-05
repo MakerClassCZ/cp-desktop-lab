@@ -11,6 +11,11 @@
 // own (its handle, the program's role, the peer, encryption, its reassembly), and every L2CAP
 // frame on it, of any channel, goes to the events the control API streams. It has no time of
 // its own: nothing happens until the host or the API does something.
+//
+// Encryption goes as a link layer does it, per link, without ciphering anything (there is no air
+// to protect): the peer starts it with a key, EDIV and Rand; the host is asked for its key (LE
+// Long Term Key Request); the same key turns the link encrypted, another ends it (MIC failure),
+// none leaves it as it was and the peer hears Key Missing.
 
 #include "ble_controller.h"
 
@@ -20,6 +25,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "common-hal/_bleio/smp_crypto.h"
 #include "shared-bindings/os/__init__.h"
 
 #include "desktop_port.h"
@@ -29,25 +35,32 @@
 #define H4_EVENT 0x04
 
 #define EVT_DISCONNECTION_COMPLETE 0x05
+#define EVT_ENCRYPTION_CHANGE 0x08
 #define EVT_COMMAND_COMPLETE 0x0e
 #define EVT_COMMAND_STATUS 0x0f
 #define EVT_NUMBER_OF_COMPLETED_PACKETS 0x13
+#define EVT_ENCRYPTION_KEY_REFRESH 0x30
 #define EVT_LE_META 0x3e
 #define EVT_VENDOR 0xff
 
 #define LE_CONNECTION_COMPLETE 0x01
 #define LE_ADVERTISING_REPORT 0x02
+#define LE_LONG_TERM_KEY_REQUEST 0x05
 #define LE_ENHANCED_CONNECTION_COMPLETE 0x0a
 #define LE_EXTENDED_ADVERTISING_REPORT 0x0d
 
 #define L2CAP_CID_ATT 0x0004
+#define L2CAP_CID_SMP 0x0006
 
 #define ERR_UNKNOWN_COMMAND 0x01
 #define ERR_UNKNOWN_CONNECTION 0x02
+#define ERR_PIN_OR_KEY_MISSING 0x06
 #define ERR_CONNECTION_LIMIT 0x09
 #define ERR_COMMAND_DISALLOWED 0x0c
+#define ERR_INVALID_PARAMETERS 0x12
 #define ERR_REMOTE_USER 0x13
 #define ERR_LOCAL_HOST 0x16
+#define ERR_MIC_FAILURE 0x3d
 
 // Advertising PDU types, as LE Advertising Report gives them.
 #define ADV_IND 0x00
@@ -65,9 +78,11 @@ static size_t _out_head;
 static size_t _out_count;
 
 // CIRCUITPY_BLE_VIRTUAL_FAULT=no-public-address: a controller without a public address, as
-// Zephyr's on an nRF. =extended: one with LE Extended Advertising (feature bit 12), as Zephyr's
-// on an nRF52840, which refuses the legacy advertising, scanning and connecting commands.
+// Zephyr's on an nRF; =no-static-address: nor a static one of its own to give. =extended: one
+// with LE Extended Advertising (feature bit 12), as Zephyr's on an nRF52840, which refuses the
+// legacy advertising, scanning and connecting commands.
 static bool _no_public_address;
+static bool _no_static_address;
 static bool _extended;
 
 // The lab's addresses, least significant byte first: a public one, 02:dc and four bytes of a hash
@@ -138,18 +153,43 @@ typedef struct {
     uint8_t local[6];           // the program's address on it
     uint8_t local_type;
     bool encrypted;
+    bool encrypting;            // the peer asked to encrypt with ltk: the host's key is due
+    uint8_t ltk[16];
     uint8_t frame[PDU_MAX + 4]; // the L2CAP frame from the host being reassembled
     size_t frame_have;
 } link_t;
 static link_t _links[LINK_COUNT];
 static int _phone = -1;         // the phone's link, or -1
 
-// ATT PDUs the program sent the phone, oldest first.
-#define PDU_COUNT 256
-static uint8_t _pdus[PDU_COUNT][PDU_MAX];
-static uint16_t _pdu_len[PDU_COUNT];
-static size_t _pdu_head;
-static size_t _pdu_count;
+// Each link's last encryption, kept apart from the link (a link that ends is reused): -1 while
+// the host's answer is due (or none was asked), else its result: 0, Key Missing, MIC failure, or
+// the reason its link ended.
+static int _encrypt_result[LINK_COUNT];
+
+// The frames the program sent the phone, oldest first: one queue for ATT, one for SMP (every
+// channel of every link is in the events too).
+#define FRAME_COUNT 256
+typedef struct {
+    uint16_t len[FRAME_COUNT];
+    uint8_t data[FRAME_COUNT][PDU_MAX];
+    size_t head;
+    size_t count;
+} queue_t;
+static queue_t _att, _smp;
+
+static void _queue_put(queue_t *q, const uint8_t *data, size_t len) {
+    if (len > PDU_MAX || q->count == FRAME_COUNT) {
+        return;
+    }
+    size_t slot = (q->head + q->count++) % FRAME_COUNT;
+    q->len[slot] = (uint16_t)len;
+    memcpy(q->data[slot], data, len);
+}
+
+static void _queues_clear(void) {
+    _att.head = _att.count = 0;
+    _smp.head = _smp.count = 0;
+}
 
 // The events, a ring of the last EVENT_COUNT: _event_end is the number of the next one.
 #define EVENT_COUNT 256
@@ -314,6 +354,10 @@ static void _link_close(int i, uint8_t reason, bool tell_host) {
     if (i == _phone) {
         _phone = -1;
     }
+    if (_links[i].encrypting) {
+        _links[i].encrypting = false;
+        _encrypt_result[i] = reason;
+    }
     if (tell_host) {
         uint8_t params[4] = { 0, LINK_HANDLE(i) & 0xff, LINK_HANDLE(i) >> 8, reason };
         _event(EVT_DISCONNECTION_COMPLETE, params, sizeof(params));
@@ -472,7 +516,60 @@ static void _addresses(void) {
     _static_address[5] |= 0xc0;
 }
 
+// ---- encryption ----
+
+// The host's answer to an LE Long Term Key Request: its key (NULL: none). The same key as the
+// peer's encrypts the link; another fails as a link layer's MIC check does.
+static void _ltk_answer(uint16_t opcode, uint16_t handle, const uint8_t *ltk) {
+    int i = _link_of(handle);
+    uint8_t ret[3] = { 0, handle & 0xff, handle >> 8 };
+    if (i < 0 || !_links[i].encrypting) {
+        ret[0] = i < 0 ? ERR_UNKNOWN_CONNECTION : ERR_COMMAND_DISALLOWED;
+        _complete(opcode, ret, sizeof(ret));
+        return;
+    }
+    link_t *link = &_links[i];
+    _complete(opcode, ret, sizeof(ret));
+    link->encrypting = false;
+    if (ltk == NULL) {
+        _encrypt_result[i] = ERR_PIN_OR_KEY_MISSING;
+        return;
+    }
+    if (memcmp(ltk, link->ltk, 16) != 0) {
+        _encrypt_result[i] = ERR_MIC_FAILURE;
+        _link_close(i, ERR_MIC_FAILURE, true);
+        return;
+    }
+    if (link->encrypted) {
+        uint8_t params[3] = { 0, handle & 0xff, handle >> 8 };
+        _event(EVT_ENCRYPTION_KEY_REFRESH, params, sizeof(params));
+    } else {
+        uint8_t params[4] = { 0, handle & 0xff, handle >> 8, 0x01 };
+        _event(EVT_ENCRYPTION_CHANGE, params, sizeof(params));
+    }
+    link->encrypted = true;
+    _encrypt_result[i] = 0;
+}
+
 // ---- the commands ----
+
+// Read Local Supported Commands: the bit of each command answered here (Core Vol 4 Part E 6.27),
+// then the extended profile's.
+static const uint8_t _commands[][2] = {
+    { 0, 5 },                   // Disconnect
+    { 5, 6 }, { 5, 7 },         // Set Event Mask, Reset
+    { 14, 3 },                  // Read Local Version Information
+    { 15, 1 },                  // Read BD_ADDR
+    { 25, 0 }, { 25, 1 }, { 25, 2 }, { 25, 4 }, { 25, 5 }, { 25, 7 },   // LE: event mask .. advertising data
+    { 26, 0 }, { 26, 1 }, { 26, 2 }, { 26, 3 },     // scan response data .. scan enable
+    { 26, 4 }, { 26, 5 },       // LE Create Connection, its Cancel
+    { 27, 6 }, { 27, 7 },       // LE Encrypt, LE Rand
+    { 28, 0 }, { 28, 1 }, { 28, 2 },    // LE Start Encryption, LTK Request Reply and Negative Reply
+};
+static const uint8_t _extended_commands[][2] = {
+    { 36, 1 }, { 36, 2 }, { 36, 3 }, { 36, 4 }, { 36, 5 },  // the set's random address .. advertising enable
+    { 37, 5 }, { 37, 6 }, { 37, 7 },    // extended scan parameters, scan enable, create connection
+};
 
 static void _reset_state(void) {
     _set_advertising(false);
@@ -545,7 +642,7 @@ static bool _legacy_refused(uint16_t opcode) {
 }
 
 static void _command(uint16_t opcode, const uint8_t *p, uint8_t len) {
-    uint8_t ret[32] = { 0 };
+    uint8_t ret[65] = { 0 };
     if (_legacy_refused(opcode)) {
         // A controller with extended advertising takes the extended commands only, as Zephyr's.
         if (opcode == 0x200d) {
@@ -619,6 +716,15 @@ static void _command(uint16_t opcode, const uint8_t *p, uint8_t len) {
             ret[5] = 0xff;
             ret[6] = 0xff;
             _complete(opcode, ret, 9);
+            break;
+        case 0x1002:            // Read Local Supported Commands
+            for (size_t i = 0; i < sizeof(_commands) / sizeof(_commands[0]); i++) {
+                ret[1 + _commands[i][0]] |= 1 << _commands[i][1];
+            }
+            for (size_t i = 0; _extended && i < sizeof(_extended_commands) / sizeof(_extended_commands[0]); i++) {
+                ret[1 + _extended_commands[i][0]] |= 1 << _extended_commands[i][1];
+            }
+            _complete(opcode, ret, 65);
             break;
         case 0x1009:            // Read BD_ADDR
             _addresses();
@@ -731,12 +837,42 @@ static void _command(uint16_t opcode, const uint8_t *p, uint8_t len) {
                 _create_connection(opcode, p[2], p + 3, p[1], (uint16_t)(p[14] | p[15] << 8));
             }
             break;
+        case 0x2017:            // LE Encrypt: AES-128 of the key and data, least significant first
+            if (len >= 32) {
+                smp_e(p, p + 16, ret + 1);
+            } else {
+                ret[0] = ERR_INVALID_PARAMETERS;
+            }
+            _complete(opcode, ret, 17);
+            break;
         case 0x2018:            // LE Rand
             common_hal_os_urandom(ret + 1, 8);
             _complete(opcode, ret, 9);
             break;
+        case 0x2019: {          // LE Start Encryption: a central's. The air does not carry it to a
+            // peer yet (the program as central does not pair), and where the program is the
+            // peripheral it is not the one to start it: Command Disallowed on every link.
+            int i = len >= 2 ? _link_of((uint16_t)(p[0] | p[1] << 8) & 0x0fff) : -1;
+            _status(opcode, i < 0 ? ERR_UNKNOWN_CONNECTION : ERR_COMMAND_DISALLOWED);
+            break;
+        }
+        case 0x201a:            // LE Long Term Key Request Reply
+            if (len >= 18) {
+                _ltk_answer(opcode, (uint16_t)(p[0] | p[1] << 8) & 0x0fff, p + 2);
+            }
+            break;
+        case 0x201b:            // LE Long Term Key Request Negative Reply
+            if (len >= 2) {
+                _ltk_answer(opcode, (uint16_t)(p[0] | p[1] << 8) & 0x0fff, NULL);
+            }
+            break;
         case 0xfc09:            // Zephyr's Read Static Addresses: one, with a zero identity root
             _addresses();
+            if (_no_static_address) {
+                ret[0] = ERR_UNKNOWN_COMMAND;
+                _complete(opcode, ret, 1);
+                break;
+            }
             ret[1] = 1;
             memcpy(ret + 2, _static_address, 6);
             _complete(opcode, ret, 2 + 6 + 16);
@@ -749,8 +885,8 @@ static void _command(uint16_t opcode, const uint8_t *p, uint8_t len) {
 }
 
 // ACL data from the host on a link: an L2CAP frame, maybe in fragments, to the events (any
-// channel), and an ATT one on the phone's link to the phone's queue too. Each packet is
-// acknowledged on its handle, so the host's credit comes back.
+// channel), and an ATT or SMP one on the phone's link to the phone's queue of it too. Each
+// packet is acknowledged on its handle, so the host's credit comes back.
 static void _acl(const uint8_t *p, size_t len) {
     uint16_t handle = (uint16_t)(p[1] | p[2] << 8) & 0x0fff;
     uint16_t flags = p[2] >> 4;
@@ -784,10 +920,8 @@ static void _acl(const uint8_t *p, size_t len) {
         e->len = (uint16_t)frame_len;
         memcpy(e->data, link->frame + 4, frame_len);
     }
-    if (i == _phone && cid == L2CAP_CID_ATT && frame_len <= PDU_MAX && _pdu_count < PDU_COUNT) {
-        size_t slot = (_pdu_head + _pdu_count++) % PDU_COUNT;
-        memcpy(_pdus[slot], link->frame + 4, frame_len);
-        _pdu_len[slot] = (uint16_t)frame_len;
+    if (i == _phone && (cid == L2CAP_CID_ATT || cid == L2CAP_CID_SMP)) {
+        _queue_put(cid == L2CAP_CID_ATT ? &_att : &_smp, link->frame + 4, frame_len);
     }
     link->frame_have = 0;
 }
@@ -799,10 +933,14 @@ void ble_controller_reset(void) {
     memset(_links, 0, sizeof(_links));
     memset(_peers, 0, sizeof(_peers));
     _phone = -1;
-    _pdu_head = _pdu_count = 0;
+    _queues_clear();
+    for (int i = 0; i < LINK_COUNT; i++) {
+        _encrypt_result[i] = -1;
+    }
     _le_mask = 0x1f;
     const char *fault = getenv("CIRCUITPY_BLE_VIRTUAL_FAULT");
-    _no_public_address = fault != NULL && strcmp(fault, "no-public-address") == 0;
+    _no_static_address = fault != NULL && strcmp(fault, "no-static-address") == 0;
+    _no_public_address = _no_static_address || (fault != NULL && strcmp(fault, "no-public-address") == 0);
     _extended = fault != NULL && strcmp(fault, "extended") == 0;
     pthread_mutex_unlock(&_lock);
 }
@@ -839,14 +977,14 @@ int ble_controller_write(const uint8_t *packet, size_t len) {
 
 // ---- the phone ----
 
-int ble_controller_connect(void) {
+int ble_controller_connect(const uint8_t *address, uint8_t type) {
     pthread_mutex_lock(&_lock);
     int result = -1;
     if (_phone < 0) {
-        int i = _peripheral_link(_phone_address, 0x01);
+        int i = address != NULL ? _peripheral_link(address, type) : _peripheral_link(_phone_address, 0x01);
         if (i >= 0) {
             _phone = i;
-            _pdu_head = _pdu_count = 0;
+            _queues_clear();
             result = 0;
         }
     }
@@ -860,30 +998,66 @@ void ble_controller_disconnect(uint8_t reason) {
     pthread_mutex_unlock(&_lock);
 }
 
-bool ble_controller_att_send(const uint8_t *pdu, size_t len) {
+bool ble_controller_l2cap_send(uint16_t cid, const uint8_t *pdu, size_t len) {
     pthread_mutex_lock(&_lock);
     bool ok = _phone >= 0 && len <= PDU_MAX;
     if (ok) {
-        _to_host(_phone, L2CAP_CID_ATT, pdu, len);
+        _to_host(_phone, cid, pdu, len);
     }
     pthread_mutex_unlock(&_lock);
     return ok;
 }
 
-size_t ble_controller_att_take(uint8_t *pdu, size_t max) {
+bool ble_controller_att_send(const uint8_t *pdu, size_t len) {
+    return ble_controller_l2cap_send(L2CAP_CID_ATT, pdu, len);
+}
+
+size_t ble_controller_l2cap_take(uint16_t cid, uint8_t *pdu, size_t max) {
     pthread_mutex_lock(&_lock);
+    queue_t *q = cid == L2CAP_CID_ATT ? &_att : cid == L2CAP_CID_SMP ? &_smp : NULL;
     size_t len = 0;
-    if (_pdu_count > 0) {
-        len = _pdu_len[_pdu_head];
+    if (q != NULL && q->count > 0) {
+        len = q->len[q->head];
         if (len > max) {
             len = max;
         }
-        memcpy(pdu, _pdus[_pdu_head], len);
-        _pdu_head = (_pdu_head + 1) % PDU_COUNT;
-        _pdu_count--;
+        memcpy(pdu, q->data[q->head], len);
+        q->head = (q->head + 1) % FRAME_COUNT;
+        q->count--;
     }
     pthread_mutex_unlock(&_lock);
     return len;
+}
+
+size_t ble_controller_att_take(uint8_t *pdu, size_t max) {
+    return ble_controller_l2cap_take(L2CAP_CID_ATT, pdu, max);
+}
+
+int ble_controller_encrypt(const uint8_t *address, const uint8_t ltk[16], uint16_t ediv, const uint8_t rand[8]) {
+    pthread_mutex_lock(&_lock);
+    int i = address != NULL ? _link_to(address) : _phone;
+    if (i >= 0) {
+        link_t *link = &_links[i];
+        link->encrypting = true;
+        memcpy(link->ltk, ltk, 16);
+        _encrypt_result[i] = -1;
+        // LE Long Term Key Request: the handle, the Rand, the EDIV.
+        uint16_t handle = LINK_HANDLE(i);
+        uint8_t params[13] = { LE_LONG_TERM_KEY_REQUEST, handle & 0xff, handle >> 8 };
+        memcpy(params + 3, rand, 8);
+        params[11] = ediv & 0xff;
+        params[12] = ediv >> 8;
+        _event(EVT_LE_META, params, sizeof(params));
+    }
+    pthread_mutex_unlock(&_lock);
+    return i;
+}
+
+int ble_controller_encrypt_result(int link) {
+    pthread_mutex_lock(&_lock);
+    int result = link >= 0 && link < LINK_COUNT ? _encrypt_result[link] : -1;
+    pthread_mutex_unlock(&_lock);
+    return result;
 }
 
 // ---- the air ----

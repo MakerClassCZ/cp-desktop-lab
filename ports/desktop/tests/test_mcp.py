@@ -120,6 +120,9 @@ want = {
     "ble_write",
     "ble_notifications",
     "ble_disconnect",
+    "ble_pair",
+    "ble_bonds",
+    "ble_erase_bonds",
 }
 check(
     "tools/list names every tool, each with a schema",
@@ -301,6 +304,8 @@ while True:
         last = c.value
         c.value = bytes(last).upper()
         last = c.value
+    if not a.connected and not a.advertising:
+        a.start_advertising(bytes([2, 1, 6, 5, 9]) + b"echo", connectable=True)
     time.sleep(0.01)
 """
 r = c.call("launch", drive=drive(ECHO))
@@ -335,8 +340,25 @@ r = c.call("ble_write", uuid="0x1235", text="abc")
 check("ble_write", not r.get("isError"), r)
 r = c.call("ble_notifications", uuid="0x1235", timeout=3)
 check("ble_notifications: what the program notified", '"ABC"' in text(r), r)
+r = c.call("ble_pair")
+check("ble_pair: bonded", not r.get("isError") and "bonded" in text(r), r)
+r = c.call("ble_bonds")
+check(
+    "ble_bonds: one, the program's identity",
+    not r.get("isError") and text(r).count('"own"') == 1,
+    r,
+)
 r = c.call("ble_disconnect")
 check("ble_disconnect", not r.get("isError"), r)
+r = c.call("ble_connect", bond=True)
+check(
+    "ble_connect with the bond: encrypted at once",
+    not r.get("isError") and "encrypted" in text(r),
+    r,
+)
+r = c.call("ble_erase_bonds")
+check("ble_erase_bonds", not r.get("isError") and "erased 1" in text(r), r)
+r = c.call("ble_disconnect")
 r = c.call("stop")
 r = c.call("launch", drive=drive('print("fast")\n'), fast_time=True)
 check(

@@ -23,6 +23,7 @@
 
 #include "att.h"
 #include "hci.h"
+#include "smp.h"
 
 #include "py/obj.h"
 #include "py/mperrno.h"
@@ -119,8 +120,9 @@ static size_t cmd_response_len;
 static uint8_t *cmd_response_data;
 
 static volatile bool hci_poll_in_progress = false;
-static bool command_in_progress;
-static bool commands_unanswered;
+// Commands (and ACL credits) being waited for: the background's own commands (the timeouts',
+// SMP's) wait until there are none.
+static volatile uint8_t hci_waits;
 
 
 //////////////////////////////////////////////////////////////////////
@@ -138,6 +140,53 @@ static void set_ready(bool ready) {
     if (TRANSPORT->ready != NULL) {
         TRANSPORT->ready(TRANSPORT_CTX, ready);
     }
+}
+
+// LE signaling's codes that answer or tell, never ask (Core Vol 3 Part A 4).
+static bool l2cap_signal_is_answer(uint8_t code) {
+    switch (code) {
+        case 0x01:      // Command Reject
+        case 0x07:      // Disconnection Response
+        case 0x13:      // Connection Parameter Update Response
+        case 0x15:      // LE Credit Based Connection Response
+        case 0x16:      // Flow Control Credit Indication
+        case 0x18:      // Credit Based Connection Response
+        case 0x1a:      // Credit Based Reconfigure Response
+            return true;
+        default:
+            return false;
+    }
+}
+
+// An L2CAP frame on neither ATT nor SMP: a signaling request we do not serve is refused as not
+// understood, a frame on a channel we do not have as for an invalid CID, so the peer is answered
+// rather than left waiting. Sent from here, as ATT's answers are: data, not a command.
+static void process_l2cap_other(uint16_t handle, uint16_t cid, const uint8_t *data, uint16_t len) {
+    struct __packed {
+        uint8_t code;
+        uint8_t identifier;
+        uint16_t length;
+        uint16_t reason;
+        uint16_t local_cid;
+        uint16_t remote_cid;
+    } reject = { .code = 0x01 };
+    size_t reject_len;
+    if (cid == BT_L2CAP_CID_LE_SIG) {
+        if (len < 4 || l2cap_signal_is_answer(data[0])) {
+            return;
+        }
+        reject.identifier = data[1];
+        reject.length = 2;
+        reject.reason = 0x0000;     // command not understood
+        reject_len = 6;
+    } else {
+        reject.length = 6;
+        reject.reason = 0x0002;     // invalid CID in request
+        reject.local_cid = cid;
+        reject.remote_cid = 0x0000;
+        reject_len = 10;
+    }
+    hci_send_acl_pkt(handle, BT_L2CAP_CID_LE_SIG, reject_len, (uint8_t *)&reject);
 }
 
 static void process_acl_data_pkt(uint8_t pkt_len, uint8_t pkt_data[]) {
@@ -168,21 +217,11 @@ static void process_acl_data_pkt(uint8_t pkt_len, uint8_t pkt_data[]) {
 
     if (acl->cid == BT_L2CAP_CID_ATT) {
         att_process_data(pkt->handle, acl->acl_data_len, acl->acl_data);
+    } else if (acl->cid == BT_L2CAP_CID_SMP) {
+        smp_on_pdu(pkt->handle, acl->acl_data, acl->acl_data_len);
+    } else {
+        process_l2cap_other(pkt->handle, acl->cid, acl->acl_data, acl->acl_data_len);
     }
-    // } else if (aclHdr->cid == BT_L2CAP_CID_LE_SIG) {
-    //     L2CAPSignaling.handleData(aclHdr->handle & 0x0fff, aclHdr->len, &rx_buffer[1 + sizeof(HCIACLHdr)]);
-    // } else {
-    //     struct __attribute__ ((packed)) {
-    //         uint8_t op;
-    //         uint8_t id;
-    //         uint16_t length;
-    //         uint16_t reason;
-    //         uint16_t localCid;
-    //         uint16_t remoteCid;
-    //     } l2capRejectCid= { 0x01, 0x00, 0x006, 0x0002, aclHdr->cid, 0x0000 };
-
-    //     sendAclPkt(aclHdr->handle & 0x0fff, 0x0005, sizeof(l2capRejectCid), &l2capRejectCid);
-    // }
 }
 
 // Process number of completed packets. Reduce number of pending packets by reported
@@ -268,8 +307,22 @@ static void process_evt_pkt(size_t pkt_len, uint8_t pkt_data[]) {
                 (struct bt_hci_evt_disconn_complete *)pkt->params;
             (void)disconn_complete;
 
+            smp_on_disconnect(disconn_complete->handle);
             att_remove_connection(disconn_complete->handle, disconn_complete->reason);
             // FIX L2CAPSignaling.removeConnection(disconn_complete->handle, disconn_complete->reason);
+            break;
+        }
+
+        case BT_HCI_EVT_ENCRYPT_CHANGE: {
+            struct bt_hci_evt_encrypt_change *evt = (struct bt_hci_evt_encrypt_change *)pkt->params;
+            smp_on_encryption(evt->handle & 0x0fff, evt->status, evt->encrypt != 0);
+            break;
+        }
+
+        case BT_HCI_EVT_ENCRYPT_KEY_REFRESH_COMPLETE: {
+            struct bt_hci_evt_encrypt_key_refresh_complete *evt =
+                (struct bt_hci_evt_encrypt_key_refresh_complete *)pkt->params;
+            smp_on_encryption(evt->handle & 0x0fff, evt->status, true);
             break;
         }
 
@@ -357,11 +410,26 @@ static void process_evt_pkt(size_t pkt_len, uint8_t pkt_data[]) {
                         le_conn_complete->supv_timeout,
                         le_conn_complete->clock_accuracy);
 
+                    // Our address on the link, which pairing's c1 takes: as a peripheral the one we
+                    // advertised from, as a central the one we connect from.
+                    bleio_adapter_obj_t *adapter = &common_hal_bleio_adapter_obj;
+                    bt_addr_le_t own = adapter->advertising_address;
+                    if (le_conn_complete->role == BT_HCI_ROLE_MASTER) {
+                        own.type = adapter->own_addr_type;
+                        own.a = adapter->own_addr_type == BT_ADDR_LE_RANDOM
+                            ? adapter->random_address : adapter->identity.a;
+                    }
+                    smp_on_connect(le_conn_complete->handle, &own);
                 }
                 // A connection the program asked for, made or not: connect() waits for it.
                 if (le_conn_complete->role == BT_HCI_ROLE_MASTER) {
                     common_hal_bleio_adapter_obj.connect_status = le_conn_complete->status;
                 }
+            } else if (meta_evt->subevent == BT_HCI_EVT_LE_LTK_REQUEST) {
+                struct bt_hci_evt_le_ltk_request *ltk_request = (struct bt_hci_evt_le_ltk_request *)le_evt;
+                uint8_t rand[8];
+                memcpy(rand, &ltk_request->rand, sizeof(rand));
+                smp_on_ltk_request(ltk_request->handle, ltk_request->ediv, rand);
             } else if (meta_evt->subevent == BT_HCI_EVT_LE_ADVERTISING_REPORT) {
                 process_le_advertising_report(le_evt,
                     pkt->param_len - sizeof(struct bt_hci_evt_le_meta_event));
@@ -384,7 +452,9 @@ void bleio_hci_reset(void) {
     rx_idx = 0;
     pending_pkt = 0;
     hci_poll_in_progress = false;
+    hci_waits = 0;
     bleio_att_reset();
+    smp_reset();
 }
 
 hci_result_t hci_poll_for_incoming_pkt(void) {
@@ -523,20 +593,17 @@ static hci_result_t send_command(uint16_t opcode, uint8_t params_len, void *para
     }
 
     cmd_response_received = false;
-    if (commands_unanswered) {
-        // From the background: the answer comes in later and passes by.
-        return HCI_OK;
-    }
-    const bool outer = !command_in_progress;
-    command_in_progress = true;
 
     // Wait for a response. Note that other packets may be received that are not
     // command responses.
     result = HCI_RESPONSE_TIMEOUT;
+    hci_waits++;
     uint64_t start = supervisor_ticks_ms64();
     while (supervisor_ticks_ms64() - start < RESPONSE_TIMEOUT_MSECS) {
-        // RUN_BACKGROUND_TASKS includes hci_poll_for_incoming_pkt();
         RUN_BACKGROUND_TASKS;
+        // Polled here too: from a background task (the advertising timeout's stop, SMP) the
+        // background tasks do not run again, and nothing else would read the answer.
+        hci_poll_for_incoming_pkt();
         if (cmd_response_received && cmd_response_opcode == opcode) {
             // If this is definitely a response to the command that was sent,
             // return the status value, which will will be
@@ -546,20 +613,14 @@ static hci_result_t send_command(uint16_t opcode, uint8_t params_len, void *para
             break;
         }
     }
-    if (outer) {
-        command_in_progress = false;
-    }
+    hci_waits--;
 
     // HCI_RESPONSE_TIMEOUT: no I/O error, but no response sent back in time.
     return result;
 }
 
-bool hci_command_in_progress(void) {
-    return command_in_progress;
-}
-
-void hci_commands_unanswered(bool on) {
-    commands_unanswered = on;
+bool hci_busy(void) {
+    return hci_waits > 0 || hci_poll_in_progress;
 }
 
 hci_result_t hci_send_acl_pkt(uint16_t handle, uint8_t cid, uint16_t data_len, uint8_t *data) {
@@ -567,8 +628,11 @@ hci_result_t hci_send_acl_pkt(uint16_t handle, uint8_t cid, uint16_t data_len, u
     // controller that keeps the credit (gone, or never set up) fails the send, never hangs it.
     uint64_t start = supervisor_ticks_ms64();
     while (pending_pkt >= common_hal_bleio_adapter_obj.max_acl_num_buffers) {
-        // RUN_BACKGROUND_TASKS includes hci_poll_for_incoming_pkt();
+        hci_waits++;
         RUN_BACKGROUND_TASKS;
+        // As in send_command(): the credits come back in packets read here.
+        hci_poll_for_incoming_pkt();
+        hci_waits--;
         if (supervisor_ticks_ms64() - start > RESPONSE_TIMEOUT_MSECS) {
             return HCI_WRITE_TIMEOUT;
         }
@@ -673,6 +737,49 @@ hci_result_t hci_read_buffer_size(uint16_t *acl_max_len, uint8_t *sco_max_len, u
     }
 
     return result;
+}
+
+hci_result_t hci_le_set_event_mask(uint64_t event_mask) {
+    return send_command(BT_HCI_OP_LE_SET_EVENT_MASK, sizeof(event_mask), &event_mask);
+}
+
+hci_result_t hci_read_local_supported_commands(uint8_t commands[64]) {
+    int result = send_command(BT_HCI_OP_READ_SUPPORTED_COMMANDS, 0, NULL);
+    if (result == HCI_OK) {
+        if (cmd_response_len < sizeof(struct bt_hci_rp_read_supported_commands)) {
+            return HCI_PACKET_SIZE_ERROR;
+        }
+        struct bt_hci_rp_read_supported_commands *response =
+            (struct bt_hci_rp_read_supported_commands *)cmd_response_data;
+        memcpy(commands, response->commands, sizeof(response->commands));
+    }
+    return result;
+}
+
+hci_result_t hci_le_ltk_request_reply(uint16_t handle, const uint8_t ltk[16]) {
+    struct bt_hci_cp_le_ltk_req_reply params = {
+        .handle = handle,
+    };
+    memcpy(params.ltk, ltk, sizeof(params.ltk));
+    return send_command(BT_HCI_OP_LE_LTK_REQ_REPLY, sizeof(params), &params);
+}
+
+hci_result_t hci_le_ltk_request_negative_reply(uint16_t handle) {
+    struct bt_hci_cp_le_ltk_req_neg_reply params = {
+        .handle = handle,
+    };
+    return send_command(BT_HCI_OP_LE_LTK_REQ_NEG_REPLY, sizeof(params), &params);
+}
+
+hci_result_t hci_le_start_encryption(uint16_t handle, const uint8_t rand[8], uint16_t ediv,
+    const uint8_t ltk[16]) {
+    struct bt_hci_cp_le_start_encryption params = {
+        .handle = handle,
+        .ediv = ediv,
+    };
+    memcpy(&params.rand, rand, sizeof(params.rand));
+    memcpy(params.ltk, ltk, sizeof(params.ltk));
+    return send_command(BT_HCI_OP_LE_START_ENCRYPTION, sizeof(params), &params);
 }
 
 hci_result_t hci_le_set_random_address(uint8_t addr[6]) {
@@ -856,10 +963,6 @@ hci_result_t hci_le_set_scan_parameters(uint8_t scan_type, uint16_t interval, ui
     };
 
     return send_command(BT_HCI_OP_LE_SET_SCAN_PARAM, sizeof(params), &params);
-}
-
-hci_result_t hci_le_set_event_mask(uint64_t event_mask) {
-    return send_command(BT_HCI_OP_LE_SET_EVENT_MASK, sizeof(event_mask), &event_mask);
 }
 
 hci_result_t hci_le_set_extended_scan_parameters(uint8_t own_addr_type, uint8_t scan_type, uint16_t interval, uint16_t window) {

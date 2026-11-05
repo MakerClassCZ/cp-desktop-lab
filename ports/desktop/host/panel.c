@@ -246,16 +246,29 @@ static bool _ble_central(const ble_host_state_t *s) {
     return false;
 }
 
+// Whether a link is encrypted.
+static bool _ble_encrypted(const ble_host_state_t *s) {
+    for (uint8_t i = 0; i < s->link_count; i++) {
+        if (s->links[i].encrypted) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void _draw_ble(int y) {
     ble_host_state_t s;
     const char *status = _ble_status(&s);
-    char value[64];
+    char value[96], bonds[16] = "";
+    if (s.bonds > 0) {
+        snprintf(bonds, sizeof(bonds), "  bonds: %u", s.bonds);
+    }
     if (s.connected && _ble_central(&s)) {
-        snprintf(value, sizeof(value), "connected to %s", s.central_name);
+        snprintf(value, sizeof(value), "connected to %s%s%s", s.central_name, _ble_encrypted(&s) ? ", encrypted" : "", bonds);
     } else if (s.advertising) {
-        snprintf(value, sizeof(value), "%s \"%s\"", status, s.name);
+        snprintf(value, sizeof(value), "%s \"%s\"%s", status, s.name, bonds);
     } else {
-        snprintf(value, sizeof(value), "%s", status);
+        snprintf(value, sizeof(value), "%s%s%s", status, _ble_encrypted(&s) ? ", encrypted" : "", bonds);
     }
     _text(PAD, y + 4, "BLE", 0xd0d0d0);
     _fill(CTRL_X, y + 4, 24, 24, s.connected ? 0x3080e0 : s.advertising ? 0x205090 : 0x303030);
@@ -775,7 +788,8 @@ void panel_state_json(api_buf_t *b) {
     api_buf_printf(b, "{\"panel\": \"%s\", ", _hidden ? "hidden" : _window != NULL ? "shown" : "none");
     ble_host_state_t ble;
     const char *ble_status = _ble_status(&ble);
-    api_buf_printf(b, "\"ble\": {\"state\": \"%s\", \"name\": ", ble_status);
+    api_buf_printf(b, "\"ble\": {\"state\": \"%s\", \"encrypted\": %s, \"bonds\": %u, \"name\": ",
+        ble_status, _ble_encrypted(&ble) ? "true" : "false", ble.bonds);
     api_buf_json_string(b, ble.name, strlen(ble.name));
     if (ble.connected && _ble_central(&ble)) {
         // The peer the program connected to, as the row shows it: "connected to HRM".

@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "common-hal/_bleio/Adapter.h"
+#include "common-hal/_bleio/bonding.h"
 #include "common-hal/_bleio/hci.h"
 #include "common-hal/_bleio/hci_transport.h"
 #include "shared-bindings/_bleio/__init__.h"
@@ -154,4 +155,31 @@ void ble_host_attach_adapter(void) {
 
 const char *ble_host_controller(void) {
     return !_on ? "off" : _real ? "serial" : "virtual";
+}
+
+// The bond store's blob (devices/ble_hci bonding.c) in a file beside the drive, CIRCUITPY.bonds
+// (--ble-bonds): the same bytes a board keeps in flash, with the bonds of every controller the lab
+// used, each under its identity. Read once a run, written whole at each change.
+size_t bleio_hci_bonding_storage_read(uint8_t *buf, size_t len) {
+    FILE *f = fopen(desktop_options.ble_bonds_path, "rb");
+    if (f == NULL) {
+        return 0;
+    }
+    size_t n = fread(buf, 1, len, f);
+    fclose(f);
+    ble_host_bonds_stored(buf, n, false);
+    return n;
+}
+
+bool bleio_hci_bonding_storage_write(const uint8_t *buf, size_t len) {
+    FILE *f = fopen(desktop_options.ble_bonds_path, "wb");
+    bool ok = f != NULL && fwrite(buf, 1, len, f) == len;
+    if (f != NULL && fclose(f) != 0) {
+        ok = false;
+    }
+    if (!ok) {
+        fprintf(stderr, "circuitpython: the bonds were not saved in %s\n", desktop_options.ble_bonds_path);
+    }
+    ble_host_bonds_stored(buf, len, true);
+    return ok;
 }

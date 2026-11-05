@@ -629,7 +629,7 @@ def att_error(f):
 
 with launch(SECURE) as b:
     seen(b, "ready")
-    p = b.ble.connect()
+    p = b.ble.connect(auto_pair=False)  # the bare refusals, not a phone that pairs on them
     found = [c.uuid for s in p.services() for c in s.characteristics]
     reads = {u: att_error(lambda u=u: p.read(u)) for u in (0x1241, 0x1242, 0x1243, 0x1244, 0x1245)}
     writes = {

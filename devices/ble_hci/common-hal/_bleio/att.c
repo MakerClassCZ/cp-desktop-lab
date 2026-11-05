@@ -35,6 +35,7 @@
 #include "hci.h"
 #include "att.h"
 #include "bonding.h"
+#include "smp.h"
 
 // Zephyr include files to define HCI communication values and structs.
 // #include "hci_include/hci.h"
@@ -1548,6 +1549,8 @@ static void process_write_req_or_cmd(uint16_t conn_handle, uint16_t mtu, uint8_t
         }
 
         common_hal_bleio_descriptor_set_value(descriptor, &bufinfo);
+        // A bonded peer's CCCDs go to its bond.
+        smp_on_cccd_written(conn_handle);
     }
 
     if (with_response) {

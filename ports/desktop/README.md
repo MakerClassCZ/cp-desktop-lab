@@ -307,8 +307,47 @@ row says `scanning` or `connected to HRM`. The MCP server adds `ble_device_add`,
 `CIRCUITPY_BLE_VIRTUAL_FAULT=extended` makes the virtual controller one with extended
 advertising, as Zephyr's on an nRF52840, which takes the extended commands only.
 
-The stack runs at an MTU of 23 (20 bytes a notification or a write), with no long writes and
-no pairing.
+The stack runs at an MTU of 23 (20 bytes a notification or a write), with no long writes. The
+program pairs as a peripheral (below); as a central, `connection.pair()` raises
+`NotImplementedError`.
+
+### Pairing and bonds
+
+A phone or a PC can pair with the program, as with a CLUE: LE Legacy pairing, "Just Works" (no
+code to compare or type). A characteristic with `read_perm` or `write_perm`
+`Attribute.ENCRYPT_NO_MITM` is read only over an encrypted link: the phone is told so (ATT error
+0x05) and pairs by itself, so a BLE keyboard or media keys (`adafruit_ble`'s `HIDService`) work.
+The program can ask too: `connection.pair()` waits until the link is encrypted, or raises
+`SecurityError`; `pair(bond=False)` encrypts and keeps nothing; `connection.paired` says whether
+the link is encrypted. When both sides ask for a bond (phones do), the keys are kept, and the
+phone comes back later without pairing again, its subscriptions (CCCDs) put back; when the
+program's services changed meanwhile, the phone is told (Service Changed) instead.
+
+The bonds are kept in `CIRCUITPY.bonds` beside the drive (or `--ble-bonds PATH`), the bytes a board
+keeps in flash, for the virtual controller and real ones side by side; they survive a restart.
+`_bleio.adapter.erase_bonding()` forgets the bonds of the controller in use; the phone still has its
+keys and its next connection fails until you remove the board there too ("Forget this device" on
+iOS, "Unpair" on Android, "Remove device" in Windows). Not available: LE Secure Connections,
+numeric comparison and passkeys, so `ENCRYPT_WITH_MITM` and `LESC_ENCRYPT_WITH_MITM` stay refused
+and `connection.authenticated` is `False`. Legacy pairing protects a link from a later listener,
+not from one that heard the pairing itself (as on the nRF boards). A `--ble-log` of a real
+phone's pairing holds that bond's keys.
+
+The `cpapi` phone pairs as a phone does (`auto_pair=False` shows the bare ATT errors):
+
+```python
+phone = cpapi.Identity()                      # an IRK and an identity address
+p = b.ble.connect(identity=phone)             # from a resolvable private address of it
+print(p.read(0x2A4B))                         # 0x05, so it pairs, then reads; or p.pair()
+bond = p.bond                                 # the program's LTK, EDIV, Rand, IRK, identity
+p.disconnect()
+p = b.ble.connect(bond=bond)                  # back from a new address, encrypted at once
+print(b.ble.bonds())                          # the program's bond store
+```
+
+The MCP server has `ble_pair`, `ble_bonds`, `ble_erase_bonds`, and `ble_connect` with `bond`. The
+trace shows `BLE PAIR <- REQUEST io=none bond key=16`, `BLE ENCRYPTED key=16`,
+`BLE LTK ediv=0x1a2b found`, `BLE BOND saved identity 4a:...`, never a key.
 
 ## The board panel: NeoPixels, buttons, sliders and other boards' pin names
 
@@ -695,13 +734,17 @@ naming another `Host`, or a browser's preflight, is refused, so a web page canno
 | `POST /api/panel` | key script lines (`set ENV.temp 24.5`, `press A`, `turn ENC 2`, `send IR_RX`, `down Z`), applied before the answer |
 | `GET /api/display?name=NAME` | the window (`DISPLAY`), or a board file's display, as PNG |
 | `GET /api/trace?since=N&wait=TEXT&timeout=MS` | the bus trace, as the console; with or without `--trace-bus` |
-| `GET /api/ble` | the Bluetooth controller (`virtual`, `serial`, `off`), what is advertised (`data`, `scan_response` in hex, `name`, `connectable`), the address, the connection, whether it is `scanning`; `links`: each connection's `handle`, `peer`, the program's `role` and whether it is `encrypted` |
-| `POST /api/ble/connect`, `/disconnect` | the phone joins what the program advertises, or leaves (409 with a real controller); with `{"address": ...}` a peer of that address does, as a central, or that peer's link ends |
+| `GET /api/ble` | the Bluetooth controller (`virtual`, `serial`, `off`), what is advertised (`data`, `scan_response` in hex, `name`, `connectable`), the address, the connection, whether it is `scanning`; `links`: each connection's `handle`, `peer`, the program's `role` and whether it is `encrypted`; `encrypted` and `key_size` of the first encrypted one; `bonds`, their number for this controller |
+| `POST /api/ble/connect`, `/disconnect` | the phone joins what the program advertises, or leaves (409 with a real controller); `{"address": "4a:...", "type": "random"}`: the phone connects from that address; with `{"address": ...}` alone (and `"random"`) a peer of that address does, as a central, or that peer's link ends |
 | `POST /api/ble/peer` | a peer in the air: `{"address", "random", "data", "scan_response", "connectable", "rssi"}` (hex data) advertises; `{"address", "advertising": false}` is silent, its link kept; `{"address", "gone": true}` leaves, its link ended |
-| `POST /api/ble/l2cap` | an L2CAP frame from a peer to the program: `{"address", "cid", "data"}` (hex) |
-| `GET /api/ble/events?since=N&wait=MS` | what happens in the air, in one order (`next`, `lost`, `events`): `adv` (the program's advertising, on or off), `scan`, `connected` and `disconnected` (`peer`, the program's `role`, `handle`, `reason`), every `l2cap` frame the program sends (`peer`, `cid`, `data`) |
+| `POST /api/ble/l2cap` | an L2CAP frame to the program on any channel: `{"address", "cid", "data"}` (hex) from that peer, from the phone without `"address"` |
+| `GET /api/ble/events?since=N&wait=MS` | what happens in the air, in one order (`next`, `lost`, `events`): `adv` (the program's advertising, on or off), `scan`, `connected` and `disconnected` (`peer`, the program's `role`, `handle`, `reason`), every `l2cap` frame the program sends on any link and channel, the phone's too (`peer`, `cid`, `data`) |
 | `POST /api/ble/att` | an ATT PDU from the phone to the program, as hex |
 | `GET /api/ble/att?wait=MS` | the ATT PDUs the program sent the phone since the last call (`pdus`, hex), waiting for the first |
+| `POST /api/ble/smp`, `GET /api/ble/smp?wait=MS` | the same for SMP (pairing, channel 6) |
+| `POST /api/ble/encrypt` | `{"ltk": hex, "ediv": N, "rand": hex}`: the phone encrypts its link (with `"address"`, that peer its own); `{"status": 0}`, or 6 (the program has no such key), or 0x3d (another key: the link ends) |
+| `GET /api/ble/bonds?keys=1`, `POST /api/ble/bonds/erase` | the bond store (`bonds`: our identity, `role`, the `peer`'s identity; the keys with `keys=1`), and `erase_bonding()`; with a real controller too |
+| `GET /api/ble/crypto` | the host's `c1`, `s1` and `ah` on the Bluetooth Core's sample data, a self-check |
 
 `exec` types the code into the REPL as one line, so it runs as a person typing would: after
 `code.py` has ended, in the REPL's variables, which last from one `exec` to the next. While

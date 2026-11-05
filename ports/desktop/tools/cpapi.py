@@ -677,12 +677,25 @@ class Peer:
     """The phone connected to the program: a GATT client over ATT PDUs through the control API."""
 
     MTU = 247  # asked for; the program's stack answers what it takes
+    ADDRESS = "7c:10:c9:1c:37:89"  # the virtual controller's phone, with no identity behind it
 
-    def __init__(self, board):
+    def __init__(self, board, address=None, identity=None, bond=None, auto_pair=True):
+        """address: the one connected from (6 bytes, least significant first), random. identity:
+        the phone's Identity, given away when it pairs. bond: a Bond it encrypts with at once, as
+        a phone does with a board it knows. auto_pair: answer 0x05 Insufficient Authentication by
+        pairing and 0x0F Insufficient Encryption by encrypting with the bond, then ask again."""
         self.board = board
+        self.address = bytes(address) if address else address_bytes(self.ADDRESS)
+        self.identity, self.bond, self.auto_pair = identity, bond, auto_pair
         self.mtu = 23
         self._notified = {}  # value handle: [values]
         self._services = None
+        self._security_requests = []
+        self._smp_pending = []  # PDUs taken from the program, not yet expected
+        self._encrypted = False  # this link, by the phone's own encryption
+        self._securing = False
+        if bond is not None:
+            self.encrypt(bond)
         answer = self._request(bytes([0x02]) + struct.pack("<H", self.MTU), 0x03)
         self.mtu = max(23, min(self.MTU, struct.unpack("<H", answer[1:3])[0]))
 
@@ -720,7 +733,31 @@ class Peer:
 
     def _request(self, pdu, answer, timeout=5):
         """pdu sent; the program's answer of opcode answer, or AttError. ATT has one request at a
-        time, so an answer to another one (late, after a timeout) is dropped."""
+        time, so an answer to another one (late, after a timeout) is dropped. With auto_pair, a
+        refusal for security is answered as a phone does (pairing, or its bond's encryption), and
+        the request asked again once."""
+        try:
+            return self._request_once(pdu, answer, timeout)
+        except AttError as e:
+            # On an encrypted link, Just Works can do no better: the refusal stands.
+            if (
+                not self.auto_pair
+                or self._securing
+                or self._encrypted
+                or e.code not in (0x05, 0x0F)
+            ):
+                raise
+            self._securing = True
+            try:
+                if e.code == 0x0F and self.bond is not None:
+                    self.encrypt(self.bond)
+                else:
+                    self.pair()
+            finally:
+                self._securing = False
+            return self._request_once(pdu, answer, timeout)
+
+    def _request_once(self, pdu, answer, timeout):
         self._send(pdu)
         end = time.time() + timeout
         while True:
@@ -855,6 +892,119 @@ class Peer:
     def disconnect(self):
         self.board.request("POST", "/api/ble/disconnect")
 
+    # SMP, channel 6: the phone pairs as the initiator (LE Legacy, Just Works), as a phone does.
+
+    def _smp_send(self, pdu):
+        self.board.request("POST", "/api/ble/smp", bytes(pdu).hex())
+
+    def _smp_take(self, timeout):
+        """The SMP PDUs the program sent, waiting up to timeout for one; Security Requests are kept
+        for security_requests()."""
+        pdus = self.board.request("GET", "/api/ble/smp?wait=%d" % int(timeout * 1000))["pdus"]
+        out = []
+        for hexed in pdus:
+            pdu = bytes.fromhex(hexed)
+            if pdu[:1] == b"\x0b":
+                self._security_requests.append(pdu[1] if len(pdu) > 1 else 0)
+            else:
+                out.append(pdu)
+        return out
+
+    def _smp_expect(self, code, timeout=5):
+        """The program's next SMP PDU, which should be of code: PairingFailed when it gave up."""
+        end = time.time() + timeout
+        while not self._smp_pending:
+            self._smp_pending += self._smp_take(min(max(end - time.time(), 0), 1))
+            if not self._smp_pending and time.time() > end:
+                raise TimeoutError("no SMP 0x%02x from the program" % code)
+        pdu = self._smp_pending.pop(0)
+        if pdu[0] == 0x05:
+            self._smp_pending = []
+            raise PairingFailed(pdu[1] if len(pdu) > 1 else 0)
+        if pdu[0] != code:
+            raise RuntimeError("SMP 0x%02x where 0x%02x was due" % (pdu[0], code))
+        return pdu
+
+    def security_requests(self, timeout=0):
+        """The Security Requests' AuthReq bytes the program sent since the last call (1: it asks
+        for a bond), waiting up to timeout for one."""
+        end = time.time() + timeout
+        while True:
+            self._smp_take(0)
+            if self._security_requests or time.time() >= end:
+                break
+            time.sleep(0.02)
+        got, self._security_requests = self._security_requests, []
+        return got
+
+    def _program_address(self):
+        """(type, address bytes) the program advertised from: c1 takes the responder's."""
+        s = self.board.request("GET", "/api/ble")
+        return (0 if s["public"] else 1), address_bytes(s["address"])
+
+    def pair(self, bond=True, max_key_size=16, tamper=None):
+        """Pairing as the phone: a Bond (the keys and identities given) when the program bonded,
+        else one with no keys. max_key_size below 7 is refused by the program (PairingFailed
+        0x06); tamper="confirm" sends a wrong confirm value (0x04)."""
+        rat, ra = self._program_address()
+        give = 0x02 if (bond and self.identity is not None) else 0x00
+        preq = bytes(
+            [0x01, 0x03, 0x00, 0x01 if bond else 0x00, max_key_size, give, 0x03 if bond else 0x00]
+        )
+        self._smp_send(preq)
+        prsp = self._smp_expect(0x02)
+        key_size = min(max_key_size, prsp[4])
+        mrand = os.urandom(16)
+        confirm = smp_c1(bytes(16), mrand, preq, prsp, 1, self.address, rat, ra)
+        if tamper == "confirm":
+            confirm = bytes([confirm[0] ^ 0xFF]) + confirm[1:]
+        self._smp_send(b"\x03" + confirm)
+        sconfirm = self._smp_expect(0x03)[1:]
+        self._smp_send(b"\x04" + mrand)
+        srand = self._smp_expect(0x04)[1:]
+        if smp_c1(bytes(16), srand, preq, prsp, 1, self.address, rat, ra) != sconfirm:
+            self._smp_send(b"\x05\x04")
+            raise PairingFailed(0x04, sent=True)
+        stk = smp_s1(bytes(16), srand, mrand)[:key_size] + bytes(16 - key_size)
+        self._encrypt(stk, 0, bytes(8))
+        b = Bond(key_size)
+        if prsp[6] & 0x01:
+            b.ltk = self._smp_expect(0x06)[1:17]
+            central_id = self._smp_expect(0x07)
+            b.ediv, b.rand = struct.unpack("<H", central_id[1:3])[0], central_id[3:11]
+        if prsp[6] & 0x02:
+            b.irk = self._smp_expect(0x08)[1:17]
+            address = self._smp_expect(0x09)
+            b.identity_type, b.identity = address[1], address_text(address[2:8])
+        if prsp[5] & 0x02:
+            self._smp_send(b"\x08" + self.identity.irk)
+            self._smp_send(b"\x09\x01" + self.identity.address)
+            b.phone = self.identity
+        # A barrier, harmless to ask: when ATT answers, the program has taken the keys.
+        self._request_once(b"\x10" + struct.pack("<HHH", 1, 1, 0x2800), 0x11, 5)
+        if b.ltk is not None:
+            self.bond = b
+        return b
+
+    def _encrypt(self, ltk, ediv, rand):
+        body = {"ltk": bytes(ltk).hex(), "ediv": ediv, "rand": bytes(rand).hex()}
+        status = self.board.request("POST", "/api/ble/encrypt", body)["status"]
+        if status != 0:
+            raise EncryptError(status)
+        self._encrypted = True
+
+    def encrypt(self, bond, ltk=None):
+        """The link encrypted with a bond's key, as a phone does on reconnecting (ltk: another key,
+        for a test): EncryptError 0x06 when the program has no bond of it, 0x3D for a wrong key."""
+        self._encrypt(bond.ltk if ltk is None else ltk, bond.ediv, bond.rand)
+        self.bond = bond
+
+    @property
+    def encrypted(self):
+        """Whether the phone's link is encrypted."""
+        links = self.board.request("GET", "/api/ble").get("links", [])
+        return any(link["role"] == "peripheral" and link["encrypted"] for link in links)
+
 
 class Ble:
     """The phone's side of the virtual Bluetooth controller."""
@@ -870,18 +1020,205 @@ class Ble:
         s = self.state()
         return Advertisement(s) if s.get("advertising") else None
 
-    def connect(self, timeout=5):
+    def connect(self, timeout=5, identity=None, bond=None, auto_pair=True, pair=False):
         """The phone joins the program's advertisement: a Peer, its MTU exchanged. Waits up to
-        timeout for the program to advertise; any other refusal is raised at once."""
+        timeout for the program to advertise; any other refusal is raised at once. identity: the
+        phone's (an Identity): it connects from a new resolvable private address of it. bond: it
+        comes back as the phone of that Bond, from a new address, and encrypts at once. pair: it
+        pairs (bonding) right after connecting."""
+        if bond is not None and bond.phone is not None:
+            identity = bond.phone
+        address = identity.rpa() if identity is not None else None
+        body = {"address": address_text(address), "type": "random"} if address else None
         end = time.time() + timeout
         while True:
             try:
-                self.board.request("POST", "/api/ble/connect")
-                return Peer(self.board)
+                self.board.request("POST", "/api/ble/connect", body)
+                break
             except ApiError as e:
                 if "advertises nothing" not in e.message or time.time() > end:
                     raise
                 time.sleep(0.05)
+        p = Peer(self.board, address=address, identity=identity, bond=bond, auto_pair=auto_pair)
+        if pair and bond is None:
+            p.pair()
+        return p
+
+    def bonds(self, keys=False):
+        """The program's bond store, as /api/ble/bonds gives it: a list of bonds."""
+        return self.board.request("GET", "/api/ble/bonds" + ("?keys=1" if keys else ""))["bonds"]
+
+    def erase_bonds(self):
+        """The program's erase_bonding(): the bonds of this controller's identity, their number."""
+        return self.board.request("POST", "/api/ble/bonds/erase")["erased"]
+
+
+# ---- Bluetooth LE security: AES-128 and SMP's c1, s1 and ah (Core Vol 3 Part H 2.2) ----
+#
+# Test-grade and slow, standard library only: the phone's side of LE Legacy pairing. SMP's values
+# go least significant byte first, as on the air; AES takes and gives the most significant first.
+
+
+def _aes_sbox():
+    sbox, p, q = [0] * 256, 1, 1
+    while True:
+        # p runs through the multiplicative group of GF(2^8), q through its inverses.
+        p = p ^ ((p << 1) & 0xFF) ^ (0x1B if p & 0x80 else 0)
+        q ^= q << 1
+        q ^= q << 2
+        q ^= q << 4
+        q &= 0xFF
+        if q & 0x80:
+            q ^= 0x09
+        r = lambda x, s: ((x << s) | (x >> (8 - s))) & 0xFF
+        sbox[p] = q ^ r(q, 1) ^ r(q, 2) ^ r(q, 3) ^ r(q, 4) ^ 0x63
+        if p == 1:
+            break
+    sbox[0] = 0x63
+    return sbox
+
+
+_SBOX = _aes_sbox()
+
+
+def _xtime(b):
+    return ((b << 1) ^ (0x1B if b & 0x80 else 0)) & 0xFF
+
+
+def aes128(key, block):
+    """AES-128 encryption of one 16-byte block (FIPS-197), most significant byte first."""
+    w = [list(key[i : i + 4]) for i in range(0, 16, 4)]
+    rcon = 1
+    for i in range(4, 44):
+        t = list(w[i - 1])
+        if i % 4 == 0:
+            t = [_SBOX[t[1]] ^ rcon, _SBOX[t[2]], _SBOX[t[3]], _SBOX[t[0]]]
+            rcon = _xtime(rcon)
+        w.append([a ^ b for a, b in zip(w[i - 4], t)])
+    s = [b ^ k for b, k in zip(block, sum(w[0:4], []))]
+    for rnd in range(1, 11):
+        s = [_SBOX[b] for b in s]
+        s = [s[(i + 4 * (i % 4)) % 16] for i in range(16)]  # rows shifted left by their number
+        if rnd < 10:
+            m = []
+            for c in range(4):
+                a = s[4 * c : 4 * c + 4]
+                x = a[0] ^ a[1] ^ a[2] ^ a[3]
+                m += [a[i] ^ x ^ _xtime(a[i] ^ a[(i + 1) % 4]) for i in range(4)]
+            s = m
+        s = [b ^ k for b, k in zip(s, sum(w[4 * rnd : 4 * rnd + 4], []))]
+    return bytes(s)
+
+
+def smp_e(key, data):
+    """SMP's e(): AES-128 of values given and returned least significant byte first."""
+    return aes128(bytes(reversed(key)), bytes(reversed(data)))[::-1]
+
+
+def _xor(a, b):
+    return bytes(x ^ y for x, y in zip(a, b))
+
+
+def smp_c1(k, r, preq, prsp, iat, ia, rat, ra):
+    """The confirm value: k, r 16 bytes; preq, prsp the 7-byte Pairing Request and Response; the
+    initiator's and responder's address types (0 public, 1 random) and addresses (6 bytes), all
+    least significant byte first."""
+    p1 = bytes([iat, rat]) + bytes(preq) + bytes(prsp)
+    p2 = bytes(ra) + bytes(ia) + bytes(4)
+    return smp_e(k, _xor(smp_e(k, _xor(r, p1)), p2))
+
+
+def smp_s1(k, r1, r2):
+    """The STK: e(k, r1's and r2's low halves), least significant byte first."""
+    return smp_e(k, bytes(r2[:8]) + bytes(r1[:8]))
+
+
+def smp_ah(k, r):
+    """The random address hash of a 3-byte prand under an IRK k."""
+    return smp_e(k, bytes(r[:3]) + bytes(13))[:3]
+
+
+def _le(text):
+    """A value written most significant first ("5783 d521...") as its bytes least significant first."""
+    return bytes.fromhex(text.replace(" ", ""))[::-1]
+
+
+def address_text(le):
+    """A device address's 6 bytes (least significant first) as aa:bb:cc:dd:ee:ff."""
+    return ":".join("%02x" % b for b in reversed(bytes(le)))
+
+
+def address_bytes(text):
+    """aa:bb:cc:dd:ee:ff as its 6 bytes, least significant first."""
+    return bytes.fromhex(text.replace(":", ""))[::-1]
+
+
+# Pairing Failed's reasons (Core Vol 3 Part H 3.5.5).
+SMP_REASONS = {
+    0x01: "passkey entry failed",
+    0x02: "OOB not available",
+    0x03: "authentication requirements",
+    0x04: "confirm value failed",
+    0x05: "pairing not supported",
+    0x06: "encryption key size",
+    0x07: "command not supported",
+    0x08: "unspecified reason",
+    0x09: "repeated attempts",
+    0x0A: "invalid parameters",
+}
+
+
+class PairingFailed(Exception):
+    """Pairing Failed, from the program or sent to it: its reason."""
+
+    def __init__(self, reason, sent=False):
+        super().__init__(
+            "pairing failed 0x%02x (%s)%s"
+            % (reason, SMP_REASONS.get(reason, "unknown"), ", sent by the phone" if sent else "")
+        )
+        self.reason = reason
+
+
+class EncryptError(Exception):
+    """The phone's encryption did not start: 0x06 (PIN or Key Missing: the program has no such
+    key) or 0x3D (MIC failure: the keys differ, the link is gone)."""
+
+    def __init__(self, status):
+        super().__init__("encryption failed: 0x%02x" % status)
+        self.status = status
+
+
+class Identity:
+    """A phone's identity: its IRK and identity address (random static). rpa() is a new resolvable
+    private address of it, as a phone connects from."""
+
+    def __init__(self, irk=None, address=None):
+        self.irk = irk or os.urandom(16)
+        a = bytearray(address_bytes(address) if address else os.urandom(6))
+        a[5] |= 0xC0
+        self.address = bytes(a)
+
+    def rpa(self):
+        prand = bytearray(os.urandom(3))
+        prand[2] = (prand[2] & 0x3F) | 0x40
+        return smp_ah(self.irk, prand) + bytes(prand)
+
+    def __repr__(self):
+        return "Identity(%s)" % address_text(self.address)
+
+
+class Bond:
+    """What a pairing left the phone: the program's LTK, EDIV, Rand and key size, its IRK and
+    identity address (type and text); the phone's Identity, if it gave one."""
+
+    def __init__(self, key_size):
+        self.key_size = key_size
+        self.ltk, self.ediv, self.rand = None, 0, bytes(8)
+        self.irk, self.identity, self.identity_type = None, None, None
+        self.phone = None
+
+    def __repr__(self):
+        return "Bond(%s, ediv=0x%04x, key=%d)" % (self.identity, self.ediv, self.key_size)
 
 
 # ---- Bluetooth LE: the air around the program, the devices it scans for and connects to ----

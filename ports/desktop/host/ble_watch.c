@@ -5,9 +5,11 @@
 // SPDX-License-Identifier: MIT
 
 // What the port sees of the HCI between _bleio and its controller, the same for the virtual one
-// and a real one: the state (advertising, scanning, the name, the connections) for the API and
-// the panel, a line in the bus trace for what matters (BLE ADV, SCAN, REPORT, CONNECT, ATT,
-// DISCONNECT), and every packet in a btsnoop file with --ble-log, which Wireshark opens.
+// and a real one: the state (advertising, scanning, the name, the connections, their encryption,
+// the bonds) for the API and the panel, a line in the bus trace for what matters (BLE ADV, SCAN,
+// REPORT, CONNECT, ATT, PAIR, LTK, ENCRYPTED, BOND, DISCONNECT), and every packet in a btsnoop
+// file with --ble-log, which Wireshark opens. The trace never shows a key; the btsnoop file has
+// them all, as a real HCI log does.
 
 #include <pthread.h>
 #include <stdio.h>
@@ -16,6 +18,11 @@
 
 #include "ble_host.h"
 #include "bus_trace.h"
+
+#include "common-hal/_bleio/Adapter.h"
+#include "common-hal/_bleio/Connection.h"
+#include "common-hal/_bleio/bonding.h"
+#include "shared-bindings/_bleio/__init__.h"
 
 static pthread_mutex_t _lock = PTHREAD_MUTEX_INITIALIZER;
 static ble_host_state_t _state;
@@ -293,6 +300,84 @@ static void _trace_att(bool to_phone, const uint8_t *pdu, size_t len) {
     }
 }
 
+// Pairing Failed's reasons, as a person reads them.
+static const char *_smp_reason(uint8_t reason) {
+    static const char *const reasons[] = {
+        "", "passkey entry failed", "OOB not available", "authentication requirements",
+        "confirm value failed", "pairing not supported", "encryption key size",
+        "command not supported", "unspecified reason", "repeated attempts", "invalid parameters",
+        "DHKey check failed", "numeric comparison failed", "BR/EDR pairing in progress",
+        "cross-transport key derivation not allowed",
+    };
+    return reason < sizeof(reasons) / sizeof(reasons[0]) ? reasons[reason] : "unknown";
+}
+
+// A Pairing Request or Response's IO capability, Bonding flag and maximum key size.
+static void _smp_features(char *out, size_t cap, const uint8_t *pdu) {
+    static const char *const io[] = { "display", "yes-no", "keyboard", "none", "keyboard-display" };
+    snprintf(out, cap, "io=%s%s%s%s key=%u", pdu[1] < 5 ? io[pdu[1]] : "?",
+        (pdu[3] & 0x03) == 0x01 ? " bond" : "", pdu[3] & 0x04 ? " mitm" : "", pdu[3] & 0x08 ? " sc" : "",
+        pdu[4]);
+}
+
+// An SMP PDU as a trace line: what it is, never the keys or random values it carries.
+static void _trace_smp(bool to_phone, const uint8_t *pdu, size_t len) {
+    if (len == 0 || !bus_trace_on()) {
+        return;
+    }
+    const char *dir = to_phone ? "->" : "<-";
+    char what[64];
+    switch (pdu[0]) {
+        case 0x01:
+        case 0x02:
+            if (len >= 7) {
+                _smp_features(what, sizeof(what), pdu);
+                bus_trace_text("BLE PAIR %s %s %s", dir, pdu[0] == 0x01 ? "REQUEST" : "RESPONSE", what);
+            }
+            break;
+        case 0x03:
+            bus_trace_text("BLE PAIR %s CONFIRM", dir);
+            break;
+        case 0x04:
+            bus_trace_text("BLE PAIR %s RANDOM", dir);
+            break;
+        case 0x05:
+            if (len >= 2) {
+                bus_trace_text("BLE PAIR FAILED 0x%02x %s", pdu[1], _smp_reason(pdu[1]));
+            }
+            break;
+        case 0x06:
+            bus_trace_text("BLE PAIR %s ENCRYPTION_INFORMATION", dir);
+            break;
+        case 0x07:
+            if (len >= 3) {
+                bus_trace_text("BLE PAIR %s CENTRAL_IDENTIFICATION ediv=0x%04x", dir, pdu[1] | pdu[2] << 8);
+            }
+            break;
+        case 0x08:
+            bus_trace_text("BLE PAIR %s IDENTITY_INFORMATION", dir);
+            break;
+        case 0x09:
+            if (len >= 8) {
+                bus_trace_text("BLE PAIR %s IDENTITY_ADDRESS %02x:%02x:%02x:%02x:%02x:%02x", dir,
+                    pdu[7], pdu[6], pdu[5], pdu[4], pdu[3], pdu[2]);
+            }
+            break;
+        case 0x0b:
+            if (len >= 2) {
+                bus_trace_text("BLE PAIR %s SECURITY_REQUEST%s", dir, (pdu[1] & 0x03) == 0x01 ? " bond" : "");
+            }
+            break;
+        default:
+            bus_trace_text("BLE PAIR %s 0x%02x", dir, pdu[0]);
+            break;
+    }
+}
+
+// The last LE Long Term Key Request's EDIV, and whether it was the STK's (EDIV and Rand 0).
+static uint16_t _ltk_ediv;
+static bool _ltk_stk;
+
 static void _command(const uint8_t *h4, size_t len) {
     uint16_t opcode = (uint16_t)(h4[1] | h4[2] << 8);
     const uint8_t *p = h4 + 4;
@@ -379,6 +464,15 @@ static void _command(const uint8_t *h4, size_t len) {
             }
             break;
         }
+        case 0x201a:            // LE Long Term Key Request Reply
+            if (!_ltk_stk) {
+                bus_trace_text("BLE LTK ediv=0x%04x found", _ltk_ediv);
+            }
+            break;
+        case 0x201b:            // LE Long Term Key Request Negative Reply: the peer hears 0x06
+            bus_trace_text("BLE LTK ediv=0x%04x not found", _ltk_ediv);
+            bus_trace_text("BLE ENCRYPT FAILED 0x06 key missing");
+            break;
     }
 }
 
@@ -443,12 +537,76 @@ static void _event(const uint8_t *h4, size_t len) {
         _state.connected = _state.link_count > 0;
         bus_trace_text("BLE DISCONNECT 0x%02x", p[3]);
     } else if ((h4[1] == 0x08 && n >= 4) || (h4[1] == 0x30 && n >= 3)) {
-        // Encryption Change (its on or off), Encryption Key Refresh Complete (on).
-        ble_host_link_t *link = _link((uint16_t)(p[1] | p[2] << 8) & 0x0fff);
+        // Encryption Change (its on or off), Encryption Key Refresh Complete (on). The key's size
+        // is the host's: it set it as it answered the key request, before this event comes (this
+        // runs on the VM thread, as the host's poll reads the event).
+        const uint16_t handle = (uint16_t)(p[1] | p[2] << 8) & 0x0fff;
+        ble_host_link_t *link = _link(handle);
+        bleio_connection_internal_t *connection = bleio_conn_handle_to_connection(handle);
+        if (p[0] != 0) {
+            bus_trace_text("BLE ENCRYPT FAILED 0x%02x", p[0]);
+        } else if (h4[1] == 0x30) {
+            bus_trace_text("BLE ENCRYPTED refresh");
+        } else if (p[3] != 0) {
+            bus_trace_text("BLE ENCRYPTED key=%u", connection != NULL ? connection->key_size : 0);
+        }
         if (link != NULL && p[0] == 0) {
             link->encrypted = h4[1] == 0x30 || p[3] != 0;
+            link->key_size = connection != NULL ? connection->key_size : 0;
+        }
+    } else if (h4[1] == 0x3e && n >= 13 && p[0] == 0x05) {
+        // LE Long Term Key Request: the peer encrypts with the key of this EDIV and Rand.
+        static const uint8_t zero[8] = { 0 };
+        _ltk_ediv = (uint16_t)(p[11] | p[12] << 8);
+        _ltk_stk = _ltk_ediv == 0 && memcmp(p + 3, zero, sizeof(zero)) == 0;
+    }
+}
+
+// The bond store as it was last read or written.
+static bonding_store_t _bonds;
+static bool _have_bonds;
+
+static void _trace_bond(const bonding_record_t *r) {
+    const uint8_t *a = r->peer.a.val;
+    bus_trace_text("BLE BOND saved %s%02x:%02x:%02x:%02x:%02x:%02x",
+        (r->flags & BONDING_PEER_IRK) ? "identity " : "", a[5], a[4], a[3], a[2], a[1], a[0]);
+}
+
+void ble_host_bonds_stored(const uint8_t *blob, size_t len, bool written) {
+    if (len != sizeof(bonding_store_t)) {
+        return;
+    }
+    const bonding_store_t *store = (const bonding_store_t *)blob;
+    pthread_mutex_lock(&_lock);
+    if (written) {
+        // A bond new or made again (its key changed) is saved; one gone is erased.
+        int erased = 0;
+        for (size_t i = 0; i < BONDING_MAX; i++) {
+            const bonding_record_t *was = &_bonds.records[i], *is = &store->records[i];
+            bool had = _have_bonds && (was->flags & BONDING_IN_USE);
+            if ((is->flags & BONDING_IN_USE) && (!had || memcmp(was->ltk, is->ltk, sizeof(is->ltk)) != 0 ||
+                                                 memcmp(&was->peer, &is->peer, sizeof(is->peer)) != 0)) {
+                _trace_bond(is);
+            } else if (had && !(is->flags & BONDING_IN_USE)) {
+                erased++;
+            }
+        }
+        if (erased > 0) {
+            bus_trace_text("BLE BOND erased %d", erased);
         }
     }
+    memcpy(&_bonds, blob, sizeof(_bonds));
+    _have_bonds = true;
+    // The bonds of the controller's identity, as the adapter found it at its last enable.
+    bleio_adapter_obj_t *adapter = &common_hal_bleio_adapter_obj;
+    uint8_t count = 0;
+    for (size_t i = 0; i < BONDING_MAX; i++) {
+        const bonding_record_t *r = &store->records[i];
+        count += (r->flags & BONDING_IN_USE) &&
+            (!adapter->identity_known || memcmp(&r->own, &adapter->identity, sizeof(r->own)) == 0);
+    }
+    _state.bonds = count;
+    pthread_mutex_unlock(&_lock);
 }
 
 void ble_host_packet(bool to_controller, const uint8_t *h4, size_t len) {
@@ -463,6 +621,9 @@ void ble_host_packet(bool to_controller, const uint8_t *h4, size_t len) {
     } else if (h4[0] == 0x02 && len >= 9 && (h4[2] >> 4 & 0x3) != 0x1 && (h4[7] | h4[8] << 8) == 0x0004) {
         // ACL, the first fragment of an L2CAP frame on the ATT channel.
         _trace_att(to_controller, h4 + 9, len - 9);
+    } else if (h4[0] == 0x02 && len >= 9 && (h4[2] >> 4 & 0x3) != 0x1 && (h4[7] | h4[8] << 8) == 0x0006) {
+        // ... on the SMP channel.
+        _trace_smp(to_controller, h4 + 9, len - 9);
     }
     pthread_mutex_unlock(&_lock);
 }

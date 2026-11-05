@@ -39,6 +39,10 @@ typedef int sock_t;
 #include "api_json.h"
 #include "api_ring.h"
 #include "ble_controller.h"
+#include "common-hal/_bleio/Adapter.h"
+#include "common-hal/_bleio/bonding.h"
+#include "common-hal/_bleio/smp_crypto.h"
+#include "shared-bindings/_bleio/__init__.h"
 #include "ble_host.h"
 #include "bus_trace.h"
 #include "desktop_port.h"
@@ -666,6 +670,8 @@ typedef enum {
     VM_STATE,
     VM_PANEL,
     VM_DISPLAY,                 // in: the display's name; out: width, height (16 bits each), RGB565
+    VM_BLE_BONDS,               // in: "1" for the keys too
+    VM_BLE_ERASE,
 } vm_kind_t;
 
 // A request the VM runs: the server thread queues it and waits; whichever of the two is done
@@ -757,6 +763,69 @@ static void _vm_panel(vm_request_t *q) {
 }
 #endif
 
+static void _buf_hex(api_buf_t *b, const uint8_t *data, size_t len);
+
+// ---- the bond store, read and erased on the VM thread, which owns it ----
+
+static void _address_json(api_buf_t *b, const char *key, const bt_addr_le_t *a) {
+    api_buf_printf(b, "\"%s\": \"%02x:%02x:%02x:%02x:%02x:%02x\", \"%s_type\": \"%s\"", key,
+        a->a.val[5], a->a.val[4], a->a.val[3], a->a.val[2], a->a.val[1], a->a.val[0], key,
+        a->type == BT_ADDR_LE_PUBLIC ? "public" : "random");
+}
+
+static void _hex_json(api_buf_t *b, const char *key, const uint8_t *data, size_t n) {
+    api_buf_printf(b, ", \"%s\": \"", key);
+    _buf_hex(b, data, n);
+    api_buf_add(b, "\"", 1);
+}
+
+// Every bond of the store: our identity, the role, the peer's identity, its flags; with keys, the
+// keys too (to decrypt a capture of the air in Wireshark).
+static void _vm_ble_bonds(vm_request_t *q) {
+    const bool keys = q->in != NULL && strcmp(q->in, "1") == 0;
+    bonding_store_t *store = bonding_store();
+    api_buf_t *b = &q->out;
+    api_buf_add(b, "{\"bonds\": [", 11);
+    bool first = true;
+    for (size_t i = 0; i < BONDING_MAX; i++) {
+        const bonding_record_t *r = &store->records[i];
+        if (!(r->flags & BONDING_IN_USE)) {
+            continue;
+        }
+        api_buf_add(b, first ? "{" : ", {", first ? 1 : 3);
+        first = false;
+        _address_json(b, "own", &r->own);
+        api_buf_printf(b, ", \"role\": \"%s\", ", r->role == BONDING_ROLE_PERIPHERAL ? "peripheral" : "central");
+        _address_json(b, "peer", &r->peer);
+        api_buf_printf(b, ", \"irk\": %s, \"authenticated\": %s, \"secure_connections\": %s, "
+            "\"key_size\": %u, \"ediv\": %u, \"use\": %lu, \"cccds\": %u",
+            (r->flags & BONDING_PEER_IRK) ? "true" : "false",
+            (r->flags & BONDING_AUTHENTICATED) ? "true" : "false",
+            (r->flags & BONDING_SC) ? "true" : "false", r->key_size, r->ediv, (unsigned long)r->use,
+            r->cccd_count);
+        if (keys) {
+            _hex_json(b, "ltk", r->ltk, sizeof(r->ltk));
+            _hex_json(b, "rand", r->rand, sizeof(r->rand));
+            if (r->flags & BONDING_PEER_IRK) {
+                _hex_json(b, "peer_irk", r->peer_irk, sizeof(r->peer_irk));
+            }
+        }
+        api_buf_add(b, "}", 1);
+    }
+    api_buf_add(b, "]", 1);
+    if (keys && (store->header.flags & BONDING_HAVE_IRK)) {
+        _hex_json(b, "irk", store->header.irk, sizeof(store->header.irk));
+    }
+    api_buf_add(b, "}", 1);
+}
+
+// erase_bonding(): the bonds of the controller's identity, as the program's call erases them.
+static void _vm_ble_erase(vm_request_t *q) {
+    bleio_adapter_obj_t *adapter = &common_hal_bleio_adapter_obj;
+    size_t n = bonding_erase(adapter->identity_known ? &adapter->identity : NULL);
+    api_buf_printf(&q->out, "{\"erased\": %u}", (unsigned)n);
+}
+
 void control_api_vm_task(void) {
     if (__atomic_load_n(&_queued, __ATOMIC_ACQUIRE) == 0) {
         return;
@@ -770,6 +839,11 @@ void control_api_vm_task(void) {
     for (int i = 0; i < n; i++) {
         vm_request_t *q = work[i];
         q->status = 200;
+        if (q->kind == VM_BLE_BONDS) {
+            _vm_ble_bonds(q);
+        } else if (q->kind == VM_BLE_ERASE) {
+            _vm_ble_erase(q);
+        }
         #if CIRCUITPY_SDL
         if (q->kind == VM_STATE) {
             panel_state_json(&q->out);
@@ -928,14 +1002,20 @@ static void _ble_state(request_t *r) {
         api_buf_add(&b, "\", \"scan_response\": \"", 21);
         _buf_hex(&b, s.scan_response, s.scan_response_len);
         api_buf_add(&b, "\", \"links\": [", 13);
+        const ble_host_link_t *encrypted = NULL;
         for (uint8_t i = 0; i < s.link_count; i++) {
             const ble_host_link_t *l = &s.links[i];
             api_buf_printf(&b, "%s{\"handle\": %u, \"peer\": \"%02x:%02x:%02x:%02x:%02x:%02x\", "
                 "\"role\": \"%s\", \"encrypted\": %s}", i ? ", " : "", l->handle,
                 l->peer[5], l->peer[4], l->peer[3], l->peer[2], l->peer[1], l->peer[0],
                 l->central ? "central" : "peripheral", l->encrypted ? "true" : "false");
+            if (l->encrypted && encrypted == NULL) {
+                encrypted = l;
+            }
         }
-        api_buf_add(&b, "]", 1);
+        // The first encrypted link's, and the bonds of the controller's identity.
+        api_buf_printf(&b, "], \"encrypted\": %s, \"key_size\": %u, \"bonds\": %u",
+            encrypted ? "true" : "false", encrypted ? encrypted->key_size : 0, s.bonds);
     }
     api_buf_add(&b, "}", 1);
     _answer_json(r, 200, &b);
@@ -952,20 +1032,25 @@ static bool _phone(request_t *r) {
     return false;
 }
 
-static void _ble_att_send(request_t *r) {
+#define CID_ATT 0x0004
+#define CID_SMP 0x0006
+
+// A PDU from the phone on channel cid (ATT, SMP), its body in hex.
+static void _ble_pdu_send(request_t *r, uint16_t cid) {
     uint8_t pdu[512];
     int n = r->body == NULL ? -1 : _unhex(r->body, r->body_len, pdu, sizeof(pdu));
     if (n <= 0) {
-        _error(r, 400, "the body is an ATT PDU in hex");
-    } else if (!ble_controller_att_send(pdu, (size_t)n)) {
+        _error(r, 400, cid == CID_SMP ? "the body is an SMP PDU in hex" : "the body is an ATT PDU in hex");
+    } else if (!ble_controller_l2cap_send(cid, pdu, (size_t)n)) {
         _error(r, 409, "no phone is connected");
     } else {
         _ok(r);
     }
 }
 
-// Every PDU the program has sent the phone; with wait=MS, the first one waited for.
-static void _ble_att_take(request_t *r) {
+// Every PDU the program has sent the phone on channel cid (ATT, SMP); with wait=MS, the first one
+// waited for.
+static void _ble_pdu_take(request_t *r, uint16_t cid) {
     long long wait = _param_int(r, "wait", 0);
     wait = wait < 0 ? 0 : wait > WAIT_MAX_MS ? WAIT_MAX_MS : wait;
     api_buf_t b = {0};
@@ -973,7 +1058,7 @@ static void _ble_att_take(request_t *r) {
     uint8_t pdu[512];
     bool first = true;
     for (long long waited = 0;;) {
-        size_t n = ble_controller_att_take(pdu, sizeof(pdu));
+        size_t n = ble_controller_l2cap_take(cid, pdu, sizeof(pdu));
         if (n > 0) {
             api_buf_add(&b, first ? "\"" : ", \"", first ? 1 : 3);
             _buf_hex(&b, pdu, n);
@@ -1008,6 +1093,12 @@ static bool _address(const char *text, uint8_t out[6]) {
 
 static void _buf_address(api_buf_t *b, const char *key, const uint8_t a[6]) {
     api_buf_printf(b, ", \"%s\": \"%02x:%02x:%02x:%02x:%02x:%02x\"", key, a[5], a[4], a[3], a[2], a[1], a[0]);
+}
+
+static bool _body_has(request_t *r, const char *key) {
+    char quoted[32];
+    snprintf(quoted, sizeof(quoted), "\"%s\"", key);
+    return r->body != NULL && strstr(r->body, quoted) != NULL;
 }
 
 // The body's "address" (and "random"), as bytes; false (and 400 answered) when there is none.
@@ -1069,18 +1160,23 @@ static void _ble_peer(request_t *r) {
     }
 }
 
+// {"address", "cid", "data"}: a frame from that peer to the program; without "address", from the
+// phone.
 static void _ble_l2cap(request_t *r) {
     uint8_t address[6];
-    if (!_body_address(r, address, NULL)) {
+    bool peer = _body_has(r, "address");
+    if (peer && !_body_address(r, address, NULL)) {
         return;
     }
     uint8_t data[512];
     double cid = 0;
-    int n = _body_hex(r, "data", data, sizeof(data));
+    int n = r->body == NULL ? -1 : _body_hex(r, "data", data, sizeof(data));
     if (n <= 0 || !_json_field(r->body, "cid", NULL, &cid) || cid < 1 || cid > 0xffff) {
         _error(r, 400, "the body needs \"cid\" and \"data\", an L2CAP frame's payload in hex");
-    } else if (ble_controller_l2cap(address, (uint16_t)cid, data, (size_t)n) != 0) {
+    } else if (peer && ble_controller_l2cap(address, (uint16_t)cid, data, (size_t)n) != 0) {
         _error(r, 409, "no link to that address");
+    } else if (!peer && !ble_controller_l2cap_send((uint16_t)cid, data, (size_t)n)) {
+        _error(r, 409, "no phone is connected");
     } else {
         _ok(r);
     }
@@ -1146,16 +1242,122 @@ static void _ble_events(request_t *r) {
     api_buf_free(&b);
 }
 
+// Bytes given most significant first as the Bluetooth Core prints them, least significant first
+// as SMP takes them.
+static void _le_from(uint8_t *out, const char *hex, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        unsigned v;
+        sscanf(hex + 2 * (n - 1 - i), "%2x", &v);
+        out[i] = (uint8_t)v;
+    }
+}
+
+static void _buf_hex_msb(api_buf_t *b, const uint8_t *le, size_t n) {
+    for (size_t i = n; i > 0; i--) {
+        api_buf_printf(b, "%02x", le[i - 1]);
+    }
+}
+
+// The host's c1, s1 and ah (devices/ble_hci smp_crypto.c) on the sample data of the Bluetooth
+// Core (Vol 3 Part H 2.2.3, 2.2.4 and Appendix D.7): a check of the crypto the pairing uses.
+static void _ble_crypto(request_t *r) {
+    uint8_t k[16] = { 0 }, rnd[16], preq[7], prsp[7], ia[6], ra[6], r1[16], r2[16], irk[16], prand[3];
+    uint8_t c1[16], s1[16], ah[3];
+    _le_from(rnd, "5783D52156AD6F0E6388274EC6702EE0", 16);
+    _le_from(preq, "07071000000101", 7);
+    _le_from(prsp, "05000800000302", 7);
+    _le_from(ia, "A1A2A3A4A5A6", 6);
+    _le_from(ra, "B1B2B3B4B5B6", 6);
+    smp_c1(k, rnd, preq, prsp, 1, ia, 0, ra, c1);
+    _le_from(r1, "000F0E0D0C0B0A091122334455667788", 16);
+    _le_from(r2, "010203040506070899AABBCCDDEEFF00", 16);
+    smp_s1(k, r1, r2, s1);
+    _le_from(irk, "EC0234A357C8AD05341010A60A397D9B", 16);
+    _le_from(prand, "708194", 3);
+    smp_ah(irk, prand, ah);
+    api_buf_t b = {0};
+    api_buf_add(&b, "{\"c1\": \"", 8);
+    _buf_hex_msb(&b, c1, sizeof(c1));
+    api_buf_add(&b, "\", \"s1\": \"", 10);
+    _buf_hex_msb(&b, s1, sizeof(s1));
+    api_buf_add(&b, "\", \"ah\": \"", 10);
+    _buf_hex_msb(&b, ah, sizeof(ah));
+    api_buf_add(&b, "\"}", 2);
+    _answer_json(r, 200, &b);
+    api_buf_free(&b);
+}
+
+// {"ltk": hex, "ediv": n, "rand": hex}: the phone encrypts its link (with "address", that peer
+// its own); the host's answer waited for.
+static void _ble_encrypt(request_t *r) {
+    uint8_t ltk[16], rand[8], address[6];
+    double ediv;
+    char *ltk_hex = NULL, *rand_hex = NULL;
+    bool peer = _body_has(r, "address");
+    if (peer && !_body_address(r, address, NULL)) {
+        return;
+    }
+    bool ok = r->body != NULL && _json_field(r->body, "ltk", &ltk_hex, NULL) &&
+        _json_field(r->body, "rand", &rand_hex, NULL) && _json_field(r->body, "ediv", NULL, &ediv) &&
+        ediv >= 0 && ediv <= 0xffff && _unhex(ltk_hex, strlen(ltk_hex), ltk, sizeof(ltk)) == 16 &&
+        _unhex(rand_hex, strlen(rand_hex), rand, sizeof(rand)) == 8;
+    free(ltk_hex);
+    free(rand_hex);
+    if (!ok) {
+        _error(r, 400, "the body is {\"ltk\": 16 bytes hex, \"ediv\": n, \"rand\": 8 bytes hex}");
+        return;
+    }
+    int link = ble_controller_encrypt(peer ? address : NULL, ltk, (uint16_t)ediv, rand);
+    if (link < 0) {
+        _error(r, 409, peer ? "no link to that address" : "no phone is connected");
+        return;
+    }
+    int status = -1;
+    for (int waited = 0; waited < 5000 && (status = ble_controller_encrypt_result(link)) < 0; waited += 5) {
+        struct timespec t = { 0, 5 * 1000 * 1000 };
+        nanosleep(&t, NULL);
+    }
+    if (status < 0) {
+        _error(r, 503, "the program's host did not answer the key request");
+        return;
+    }
+    api_buf_t b = {0};
+    api_buf_printf(&b, "{\"status\": %d}", status);
+    _answer_json(r, 200, &b);
+    api_buf_free(&b);
+}
+
+// {"address": "aa:bb:cc:dd:ee:ff", "type": "random"}: the phone's address for a connection.
+static bool _phone_address(request_t *r, uint8_t address[6], uint8_t *type) {
+    char *kind = NULL;
+    if (!_body_address(r, address, NULL)) {
+        return false;
+    }
+    bool ok = _json_field(r->body, "type", &kind, NULL) && (strcmp(kind, "random") == 0 || strcmp(kind, "public") == 0);
+    *type = ok && strcmp(kind, "public") == 0 ? 0 : 1;
+    free(kind);
+    if (!ok) {
+        _error(r, 400, "the phone's \"type\" is \"random\" or \"public\"");
+    }
+    return ok;
+}
+
 static void _ble(request_t *r, bool get, bool post) {
     if (strcmp(r->path, "/api/ble") == 0 && get) {
         _ble_state(r);
+    } else if (strcmp(r->path, "/api/ble/crypto") == 0 && get) {
+        _ble_crypto(r);
+    } else if (strcmp(r->path, "/api/ble/bonds") == 0 && get) {
+        _vm_call(r, VM_BLE_BONDS, _param_int(r, "keys", 0) ? "1" : "0");
+    } else if (strcmp(r->path, "/api/ble/bonds/erase") == 0 && post) {
+        _vm_call(r, VM_BLE_ERASE, NULL);
     } else if (strcmp(r->path, "/api/ble/connect") == 0 && post) {
-        uint8_t address[6];
+        uint8_t address[6], type = 1;
         bool random;
         if (!_phone(r)) {
             return;
         }
-        if (r->body != NULL && strstr(r->body, "\"address\"") != NULL) {
+        if (_body_has(r, "address") && !_body_has(r, "type")) {
             // A peer of that address connects, as a central.
             if (!_body_address(r, address, &random)) {
                 return;
@@ -1165,7 +1367,10 @@ static void _ble(request_t *r, bool get, bool post) {
             } else {
                 _ok(r);
             }
-        } else if (ble_controller_connect() != 0) {
+        } else if (_body_has(r, "address") && !_phone_address(r, address, &type)) {
+            return;
+        } else if (ble_controller_connect(_body_has(r, "address") ? address : NULL, type) != 0) {
+            // The phone, from its own address or (with "type") from that one.
             _error(r, 409, "the program advertises nothing connectable, or a phone is connected");
         } else {
             _ok(r);
@@ -1176,7 +1381,7 @@ static void _ble(request_t *r, bool get, bool post) {
             return;
         }
         // 0x13: the remote user ended it, as a phone that leaves does.
-        if (r->body != NULL && strstr(r->body, "\"address\"") != NULL) {
+        if (_body_has(r, "address")) {
             if (!_body_address(r, address, NULL)) {
                 return;
             }
@@ -1203,11 +1408,23 @@ static void _ble(request_t *r, bool get, bool post) {
         }
     } else if (strcmp(r->path, "/api/ble/att") == 0 && post) {
         if (_phone(r)) {
-            _ble_att_send(r);
+            _ble_pdu_send(r, CID_ATT);
         }
     } else if (strcmp(r->path, "/api/ble/att") == 0 && get) {
         if (_phone(r)) {
-            _ble_att_take(r);
+            _ble_pdu_take(r, CID_ATT);
+        }
+    } else if (strcmp(r->path, "/api/ble/smp") == 0 && post) {
+        if (_phone(r)) {
+            _ble_pdu_send(r, CID_SMP);
+        }
+    } else if (strcmp(r->path, "/api/ble/smp") == 0 && get) {
+        if (_phone(r)) {
+            _ble_pdu_take(r, CID_SMP);
+        }
+    } else if (strcmp(r->path, "/api/ble/encrypt") == 0 && post) {
+        if (_phone(r)) {
+            _ble_encrypt(r);
         }
     } else {
         _error(r, 404, "no such endpoint");

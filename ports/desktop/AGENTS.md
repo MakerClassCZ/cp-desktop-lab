@@ -72,7 +72,8 @@ with Board.launch("ports/desktop/build-linux/circuitpython", "/tmp/repro/CIRCUIT
   `cpapi.Air(a, b)` puts two programs on one air (CLUE to CLUE). The trace has `BLE SCAN`,
   `BLE REPORT` and `BLE CONNECT ... central`.
 - `tools/cp_mcp.py` serves the same to an agent over MCP (`ble_scan`, `ble_connect`, ...;
-  `ble_device_add`, `ble_device_notify`, `ble_device_written`, `ble_device_remove` for a central).
+  `ble_device_add`, `ble_device_notify`, `ble_device_written`, `ble_device_remove` for a central;
+  `ble_pair`, `ble_bonds`, `ble_erase_bonds` for pairing).
 
 ## Good evidence for an issue or a PR
 
@@ -93,7 +94,8 @@ with Board.launch("ports/desktop/build-linux/circuitpython", "/tmp/repro/CIRCUIT
 - A board's memory: the heap is 16 MB unless `--ram MB` (`args=["--ram", "1"]`) says less.
 - 64-bit sizes: use the i386 program when `size_t`, pointers or `mp_int_t` may matter.
 - The nRF port's own `_bleio`: BLE here is the HCI host stack the AirLift boards use
-  (`devices/ble_hci`), as a peripheral and as a central, with no pairing, at an MTU of 23.
+  (`devices/ble_hci`), as a peripheral and as a central, at an MTU of 23; it pairs (LE Legacy,
+  Just Works) and bonds as a peripheral only, not as a central (`pair()` there raises).
   Its devices and other labs answer at once: radio timing, lost packets and a distance are
   not there. A bug of a CLUE's SoftDevice code needs the board. The lab's
   adapter comes on at its first use, so a program that sets `adapter.enabled = False` and then
