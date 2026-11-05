@@ -90,7 +90,7 @@ static void _hex(char *out, size_t cap, const uint8_t *data, size_t len) {
 static bool _scan_active;
 
 // What a scan reported, so the trace has each address and data once per scan.
-#define SEEN_COUNT 32
+#define SEEN_COUNT 64
 static struct {
     uint8_t address[6];
     uint32_t hash;

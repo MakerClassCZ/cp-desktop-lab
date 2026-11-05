@@ -420,6 +420,33 @@ check(
     (pb_cccd, packet),
 )
 
+# One service discovered, then another (adafruit_ble's connection[Service] each time): the first
+# keeps its notifications. And a 128-bit service.
+with start() as b, cpapi.Air(b) as air:
+    hrm = air.add(cpapi.devices.heart_rate())
+    uart = air.add(cpapi.devices.uart())
+    ex(b, SETUP)
+    ex(b, connect(hrm.address))
+    ex(
+        b,
+        "m = c.discover_remote_services([_bleio.UUID(0x180D)])[0].characteristics[0]\n"
+        "buf = _bleio.CharacteristicBuffer(m, buffer_size=16)\nm.set_cccd(notify=True)\n"
+        "gap = c.discover_remote_services([_bleio.UUID(0x1800)])\n",
+    )
+    hrm.beat(90)
+    kept = ex(b, "time.sleep(0.2)\nprint('kept', buf.read(buf.in_waiting))")
+    ex(b, "c.disconnect()\ntime.sleep(0.2)")
+    ex(b, connect(uart.address))
+    long_uuid = ex(b, DISCOVER % "")
+check("[15] a second discovery keeps the first's notifications", "kept b'\\x00Z'" in kept, kept)
+check(
+    "[11] a 128-bit service and its characteristics",
+    "service UUID('%s')" % cpapi.NUS_SERVICE in long_uuid
+    and "char UUID('%s') write,write_no_response" % cpapi.NUS_RX in long_uuid
+    and "char UUID('%s') notify ['UUID(0x2902)']" % cpapi.NUS_TX in long_uuid,
+    long_uuid,
+)
+
 # The phone's connection: the phone has no services the program asks for.
 with start() as b:
     ex(b, PHONE_AND_SENSOR)

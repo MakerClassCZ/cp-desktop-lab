@@ -1155,12 +1155,14 @@ class Peripheral:
     # ---- what it does ----
 
     def _send(self, pdu):
+        """pdu to the connected program; False when there is none (or its link just ended)."""
         if self.board is None:
             return False
-        self.air.boards[self.board].request(
-            "POST", "/api/ble/l2cap", {"address": self.address, "cid": 4, "data": pdu.hex()}
+        return self.air._post(
+            self.air.boards[self.board],
+            {"address": self.address, "cid": 4, "data": pdu.hex()},
+            "/api/ble/l2cap",
         )
-        return True
 
     def _value_pdu(self, opcode, c, value):
         c.value = bytes(value)
@@ -1482,7 +1484,10 @@ class Air:
             for e in r["events"]:
                 with self.lock:
                     self.events[i].append(e)
-                    self._event(i, e)
+                    try:
+                        self._event(i, e)
+                    except (ApiError, OSError, http.client.HTTPException):
+                        pass  # a link that ended meanwhile: the next events say so
 
     def _repeat(self):
         while not self._stop.wait(self.repeat):

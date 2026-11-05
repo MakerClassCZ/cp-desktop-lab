@@ -162,7 +162,16 @@ static void _put(const uint8_t *data, size_t len) {
     }
 }
 
+// Room for a whole packet of len bytes: a packet that does not fit is dropped whole, never cut,
+// which would leave the host reading the H4 stream out of step.
+static bool _room(size_t len) {
+    return _out_count + len <= sizeof(_out);
+}
+
 static void _event(uint8_t code, const uint8_t *params, uint8_t len) {
+    if (!_room(3 + (size_t)len)) {
+        return;
+    }
     uint8_t head[3] = { H4_EVENT, code, len };
     _put(head, sizeof(head));
     _put(params, len);
@@ -317,6 +326,9 @@ static void _to_host(int i, uint16_t cid, const uint8_t *data, size_t len) {
     uint8_t frame[4 + PDU_MAX] = { (uint8_t)len, (uint8_t)(len >> 8), cid & 0xff, cid >> 8 };
     memcpy(frame + 4, data, len);
     uint16_t handle = LINK_HANDLE(i);
+    if (!_room(len + 4 + 5 * ((len + 4 + 250) / 251))) {
+        return;                 // the whole frame, or none of it
+    }
     for (size_t at = 0; at < len + 4; at += 251) {
         size_t n = len + 4 - at < 251 ? len + 4 - at : 251;
         uint8_t head[5] = { H4_ACL, handle & 0xff, (handle >> 8) | (at == 0 ? 0x20 : 0x10), (uint8_t)n, (uint8_t)(n >> 8) };
@@ -879,6 +891,11 @@ size_t ble_controller_att_take(uint8_t *pdu, size_t max) {
 int ble_controller_peer(const ble_peer_t *in) {
     pthread_mutex_lock(&_lock);
     peer_t *p = _peer(in->address);
+    if (p == NULL && (in->gone || !in->advertising)) {
+        // Silent or gone, and not in the air: nothing to keep.
+        pthread_mutex_unlock(&_lock);
+        return 0;
+    }
     if (p == NULL) {
         for (int i = 0; i < PEER_COUNT && p == NULL; i++) {
             if (!_peers[i].used) {
