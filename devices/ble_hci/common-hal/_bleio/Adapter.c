@@ -914,11 +914,14 @@ static hci_result_t start_advertising(bleio_adapter_obj_t *self,
         uint8_t full_data[MAX_ADVERTISEMENT_SIZE] = { 0 };
         memcpy(full_data, advertising_data, MIN(sizeof(full_data), advertising_data_len));
         TRY(hci_le_set_advertising_data(advertising_data_len, full_data));
+        // The scan response always, an empty one too: the controller keeps the last one, and an
+        // advertisement without one (the BLE workflow's private one after its discovery) would
+        // answer a scan with the old name.
         memset(full_data, 0, sizeof(full_data));
         if (scan_response_data_len > 0) {
             memcpy(full_data, scan_response_data, MIN(sizeof(full_data), scan_response_data_len));
-            TRY(hci_le_set_scan_response_data(scan_response_data_len, full_data));
         }
+        TRY(hci_le_set_scan_response_data(scan_response_data_len, full_data));
 
         // No duration mechanism is provided for legacy advertising, so we need to do our own.
         self->advertising_timeout_msecs = timeout * 1000;

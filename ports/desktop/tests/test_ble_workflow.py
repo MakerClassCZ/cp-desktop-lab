@@ -449,10 +449,16 @@ def disconnect_mid_write():
         p.disconnect()
         # The phone paired for the transfer: bonded, the workflow advertises privately.
         readvertised = workflow_is(b, "reconnecting")
+        private = (b.ble.scan(), state(b)["scan_response"])
         names = {e.name for e in b.ble.connect().files.listdir("/")}
         open(os.path.join(DRIVE, "code.py"), "w").write('print("edited")\n')
         edited = seen(b, "edited", 6)
     check("a disconnect mid-write: advertising again", readvertised and "code.py" in names, names)
+    check(
+        "... privately: no name left from the discovery's scan response",
+        private[0] is not None and private[0].name is None and private[1] == "",
+        private,
+    )
     check("... and autoreload goes on", edited)
 
 
