@@ -704,7 +704,11 @@ def off_keeps_bonds():
     with launch(READY, keep_bonds=True) as b:
         seen(b, "ready")
         after = [x["role"] for x in b.ble.bonds()]
-    check("--ble-workflow off: a bond kept over two boots", before == after == ["central"], (before, after))
+    check(
+        "--ble-workflow off: a bond kept over two boots",
+        before == after == ["central"],
+        (before, after),
+    )
 
 
 def discover_off():
