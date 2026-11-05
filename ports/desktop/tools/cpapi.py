@@ -898,7 +898,7 @@ class GattCharacteristic:
     """A characteristic of a Peripheral's GATT server: its UUID, its properties by name (as
     Characteristic.names() gives them), its value. error: the ATT error code every read and write
     of it gets (0x02 read not permitted, 0x03 write not permitted, 0x05 insufficient
-    authentication ...)."""
+    authentication ...), or "none": reads of it get no answer at all."""
 
     def __init__(self, u, properties=("read",), value=b"", error=None):
         self.uuid = uuid(u)
@@ -1104,6 +1104,8 @@ class Peripheral:
             offset = struct.unpack("<H", pdu[3:5])[0] if op == 0x0C and len(pdu) >= 5 else 0
             for h, _, v, c in self._attributes():
                 if h == handle:
+                    if c is not None and c.error == "none":
+                        return None  # a device that never answers
                     code = self._refused(c, read=True)
                     if code:
                         return error(code, h)
@@ -1352,6 +1354,7 @@ class Air:
         """A device into the air: every program sees it advertise. Returns it."""
         with self.lock:
             device.air = self
+            device.board, device.advertising = None, True
             self.devices.append(device)
             self._post_device(device)
         return device

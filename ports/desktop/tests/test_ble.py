@@ -467,7 +467,7 @@ except Exception as e:
 """
 with launch(DISCOVER) as b:
     seen(b, "ready")
-    b.request("POST", "/api/ble/connect")
+    b.ble.connect().serve(2)  # the phone answers the program's requests
     ok = seen(b, "discovered ()")
     out = b.console(since=0)["data"][-300:]
 check("discover_remote_services() on the phone's connection", ok, out)
