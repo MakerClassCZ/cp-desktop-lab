@@ -13,6 +13,7 @@
 // and DHKey Check would be states of their own after the Pairing Response.
 
 #include "smp.h"
+#include "supervisor/shared/bluetooth/bluetooth.h"
 
 #include <string.h>
 
@@ -282,7 +283,19 @@ static void _pairing_request(bleio_connection_internal_t *c, const uint8_t *pdu,
         _fail(c, SMP_ERR_UNSPECIFIED);
         return;
     }
-    // Here a port could refuse a pairing (the BLE workflow: only in discovery mode).
+    // The BLE workflow's link (to the supervisor's advertising, not the program's) takes a new
+    // central only in discovery mode, as on a board: outside it the workflow advertises privately
+    // for its bonded centrals, which may pair again. The program's own links pair whenever asked.
+    #if CIRCUITPY_BLE_FILE_SERVICE || CIRCUITPY_BLE_SERIAL_SERVICE
+    if (!c->user_owned && supervisor_bluetooth_workflow_is_enabled() &&
+        !supervisor_bluetooth_discovery_mode()) {
+        const bt_addr_le_t *own = _own_identity();
+        if (own == NULL || bonding_find_peer(own, &c->addr) == NULL) {
+            _fail(c, SMP_ERR_PAIRING_NOT_SUPPORTED);
+            return;
+        }
+    }
+    #endif
     const uint8_t auth = pdu[3], max_key_size = pdu[4];
     if (max_key_size < SMP_MIN_KEY_SIZE) {
         _fail(c, SMP_ERR_ENC_KEY_SIZE);

@@ -20,6 +20,8 @@ void supervisor_stop_bluetooth(void);
 void supervisor_bluetooth_enable_workflow(void);
 void supervisor_bluetooth_disable_workflow(void);
 bool supervisor_bluetooth_workflow_is_enabled(void);
+// This boot is in discovery mode (no bond, or reset with the boot button): a new central may pair.
+bool supervisor_bluetooth_discovery_mode(void);
 
 // Title bar status
 bool supervisor_bluetooth_status_dirty(void);

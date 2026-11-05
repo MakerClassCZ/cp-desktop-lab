@@ -466,3 +466,11 @@ bool supervisor_bluetooth_workflow_is_enabled(void) {
     #endif
     return false;
 }
+
+bool supervisor_bluetooth_discovery_mode(void) {
+    #if BLE_WORKFLOW
+    return boot_in_discovery_mode;
+    #else
+    return false;
+    #endif
+}

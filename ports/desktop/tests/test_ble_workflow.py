@@ -555,6 +555,54 @@ def bonded():
     check("POST /api/ble/discover: reset, bonds erased, discovery", disc and not s2["bonded"], s2)
 
 
+PROGRAM_SECURE = """import _bleio, time
+s = _bleio.Service(_bleio.UUID(0x1240))
+_bleio.Characteristic.add_to_service(s, _bleio.UUID(0x1241), properties=_bleio.Characteristic.READ,
+    read_perm=_bleio.Attribute.ENCRYPT_NO_MITM, max_length=8, initial_value=b"secret")
+_bleio.adapter.start_advertising(bytes([2, 1, 6]), connectable=True)
+print("ready")
+while True:
+    time.sleep(0.1)
+"""
+
+
+def pairing_outside_discovery():
+    # Bonded, so not in discovery mode: the workflow takes no new central, the bonded one comes
+    # back and may pair again; the program's own advertising still pairs anyone, as SMP's does.
+    bond = pair_once()
+    with launch(READY, args=ON, keep_bonds=True) as b:
+        seen(b, "ready")
+        workflow_is(b, "reconnecting")
+        stranger = b.ble.connect(identity=cpapi.Identity(), auto_pair=False)
+        try:
+            stranger.pair()
+            refused_new = None
+        except cpapi.PairingFailed as e:
+            refused_new = e.reason
+        stranger_read = att_code(lambda: stranger.read(cpapi.FT_TRANSFER))
+        stranger.disconnect()
+        workflow_is(b, "reconnecting")
+        p = b.ble.connect(bond=bond)
+        again = p.pair().ltk is not None
+        bonds = state(b)["bonds"]
+    check(
+        "not in discovery: a new central's pairing refused (0x05), the workflow closed to it",
+        refused_new == 0x05 and stranger_read == 0x05,
+        (refused_new, stranger_read),
+    )
+    check("... the bonded central pairs again, still one bond", again and bonds == 1, bonds)
+    with launch(PROGRAM_SECURE, args=ON, keep_bonds=True) as b:
+        seen(b, "ready")
+        p = b.ble.connect(identity=cpapi.Identity())
+        value = p.read(0x1241)
+        bonds = state(b)["bonds"]
+    check(
+        "... the program's own service: a new phone pairs (on 0x05) and reads",
+        value == b"secret" and bonds == 2,
+        (value, bonds),
+    )
+
+
 def discover_option():
     pair_once()
     with launch(READY, args=["--ble-workflow", "discover"], keep_bonds=True) as b:
@@ -644,6 +692,7 @@ for scenario in (
     ble_serial,
     ble_ctrl_c,
     bonded,
+    pairing_outside_discovery,
     discover_option,
     reset_keeps_bond,
     trace_and_panel,
