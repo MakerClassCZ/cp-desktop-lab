@@ -34,14 +34,14 @@ static void _xor(uint8_t out[16], const uint8_t a[16], const uint8_t b[16]) {
     }
 }
 
-void smp_c1(const uint8_t k[16], const uint8_t r[16], const uint8_t preq[7], const uint8_t pres[7],
+void smp_c1(const uint8_t k[16], const uint8_t r[16], const uint8_t preq[7], const uint8_t prsp[7],
     uint8_t iat, const uint8_t ia[6], uint8_t rat, const uint8_t ra[6], uint8_t out[16]) {
-    // p1 = pres || preq || rat || iat, p2 = padding || ia || ra (most significant first).
+    // p1 = prsp || preq || rat || iat, p2 = padding || ia || ra (most significant first).
     uint8_t p1[16], p2[16] = { 0 }, t[16];
     p1[0] = iat;
     p1[1] = rat;
     memcpy(p1 + 2, preq, 7);
-    memcpy(p1 + 9, pres, 7);
+    memcpy(p1 + 9, prsp, 7);
     memcpy(p2, ra, 6);
     memcpy(p2 + 6, ia, 6);
     // c1 = e(k, e(k, r XOR p1) XOR p2)

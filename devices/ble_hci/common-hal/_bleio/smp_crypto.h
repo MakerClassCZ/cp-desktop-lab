@@ -14,9 +14,9 @@
 
 // e(key, data): AES-128.
 void smp_e(const uint8_t key[16], const uint8_t data[16], uint8_t out[16]);
-// The confirm value of a random value r: preq and pres the 7-byte Pairing Request and Response,
+// The confirm value of a random value r: preq and prsp the 7-byte Pairing Request and Response,
 // iat/ia the initiator's address type (0 public, 1 random) and address, rat/ra the responder's.
-void smp_c1(const uint8_t k[16], const uint8_t r[16], const uint8_t preq[7], const uint8_t pres[7],
+void smp_c1(const uint8_t k[16], const uint8_t r[16], const uint8_t preq[7], const uint8_t prsp[7],
     uint8_t iat, const uint8_t ia[6], uint8_t rat, const uint8_t ra[6], uint8_t out[16]);
 // The STK of the responder's r1 and the initiator's r2.
 void smp_s1(const uint8_t k[16], const uint8_t r1[16], const uint8_t r2[16], uint8_t out[16]);

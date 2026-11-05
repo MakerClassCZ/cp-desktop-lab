@@ -74,6 +74,15 @@ hci_result_t hci_le_set_extended_advertising_parameters(uint8_t handle, uint16_t
 hci_result_t hci_le_set_extended_scan_response_data(uint8_t handle, uint8_t op, uint8_t frag_pref, uint8_t len, uint8_t data[]);
 
 hci_result_t hci_le_rand(uint8_t rand[8]);
+hci_result_t hci_le_set_event_mask(uint64_t event_mask);
+hci_result_t hci_read_local_supported_commands(uint8_t commands[64]);
+// The LE Long Term Key Request's answers: the key, or none (the peer then sees PIN or Key Missing).
+hci_result_t hci_le_ltk_request_reply(uint16_t handle, const uint8_t ltk[16]);
+hci_result_t hci_le_ltk_request_negative_reply(uint16_t handle);
+// A central's encryption of a link with a bond's key (LE Start Encryption): the answer is a
+// Command Status, the result an Encryption Change.
+hci_result_t hci_le_start_encryption(uint16_t handle, const uint8_t rand[8], uint16_t ediv,
+    const uint8_t ltk[16]);
 hci_result_t hci_le_set_random_address(uint8_t addr[6]);
 hci_result_t hci_le_set_advertising_set_random_address(uint8_t handle, uint8_t addr[6]);
 hci_result_t hci_vs_read_static_address(bt_addr_t *addr);

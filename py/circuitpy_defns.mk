@@ -661,6 +661,7 @@ SRC_DEVICES_HAL += \
 	_bleio/bonding.c \
 	_bleio/hci.c \
 	_bleio/hci_uart_transport.c \
+	_bleio/smp.c \
 	_bleio/smp_crypto.c \
     _bleio/Adapter.c \
 	_bleio/Attribute.c \

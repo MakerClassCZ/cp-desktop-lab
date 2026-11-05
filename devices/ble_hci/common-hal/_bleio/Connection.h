@@ -15,6 +15,7 @@
 #include "common-hal/_bleio/__init__.h"
 #include "shared-module/_bleio/Address.h"
 #include "common-hal/_bleio/Service.h"
+#include "common-hal/_bleio/smp.h"
 
 typedef enum {
     PAIR_NOT_PAIRED,
@@ -25,7 +26,7 @@ typedef enum {
 // We split the Connection object into two so that the internal mechanics can live outside of the
 // VM. If it were one object, then we'd risk user code seeing a connection object of theirs be
 // reused.
-typedef struct {
+typedef struct _bleio_connection_internal {
     uint16_t conn_handle;
     // Our role on the link: central (we connected) or peripheral (a central connected to us).
     bool is_central;
@@ -37,6 +38,8 @@ typedef struct {
     mp_obj_list_t *remote_service_list;
     // EDIV: Encrypted Diversifier: Identifies LTK during legacy pairing.
     uint16_t ediv;
+    // Pairing and the link's bond (smp.c).
+    smp_conn_t smp;
     volatile pair_status_t pair_status;
     uint8_t sec_status; // Internal security status.
     mp_obj_t connection_obj;

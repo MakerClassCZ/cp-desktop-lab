@@ -85,6 +85,10 @@ typedef struct _bleio_adapter_obj_t {
     // until an enable has read it.
     bt_addr_le_t identity;
     bool identity_known;
+    // The address the last advertising went out from: ours on a link a central makes to it.
+    bt_addr_le_t advertising_address;
+    // Read Local Supported Commands' bitmap (all 0 when the controller did not answer it).
+    uint8_t supported_commands[64];
 } bleio_adapter_obj_t;
 
 uint16_t bleio_adapter_add_attribute(bleio_adapter_obj_t *adapter, mp_obj_t *attribute);
