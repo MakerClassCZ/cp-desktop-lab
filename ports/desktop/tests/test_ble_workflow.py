@@ -566,6 +566,31 @@ while True:
 """
 
 
+TICKS = 'import time\nprint("ready")\nwhile True:\n    print("tick")\n    time.sleep(0.2)\n'
+
+
+def bonded_subscription():
+    # The serial service's CCCD (the workflow's, in the table's static part) is in the bond: the
+    # bonded phone that comes back gets code.py's output without subscribing again.
+    with launch(TICKS, args=ON) as b:
+        seen(b, "ready")
+        p = b.ble.connect(pair=True)
+        bond = p.bond
+        first = p.console.read(1)
+        p.disconnect()  # the phone leaves: the bond takes its subscriptions
+        workflow_is(b, "reconnecting")
+    with launch(TICKS, args=ON, keep_bonds=True) as b:
+        seen(b, "ready")
+        p = b.ble.connect(bond=bond)
+        p.characteristic(cpapi.SERIAL_TX).subscribed = True  # not written again
+        again = p.console.read(2)
+    check(
+        "a bonded phone's serial subscription comes back with its bond",
+        "tick" in first and "tick" in again,
+        (first[-40:], again[-40:]),
+    )
+
+
 def pairing_outside_discovery():
     # Bonded, so not in discovery mode: the workflow takes no new central, the bonded one comes
     # back and may pair again; the program's own advertising still pairs anyone, as SMP's does.
@@ -716,6 +741,7 @@ for scenario in (
     ble_ctrl_c,
     bonded,
     pairing_outside_discovery,
+    bonded_subscription,
     discover_option,
     reset_keeps_bond,
     trace_and_panel,

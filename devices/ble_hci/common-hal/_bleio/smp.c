@@ -202,11 +202,14 @@ static void _snapshot_cccds(bonding_record_t *record) {
     }
 }
 
-static void _set_cccd(uint16_t handle, uint16_t value) {
+// A CCCD of the link's put back, as the peer wrote it: a PacketBuffer's notifications (the BLE
+// workflow's serial) go to the peer that wrote its CCCD, so to this link.
+static void _set_cccd(bleio_connection_internal_t *c, uint16_t handle, uint16_t value) {
     bleio_descriptor_obj_t *d = _cccd_at(handle);
     if (d != NULL) {
         mp_buffer_info_t buf = { .buf = &value, .len = sizeof(value) };
         common_hal_bleio_descriptor_set_value(d, &buf);
+        bleio_characteristic_peer(d->characteristic, c->conn_handle);
     }
 }
 
@@ -221,7 +224,7 @@ static void _restore_cccds(bleio_connection_internal_t *c, bonding_record_t *rec
     const uint32_t hash = _gatt_hash();
     if (record->gatt_hash == hash) {
         for (uint8_t i = 0; i < record->cccd_count && i < BONDING_CCCD_MAX; i++) {
-            _set_cccd(record->cccds[i].handle, record->cccds[i].value);
+            _set_cccd(c, record->cccds[i].handle, record->cccds[i].value);
         }
         return;
     }
@@ -236,7 +239,7 @@ static void _restore_cccds(bleio_connection_internal_t *c, bonding_record_t *rec
     record->cccd_count = 0;
     record->gatt_hash = hash;
     if (sc_value != 0) {
-        _set_cccd(sc_cccd, sc_value);
+        _set_cccd(c, sc_cccd, sc_value);
         record->cccds[0].handle = sc_cccd;
         record->cccds[0].value = sc_value;
         record->cccd_count = 1;
