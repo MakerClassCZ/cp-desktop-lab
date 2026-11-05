@@ -4,7 +4,8 @@ with Board.launch("circuitpython", "CIRCUITPY") as b:
     b.wait("Hello")
     print(b.state())
 
-From the command line, one run of a script: python3 cpapi.py run PROGRAM CODE (run --help).
+From the command line, one run of a script: python3 cpapi.py run PROGRAM CODE (run --help);
+programs started by hand on one Bluetooth air: python3 cpapi.py air PORT PORT... (air --help).
 """
 
 import http.client
@@ -1622,8 +1623,57 @@ def run(argv):
     return status
 
 
+def air(argv):
+    """cpapi.py air PORT PORT...: the programs started by hand with --api PORT (and the same
+    CIRCUITPY_API_TOKEN in the environment) on one air, until Ctrl-C: what one advertises the
+    others see, and one connects to another (CLUE to CLUE)."""
+    import argparse
+
+    ap = argparse.ArgumentParser(prog="cpapi.py air", description=air.__doc__)
+    ap.add_argument("ports", nargs="+", type=int)
+    ap.add_argument("--host", default="127.0.0.1")
+    try:
+        a = ap.parse_args(argv)
+    except SystemExit as e:
+        return 64 if e.code else 0
+    token = os.environ.get("CIRCUITPY_API_TOKEN")
+    if not token:
+        print("cpapi.py air: set CIRCUITPY_API_TOKEN, as for the programs", file=sys.stderr)
+        return 64
+    boards = [Board.attach("http://%s:%d/" % (a.host, port), token) for port in a.ports]
+    for b in boards:
+        try:
+            b.info()
+        except (ApiError, OSError, http.client.HTTPException) as e:
+            print("cpapi.py air: no program at %s: %s" % (b.url, e), file=sys.stderr)
+            return 1
+    with Air(*boards) as relay:
+        print("on one air: %s (Ctrl-C ends it)" % ", ".join(b.url for b in boards))
+        try:
+            seen = [0] * len(boards)
+            while True:
+                time.sleep(0.5)
+                with relay.lock:
+                    for i, events in enumerate(relay.events):
+                        for e in events[seen[i] :]:
+                            if e["kind"] in ("connected", "disconnected"):
+                                print(
+                                    "%s %s %s %s"
+                                    % (boards[i].url, e["kind"], e["role"], e["peer"])
+                                )
+                        seen[i] = len(events)
+        except KeyboardInterrupt:
+            pass
+    return 0
+
+
 if __name__ == "__main__":
-    if sys.argv[1:2] != ["run"]:
-        print("usage: python cpapi.py run PROGRAM CODE [options]  (run --help)", file=sys.stderr)
+    commands = {"run": run, "air": air}
+    if sys.argv[1:2] == [] or sys.argv[1] not in commands:
+        print(
+            "usage: python cpapi.py run PROGRAM CODE [options]  (run --help)\n"
+            "       python cpapi.py air PORT PORT...  (air --help)",
+            file=sys.stderr,
+        )
         sys.exit(64)
-    sys.exit(run(sys.argv[2:]))
+    sys.exit(commands[sys.argv[1]](sys.argv[2:]))

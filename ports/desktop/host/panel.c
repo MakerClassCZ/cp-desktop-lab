@@ -229,17 +229,30 @@ static bool _ble_row(void) {
     return strcmp(ble_host_controller(), "off") != 0 && common_hal_bleio_adapter_obj.enabled;
 }
 
-// "advertising", "connected" or "on"; "off" with no adapter on.
+// "advertising", "scanning", "connected" or "on"; "off" with no adapter on.
 static const char *_ble_status(ble_host_state_t *s) {
     ble_host_state(s);
-    return !_ble_row() ? "off" : s->connected ? "connected" : s->advertising ? "advertising" : "on";
+    return !_ble_row() ? "off" : s->connected ? "connected" : s->advertising ? "advertising"
+           : s->scanning ? "scanning" : "on";
+}
+
+// Whether the program is the central of one of its connections.
+static bool _ble_central(const ble_host_state_t *s) {
+    for (uint8_t i = 0; i < s->link_count; i++) {
+        if (s->links[i].central) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static void _draw_ble(int y) {
     ble_host_state_t s;
     const char *status = _ble_status(&s);
     char value[64];
-    if (s.advertising) {
+    if (s.connected && _ble_central(&s)) {
+        snprintf(value, sizeof(value), "connected to %s", s.central_name);
+    } else if (s.advertising) {
         snprintf(value, sizeof(value), "%s \"%s\"", status, s.name);
     } else {
         snprintf(value, sizeof(value), "%s", status);
@@ -764,6 +777,11 @@ void panel_state_json(api_buf_t *b) {
     const char *ble_status = _ble_status(&ble);
     api_buf_printf(b, "\"ble\": {\"state\": \"%s\", \"name\": ", ble_status);
     api_buf_json_string(b, ble.name, strlen(ble.name));
+    if (ble.connected && _ble_central(&ble)) {
+        // The peer the program connected to, as the row shows it: "connected to HRM".
+        api_buf_add(b, ", \"central_to\": ", 16);
+        api_buf_json_string(b, ble.central_name, strlen(ble.central_name));
+    }
     api_buf_add(b, "}, ", 3);
     api_buf_add(b, "\"parts\": [", 10);
     for (int i = 0; i < parts_count(); i++) {

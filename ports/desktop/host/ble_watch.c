@@ -338,6 +338,28 @@ static void _command(const uint8_t *h4, size_t len) {
                 *(opcode == 0x2008 ? &_state.data_len : &_state.scan_response_len) = p[0];
             }
             break;
+        // The extended commands of a controller with extended advertising, for advertising set 0
+        // with legacy PDUs, as ble_hci sends them.
+        case 0x2035:            // LE Set Advertising Set Random Address
+            if (n >= 7) {
+                memcpy(_random_address, p + 1, 6);
+            }
+            break;
+        case 0x2036:            // LE Set Extended Advertising Parameters: properties, own address type
+            if (n >= 11) {
+                uint16_t props = (uint16_t)(p[1] | p[2] << 8);
+                _adv_type = props & 0x01 ? (props & 0x04 ? 0x01 : 0x00) : props & 0x02 ? 0x02 : 0x03;
+                _own_address_type = p[10];
+            }
+            break;
+        case 0x2037:            // LE Set Extended Advertising Data
+        case 0x2038:            // LE Set Extended Scan Response Data
+            if (n >= 4 && p[3] <= 31 && 4u + p[3] <= n) {
+                memcpy(opcode == 0x2037 ? _state.data : _state.scan_response, p + 4, p[3]);
+                *(opcode == 0x2037 ? &_state.data_len : &_state.scan_response_len) = p[3];
+            }
+            break;
+        case 0x2039:            // LE Set Extended Advertising Enable
         case 0x200a: {          // LE Set Advertising Enable
             _state.advertising = n >= 1 && p[0] != 0;
             _state.connectable = _adv_type == 0x00 || _adv_type == 0x01;

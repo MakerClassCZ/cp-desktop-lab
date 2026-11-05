@@ -643,24 +643,33 @@ CLIENT_RADIO = UART_CLIENT
 
 radio = lib_files("adafruit_ble") is not None
 files = lib_files("adafruit_ble") if radio else None
-with start("CLUEA", ECHO_RADIO if radio else ECHO_RAW, files=files) as A, start("CLUEB", files=files) as B:
+with (
+    start("CLUEA", ECHO_RADIO if radio else ECHO_RAW, files=files) as A,
+    start("CLUEB", files=files) as B,
+):
     A.wait("ready", timeout=15)
     with cpapi.Air(A, B):
         out = ex(B, CLIENT_RADIO if radio else CLIENT_RAW, timeout=30)
         a_connected = seen(A, "connected", 5)
         left = ex(
-            B, "import _bleio\nfor x in _bleio.adapter.connections:\n    x.disconnect()\nprint('left')"
+            B,
+            "import _bleio\nfor x in _bleio.adapter.connections:\n    x.disconnect()\nprint('left')",
         )
         a_disconnected = seen(A, "disconnected", 5)
     trace_a, trace_b = A.trace(since=0)["data"], B.trace(since=0)["data"]
     address_a = A.request("GET", "/api/ble")["address"]
     console_a = A.console(since=0)["data"]
 check(
-    "[17] CLUE to CLUE: B scans, connects, writes hello, reads it back%s" % (" (adafruit_ble)" if radio else " (_bleio)"),
+    "[17] CLUE to CLUE: B scans, connects, writes hello, reads it back%s"
+    % (" (adafruit_ble)" if radio else " (_bleio)"),
     "echo b'hello'" in out,
     out,
 )
-check("[17] A sees the connection come and go", a_connected and a_disconnected, (left, console_a[-300:]))
+check(
+    "[17] A sees the connection come and go",
+    a_connected and a_disconnected,
+    (left, console_a[-300:]),
+)
 connects_a = [x for x in trace_a.splitlines() if "BLE CONNECT " in x]
 check(
     "[17] the traces: B central to A, A the peripheral",
@@ -671,7 +680,10 @@ check(
 )
 
 # Two scanners, one advertiser: three labs on one air.
-ADVERTISE = SETUP + "a.start_advertising(bytes([2, 1, 6, 5, 9]) + b'Lamp', connectable=True)\nprint('ready')\nwhile True:\n    time.sleep(0.1)\n"
+ADVERTISE = (
+    SETUP
+    + "a.start_advertising(bytes([2, 1, 6, 5, 9]) + b'Lamp', connectable=True)\nprint('ready')\nwhile True:\n    time.sleep(0.1)\n"
+)
 with start("LABA", ADVERTISE) as A, start("LABB") as B, start("LABC") as Cc:
     A.wait("ready", timeout=15)
     address_a = A.request("GET", "/api/ble")["address"]
@@ -699,7 +711,9 @@ print("connected", c.connected, gc.mem_free())
 while True:
     time.sleep(0.1)
 """
-with cpapi.Board.launch(BIN, drive(RELOADED % "c7:00:00:00:00:01".replace(":", ""), None, "RELOAD"), env=HEADLESS) as b:
+with cpapi.Board.launch(
+    BIN, drive(RELOADED % "c7:00:00:00:00:01".replace(":", ""), None, "RELOAD"), env=HEADLESS
+) as b:
     with cpapi.Air(b) as air:
         hrm = air.add(cpapi.devices.heart_rate(address="c7:00:00:00:00:01"))
         runs = []
@@ -708,7 +722,9 @@ with cpapi.Board.launch(BIN, drive(RELOADED % "c7:00:00:00:00:01".replace(":", "
             seen(b, "\n", 2)
             line = b.console(since=0)["data"].split("connected ")[-1].split()
             linked = hrm.wait_connected(True)
-            runs.append((line[0] if line else None, int(line[1]) if len(line) > 1 else None, linked))
+            runs.append(
+                (line[0] if line else None, int(line[1]) if len(line) > 1 else None, linked)
+            )
             if i < 5:
                 b.reload()
                 runs[-1] += (hrm.wait_connected(False),)
@@ -718,6 +734,226 @@ check(
     runs,
 )
 frees = [r[1] for r in runs[1:] if r[1] is not None]
-check("[20] memory within 1 KB over the runs", len(frees) == 5 and max(frees) - min(frees) <= 1024, frees)
+check(
+    "[20] memory within 1 KB over the runs",
+    len(frees) == 5 and max(frees) - min(frees) <= 1024,
+    frees,
+)
+
+# ---- a controller with extended advertising (Zephyr's on an nRF52840) ----
+
+EXTENDED = {"CIRCUITPY_BLE_VIRTUAL_FAULT": "extended"}
+EXTENDED_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "extended.btsnoop")
+with start(env=EXTENDED, args=["--ble-log", EXTENDED_LOG]) as b, cpapi.Air(b) as air:
+    air.add(cpapi.devices.beacon(IBEACON, rssi=-60, address="c1:22:33:44:55:66"))
+    hrm = air.add(cpapi.devices.heart_rate(address="c5:11:22:33:44:55"))
+    ex(b, SETUP)
+    got = entries(ex(b, SCAN % "timeout=0.5"))
+    first = ex(b, connect(hrm.address))
+    found = ex(b, DISCOVER % "")
+    ex(b, "c.disconnect()\ntime.sleep(0.2)")
+    ex(b, "a.start_advertising(bytes([2, 1, 6, 4, 9]) + b'Ext', connectable=True)")
+    state = b.request("GET", "/api/ble")
+    phone = b.ble.connect()
+    name = phone.read(0x2A00)
+    trace = b.trace(since=0)["data"]
+check(
+    "[23] extended: the scan (1)",
+    ("c1:22:33:44:55:66", 1, -60, False, False, IBEACON.hex()) in got,
+    got,
+)
+check(
+    "[23] extended: a connection (6)",
+    first.startswith("connected True 1") and "BLE CONNECT c5:11:22:33:44:55 central" in trace,
+    (first, trace[-400:]),
+)
+check(
+    "[23] extended: discovery (11)",
+    "service UUID(0x180d)" in found and "discovered 3" in found,
+    found,
+)
+log = open(EXTENDED_LOG, "rb").read()
+# H4 commands: 01, the opcode (little-endian); the LE meta event of an Enhanced Connection Complete.
+EXTENDED_HCI = (b"\x01\x41\x20", b"\x01\x42\x20", b"\x01\x43\x20", b"\x04\x3e\x1f\x0a")
+check(
+    "[23] extended: the extended commands and events, no legacy ones",
+    all(x in log for x in EXTENDED_HCI)
+    and b"\x01\x0c\x20" not in log
+    and b"\x01\x0d\x20" not in log,
+    len(log),
+)
+check(
+    "[23] extended: advertising, and the phone's connection",
+    state["advertising"] and "Ext" in state["name"] and name.startswith(b"CIRCUITPY"),
+    (state, name),
+)
+
+# ---- MCP: an agent tests a central program ----
+
+SERVER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "cp_mcp.py")
+
+
+class Mcp:
+    """cp_mcp.py over pipes, one request at a time."""
+
+    def __init__(self):
+        import subprocess, sys
+
+        self.p = subprocess.Popen(
+            [sys.executable, SERVER, "--program", BIN],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+        )
+        self.n = 0
+        self.request("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}})
+
+    def request(self, method, params):
+        import json
+
+        self.n += 1
+        self.p.stdin.write(
+            json.dumps(
+                {"jsonrpc": "2.0", "id": self.n, "method": method, "params": params}
+            ).encode()
+            + b"\n"
+        )
+        self.p.stdin.flush()
+        return json.loads(self.p.stdout.readline())
+
+    def call(self, tool, **arguments):
+        r = self.request("tools/call", {"name": tool, "arguments": arguments}).get("result", {})
+        return "".join(c.get("text", "") for c in r.get("content", [])), bool(r.get("isError"))
+
+    def close(self):
+        self.call("stop")
+        self.p.stdin.close()
+        self.p.wait(10)
+
+
+m = Mcp()
+try:
+    tools = [t["name"] for t in m.request("tools/list", {})["result"]["tools"]]
+    m.call("launch", drive=drive(IDLE, None, "MCPBLE"))
+    added, _ = m.call("ble_device_add", kind="heart_rate", address="c8:00:00:00:00:01", bpm=70)
+    m.call("ble_device_add", kind="uart", address="c8:00:00:00:00:02")
+    m.call("exec", code=SETUP, interrupt=True)
+    out, _ = m.call(
+        "exec",
+        code=connect("c8:00:00:00:00:02")
+        + DISCOVER % ""
+        + "ch = {x.uuid: x for s in services for x in s.characteristics}\nU = _bleio.UUID\nrx = ch[U(%r)]\ntx = ch[U(%r)]\nbuf = _bleio.CharacteristicBuffer(tx, buffer_size=64)\ntx.set_cccd(notify=True)\nrx.value = b'ping'\n"
+        % (cpapi.NUS_RX, cpapi.NUS_TX),
+    )
+    written, _ = m.call("ble_device_written", address="c8:00:00:00:00:02", timeout=3)
+    sent, _ = m.call("ble_device_notify", address="c8:00:00:00:00:02", text="pong")
+    echoed, _ = m.call("exec", code="time.sleep(0.2)\nprint('got', buf.read(buf.in_waiting))")
+    removed, _ = m.call("ble_device_remove", address="c8:00:00:00:00:02")
+    after, _ = m.call("exec", code="time.sleep(0.2)\nprint('after', c.connected)")
+    unknown, unknown_error = m.call("ble_device_notify", address="c8:00:00:00:00:09", bpm=1)
+finally:
+    m.close()
+check(
+    "MCP: the ble_device_ tools are there",
+    all("ble_device_" + t in tools for t in ("add", "notify", "written", "remove")),
+    tools,
+)
+check("MCP: ble_device_add says where the device is", "c8:00:00:00:00:01" in added, added)
+check("MCP: the program connects to the device", "connected True" in out, out)
+check("MCP: ble_device_written has what the program wrote", "ping" in written, written)
+check(
+    "MCP: ble_device_notify reaches the program",
+    sent == "sent" and "got b'pong'" in echoed,
+    (sent, echoed),
+)
+check(
+    "MCP: ble_device_remove ends the connection",
+    "removed" in removed and "after False" in after,
+    (removed, after),
+)
+check("MCP: an unknown device is an error", unknown_error and "no device" in unknown, unknown)
+
+# ---- the panel row ----
+
+with start() as b, cpapi.Air(b) as air:
+    hrm = air.add(cpapi.devices.heart_rate(name="Strap"))
+    ex(b, SETUP)
+    ex(b, "results = a.start_scan()")
+    scan_row = b.state().get("ble")
+    ex(b, "a.stop_scan()")
+    ex(b, connect(hrm.address))
+    central_row = b.state().get("ble")
+check("the panel row: scanning", scan_row and scan_row.get("state") == "scanning", scan_row)
+check(
+    "the panel row: connected to the device a scan named",
+    central_row
+    and central_row.get("state") == "connected"
+    and central_row.get("central_to") == "Strap",
+    central_row,
+)
+
+# ---- cpapi.py air: two labs started by hand, on one air ----
+
+import socket, subprocess, sys  # noqa: E402
+
+TOKEN = "0123456789abcdef0123456789abcdef"
+
+
+def free_port():
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+ports = [free_port(), free_port()]
+env = dict(HEADLESS, CIRCUITPY_API_TOKEN=TOKEN)
+labs = [
+    subprocess.Popen(
+        [BIN, "--drive", drive(code, None, name), "--api", str(port)],
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    for code, name, port in ((ADVERTISE, "HANDA", ports[0]), (IDLE, "HANDB", ports[1]))
+]
+CPAPI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "cpapi.py")
+relay = None
+try:
+    A, B = (cpapi.Board.attach("http://127.0.0.1:%d/" % p, TOKEN) for p in ports)
+    A.wait("ready", timeout=15)
+    B.wait("idle", timeout=15)
+    relay = subprocess.Popen(
+        [sys.executable, CPAPI, "air"] + [str(p) for p in ports],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    time.sleep(1)
+    address_a = A.request("GET", "/api/ble")["address"]
+    ex(B, SETUP)
+    by_hand = ex(B, connect(address_a, random=False))
+    no_token = subprocess.run(
+        [sys.executable, CPAPI, "air", str(ports[0])],
+        env=dict(HEADLESS),
+        capture_output=True,
+        timeout=20,
+    )
+finally:
+    if relay is not None:
+        relay.terminate()
+        relay.wait(10)
+    for p in labs:
+        p.kill()
+        p.wait()
+check(
+    "cpapi.py air: B connects to A, both started by hand",
+    by_hand.startswith("connected True"),
+    by_hand,
+)
+check("cpapi.py air without the token: 64", no_token.returncode == 64, no_token)
 
 print("DONE")

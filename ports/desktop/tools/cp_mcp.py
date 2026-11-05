@@ -207,6 +207,52 @@ TOOLS = [
         _schema({"uuid": STRING, "timeout": SECONDS}, ["uuid"]),
     ),
     ("ble_disconnect", "The phone leaves: the program sees the disconnect.", _schema()),
+    (
+        "ble_device_add",
+        "Put a device in the air around the program (the virtual controller), for a program "
+        "that scans and connects as a central: heart_rate (a heart rate sensor: 0x180D, "
+        "measurement notified, body sensor location), uart (a Nordic UART device), beacon (raw "
+        "advertising data, not connectable). Returns its address, which the other ble_device_ "
+        "tools take.",
+        _schema(
+            {
+                "kind": {"type": "string", "enum": ["heart_rate", "uart", "beacon"]},
+                "name": dict(STRING, description="its advertised name"),
+                "bpm": {"type": "integer", "description": "heart_rate: the first measurement"},
+                "data": dict(STRING, description="beacon: its advertising data, hex"),
+                "rssi": {"type": "integer", "description": "the signal the program sees, dBm"},
+                "address": dict(STRING, description="aa:bb:cc:dd:ee:ff; default a new one"),
+            },
+            ["kind"],
+        ),
+    ),
+    (
+        "ble_device_notify",
+        "A device sends to the connected program: heart_rate a measurement of bpm, uart the "
+        "text, any other a characteristic's new value (uuid and hex). Notifications go out "
+        "only when the program has turned them on.",
+        _schema(
+            {
+                "address": STRING,
+                "bpm": {"type": "integer"},
+                "text": STRING,
+                "uuid": STRING,
+                "hex": STRING,
+            },
+            ["address"],
+        ),
+    ),
+    (
+        "ble_device_written",
+        "What the program wrote to a device since the last call: uart the text it got, any "
+        "other a characteristic's values (uuid), waiting up to timeout for the first.",
+        _schema({"address": STRING, "uuid": STRING, "timeout": SECONDS}, ["address"]),
+    ),
+    (
+        "ble_device_remove",
+        "Take a device out of the air: the program no longer sees it, and its connection ends.",
+        _schema({"address": STRING}, ["address"]),
+    ),
 ]
 
 
@@ -227,6 +273,8 @@ class Server:
         self.program = program
         self.board = None
         self.peer = None  # ble_connect's phone
+        self.air = None  # the devices around the program: a cpapi.Air
+        self.devices = {}  # their address: the device and its kind
         self.drive = None  # the drive's path on this computer
 
     # ---- the board ----
@@ -274,11 +322,18 @@ class Server:
             raise ToolError("the program does not answer: %s" % e)
 
     def close(self):
+        self._close_air()
         if self.launched:
             self.board.close()
         self.board = None
         self.peer = None
         self.drive = None
+
+    def _close_air(self):
+        if self.air is not None:
+            self.air.close()
+        self.air = None
+        self.devices = {}
 
     # ---- tools ----
 
@@ -576,6 +631,75 @@ class Server:
         self._api(self._need().request, "POST", "/api/ble/disconnect")
         self.peer = None
         return "disconnected"
+
+    # ---- Bluetooth LE: devices around the program ----
+
+    def _device(self, address):
+        d = self.devices.get((address or "").lower())
+        if d is None:
+            raise ToolError("no device %s: ble_device_add first" % address)
+        return d
+
+    def t_ble_device_add(self, kind, name=None, bpm=72, data=None, rssi=-60, address=None):
+        board = self._need()
+        if self.air is not None and self.air.boards[0] is not board:
+            self._close_air()
+        kw = {"rssi": rssi}
+        if address:
+            kw["address"] = address
+        if kind == "heart_rate":
+            d = cpapi.devices.heart_rate(bpm, name or "HRM", **kw)
+        elif kind == "uart":
+            d = cpapi.devices.uart(name or "UART", **kw)
+        elif kind == "beacon":
+            if not data:
+                raise ToolError("a beacon needs data: its advertising bytes in hex")
+            d = cpapi.devices.beacon(bytes.fromhex(data), **kw)
+        else:
+            raise ToolError("kind is heart_rate, uart or beacon")
+        if self.air is None:
+            self.air = cpapi.Air(board)
+        d.kind = kind
+        self._api(self.air.add, d)
+        self.devices[d.address] = d
+        return "%s %s advertising at %s" % (kind, json.dumps(d.name), d.address)
+
+    def t_ble_device_notify(self, address, bpm=None, text=None, uuid=None, hex=None):
+        d = self._device(address)
+        if bpm is not None and d.kind == "heart_rate":
+            sent = self._api(d.beat, int(bpm))
+        elif text is not None and d.kind == "uart":
+            sent = self._api(d.send, text)
+        elif uuid is not None and (hex is not None or text is not None):
+            value = bytes.fromhex(hex) if hex is not None else text.encode()
+            try:
+                sent = self._api(d.notify, uuid, value)
+            except KeyError as e:
+                raise ToolError(str(e))
+        else:
+            raise ToolError("give bpm (heart_rate), text (uart), or uuid and hex")
+        if not d.connected:
+            return "not connected: the value is set, nothing was sent"
+        return "sent" if sent else "not sent: the program has not turned notifications on"
+
+    def t_ble_device_written(self, address, uuid=None, timeout=0):
+        d = self._device(address)
+        wait = clamp_wait(timeout, 0)
+        if d.kind == "uart" and uuid is None:
+            return self._api(d.received, wait) or "nothing written"
+        if uuid is None:
+            raise ToolError("give the characteristic's uuid")
+        try:
+            values = self._api(d.wait_written, uuid, wait) if wait else self._api(d.written, uuid)
+        except KeyError as e:
+            raise ToolError(str(e))
+        return "\n".join(self._value(v) for v in values) or "nothing written"
+
+    def t_ble_device_remove(self, address):
+        d = self._device(address)
+        self._api(self.air.remove, d)
+        del self.devices[d.address]
+        return "removed"
 
     def call(self, name, arguments):
         """A tools/call result."""

@@ -647,6 +647,78 @@ static void _command(uint16_t opcode, const uint8_t *p, uint8_t len) {
             _link_close(i, ERR_LOCAL_HOST, true);
             break;
         }
+        case 0x2035:            // LE Set Advertising Set Random Address: one set, handle 0
+            if (!_extended) {
+                _refuse(opcode, ERR_UNKNOWN_COMMAND);
+            } else {
+                if (len >= 7) {
+                    memcpy(_random_address, p + 1, 6);
+                }
+                _ok(opcode);
+            }
+            break;
+        case 0x2036:            // LE Set Extended Advertising Parameters: legacy PDUs, as ble_hci sends
+            if (!_extended) {
+                _refuse(opcode, ERR_UNKNOWN_COMMAND);
+            } else {
+                if (len >= 11) {
+                    uint16_t props = (uint16_t)(p[1] | p[2] << 8);
+                    _adv_type = props & 0x01 ? (props & 0x04 ? ADV_DIRECT_IND : ADV_IND)
+                        : props & 0x02 ? ADV_SCAN_IND : ADV_NONCONN_IND;
+                    _own_address_type = p[10];
+                }
+                ret[1] = 0;     // the TX power chosen: 0 dBm
+                _complete(opcode, ret, 2);
+            }
+            break;
+        case 0x2037:            // LE Set Extended Advertising Data
+        case 0x2038:            // LE Set Extended Scan Response Data
+            if (!_extended) {
+                _refuse(opcode, ERR_UNKNOWN_COMMAND);
+            } else {
+                // Handle, operation, fragment preference, length, data: 31 bytes, legacy PDUs.
+                if (len >= 4 && p[3] <= 31 && 4 + p[3] <= len) {
+                    memcpy(opcode == 0x2037 ? _adv_data : _scan_response, p + 4, p[3]);
+                    *(opcode == 0x2037 ? &_adv_data_len : &_scan_response_len) = p[3];
+                }
+                _ok(opcode);
+            }
+            break;
+        case 0x2039:            // LE Set Extended Advertising Enable
+            if (!_extended) {
+                _refuse(opcode, ERR_UNKNOWN_COMMAND);
+            } else {
+                _ok(opcode);
+                _set_advertising(len >= 1 && p[0] != 0);
+            }
+            break;
+        case 0x2041:            // LE Set Extended Scan Parameters: own address, filter, PHYs, then the 1M PHY's type
+            if (!_extended) {
+                _refuse(opcode, ERR_UNKNOWN_COMMAND);
+            } else {
+                if (len >= 4) {
+                    _scan_active = p[3] == 0x01;
+                }
+                _ok(opcode);
+            }
+            break;
+        case 0x2042:            // LE Set Extended Scan Enable: enable, filter duplicates, duration, period
+            if (!_extended) {
+                _refuse(opcode, ERR_UNKNOWN_COMMAND);
+            } else {
+                _ok(opcode);
+                _scan_enable(len >= 1 && p[0] != 0, len >= 2 && p[1] != 0);
+            }
+            break;
+        case 0x2043:            // LE Extended Create Connection: filter, own address, peer, PHYs, the 1M PHY's parameters
+            if (!_extended) {
+                _refuse(opcode, ERR_UNKNOWN_COMMAND);
+            } else if (len < 10 + 16) {
+                _status(opcode, 0x12);
+            } else {
+                _create_connection(opcode, p[2], p + 3, p[1], (uint16_t)(p[14] | p[15] << 8));
+            }
+            break;
         case 0x2018:            // LE Rand
             common_hal_os_urandom(ret + 1, 8);
             _complete(opcode, ret, 9);
