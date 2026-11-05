@@ -23,6 +23,7 @@
 bleio_uuid_obj_t cccd_uuid;
 
 bool vm_used_ble;
+bool vm_added_services;
 
 // void check_sec_status(uint8_t sec_status) {
 //     if (sec_status == BLE_GAP_SEC_STATUS_SUCCESS) {
@@ -99,7 +100,7 @@ void bleio_user_reset(void) {
 // handles; so does a reset with the workflow on.
 void bleio_reset(void) {
     bleio_adapter_obj_t *adapter = &common_hal_bleio_adapter_obj;
-    if (workflow_running() && !vm_used_ble) {
+    if (workflow_running() && !vm_added_services) {
         return;
     }
     #if CIRCUITPY_BLE_FILE_SERVICE || CIRCUITPY_BLE_SERIAL_SERVICE
@@ -122,6 +123,7 @@ void bleio_reset(void) {
         adapter->appearance_characteristic = NULL;
         adapter->service_changed_characteristic = NULL;
         vm_used_ble = false;
+        vm_added_services = false;
         #if CIRCUITPY_BLE_FILE_SERVICE || CIRCUITPY_BLE_SERIAL_SERVICE
         if (restart) {
             // Enabling may raise (a controller that does not answer): between two VMs there is no

@@ -762,7 +762,11 @@ static void check_data_fit(size_t data_len, bool connectable) {
 //     return true;
 // }
 
-static void start_advertising(bleio_adapter_obj_t *self,
+#define TRY(call) do { hci_result_t _r = (call); if (_r != HCI_OK) { return _r; } } while (0)
+
+// Every HCI error returned, none raised: the supervisor advertises from the background, where
+// there may be no VM to raise in.
+static hci_result_t start_advertising(bleio_adapter_obj_t *self,
     bool connectable, bool anonymous, uint32_t timeout, float interval,
     const uint8_t *advertising_data, uint16_t advertising_data_len,
     const uint8_t *scan_response_data, uint16_t scan_response_data_len,
@@ -785,7 +789,7 @@ static void start_advertising(bleio_adapter_obj_t *self,
     bt_addr_t random_address = self->random_address;
     if (anonymous) {
         uint8_t rand[8];
-        hci_check_error(hci_le_rand(rand));
+        TRY(hci_le_rand(rand));
         memcpy(random_address.val, rand, sizeof(random_address.val));
         random_address.val[5] &= 0x3f;
     }
@@ -807,7 +811,7 @@ static void start_advertising(bleio_adapter_obj_t *self,
         // Advertising interval.
         uint32_t interval_units = SEC_TO_UNITS(interval, UNIT_0_625_MS);
 
-        hci_check_error(
+        TRY(
             hci_le_set_extended_advertising_parameters(
                 0,              // handle
                 props,          // adv properties
@@ -827,10 +831,10 @@ static void start_advertising(bleio_adapter_obj_t *self,
 
         // An advertising set has a random address of its own, set once the set exists.
         if (own_addr_type == BT_ADDR_LE_RANDOM) {
-            hci_check_error(hci_le_set_advertising_set_random_address(0, random_address.val));
+            TRY(hci_le_set_advertising_set_random_address(0, random_address.val));
         }
 
-        hci_check_error(
+        TRY(
             hci_le_set_extended_advertising_data(
                 0,                                  // handle
                 BT_HCI_LE_EXT_ADV_OP_COMPLETE_DATA,
@@ -841,7 +845,7 @@ static void start_advertising(bleio_adapter_obj_t *self,
         // A scannable set must have scan response data defined before it is enabled,
         // even if that data is empty.
         if (props & BT_HCI_LE_ADV_PROP_SCAN) {
-            hci_check_error(
+            TRY(
                 hci_le_set_extended_scan_response_data(
                     0,                                  // handle
                     BT_HCI_LE_EXT_ADV_OP_COMPLETE_DATA,
@@ -859,7 +863,7 @@ static void start_advertising(bleio_adapter_obj_t *self,
         uint8_t handle[1] = { 0 };
         uint16_t duration_forever[1] = { 0 };
         uint8_t max_ext_adv_evts[1] = { 0 };
-        hci_check_error(
+        TRY(
             hci_le_set_extended_advertising_enable(
                 BT_HCI_LE_ADV_ENABLE,
                 1,                // one advertising set.
@@ -886,10 +890,10 @@ static void start_advertising(bleio_adapter_obj_t *self,
         uint16_t interval_units = SEC_TO_UNITS(interval, UNIT_0_625_MS);
 
         if (own_addr_type == BT_ADDR_LE_RANDOM) {
-            hci_check_error(hci_le_set_random_address(random_address.val));
+            TRY(hci_le_set_random_address(random_address.val));
         }
 
-        hci_check_error(
+        TRY(
             hci_le_set_advertising_parameters(
                 interval_units, // min interval
                 interval_units, // max interval
@@ -904,11 +908,11 @@ static void start_advertising(bleio_adapter_obj_t *self,
         // even though the actual data length may be shorter.
         uint8_t full_data[MAX_ADVERTISEMENT_SIZE] = { 0 };
         memcpy(full_data, advertising_data, MIN(sizeof(full_data), advertising_data_len));
-        hci_check_error(hci_le_set_advertising_data(advertising_data_len, full_data));
+        TRY(hci_le_set_advertising_data(advertising_data_len, full_data));
         memset(full_data, 0, sizeof(full_data));
         if (scan_response_data_len > 0) {
             memcpy(full_data, scan_response_data, MIN(sizeof(full_data), scan_response_data_len));
-            hci_check_error(hci_le_set_scan_response_data(scan_response_data_len, full_data));
+            TRY(hci_le_set_scan_response_data(scan_response_data_len, full_data));
         }
 
         // No duration mechanism is provided for legacy advertising, so we need to do our own.
@@ -916,11 +920,14 @@ static void start_advertising(bleio_adapter_obj_t *self,
         self->advertising_start_ticks = supervisor_ticks_ms64();
 
         // Start advertising.
-        hci_check_error(hci_le_set_advertising_enable(BT_HCI_LE_ADV_ENABLE));
+        TRY(hci_le_set_advertising_enable(BT_HCI_LE_ADV_ENABLE));
     } // end legacy advertising setup
 
     self->now_advertising = true;
+    return HCI_OK;
 }
+
+#undef TRY
 
 // The supervisor's (the BLE workflow's) advertising, which the program's replaces. It asks again
 // at every background pass while nothing is connected: advertising it started already goes on as
@@ -935,8 +942,12 @@ uint32_t _common_hal_bleio_adapter_start_advertising(bleio_adapter_obj_t *self,
     if (self->now_advertising) {
         return self->circuitpython_advertising ? 0 : 1;
     }
-    start_advertising(self, connectable, anonymous, timeout, interval, advertising_data,
-        advertising_data_len, scan_response_data, scan_response_data_len, tx_power, directed_to);
+    hci_result_t result = start_advertising(self, connectable, anonymous, timeout, interval,
+        advertising_data, advertising_data_len, scan_response_data, scan_response_data_len,
+        tx_power, directed_to);
+    if (result != HCI_OK) {
+        return result;
+    }
     self->circuitpython_advertising = true;
     return 0;
 }
@@ -981,14 +992,16 @@ void common_hal_bleio_adapter_start_advertising(bleio_adapter_obj_t *self,
         // The supervisor's: the program's takes its place.
         common_hal_bleio_adapter_stop_advertising(self);
     }
-    start_advertising(
+    hci_check_error(start_advertising(
         self, connectable, anonymous, timeout, interval,
         advertising_data_bufinfo->buf,
         advertising_data_bufinfo->len,
         scan_response_data_bufinfo->buf,
         scan_response_data_bufinfo->len,
-        tx_power, directed_to);
+        tx_power, directed_to));
     self->circuitpython_advertising = false;
+    // A board's AirLift adapter is made again by the next run's program (bleio_reset()).
+    vm_used_ble = true;
 }
 
 void common_hal_bleio_adapter_stop_advertising(bleio_adapter_obj_t *self) {

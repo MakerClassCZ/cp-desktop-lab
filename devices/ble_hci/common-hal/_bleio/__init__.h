@@ -27,6 +27,8 @@ void bleio_hci_background(void);
 
 // Track if the user code modified the BLE state to know if we need to undo it on reload.
 extern bool vm_used_ble;
+// The program added services: with the BLE workflow on, its reload restarts the stack.
+extern bool vm_added_services;
 
 // UUID shared by all CCCD's.
 extern bleio_uuid_obj_t cccd_uuid;
