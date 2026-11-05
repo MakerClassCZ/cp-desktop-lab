@@ -16,6 +16,8 @@
 
 #include "py/gc.h"
 #include "py/mphal.h"
+#include "py/binary.h"
+#include "py/objarray.h"
 #include "py/objstr.h"
 #include "py/runtime.h"
 #include "supervisor/shared/safe_mode.h"
@@ -54,28 +56,100 @@
 
 bleio_connection_internal_t bleio_connections[BLEIO_TOTAL_CONNECTION_COUNT];
 
+// The static arena: the values, lists and CCCDs of static attribute objects, the table's static
+// part. Sized for the generic
+// services and, when built, the BLE workflow's (three values of a full packet, 512 bytes each).
+#ifndef BLEIO_HCI_STATIC_ARENA_SIZE
+#if CIRCUITPY_BLE_FILE_SERVICE || CIRCUITPY_BLE_SERIAL_SERVICE
+#define BLEIO_HCI_STATIC_ARENA_SIZE 4096
+#else
+#define BLEIO_HCI_STATIC_ARENA_SIZE 1024
+#endif
+#endif
+static uint64_t _arena[BLEIO_HCI_STATIC_ARENA_SIZE / sizeof(uint64_t)];
+static size_t _arena_used;
+
+void *bleio_attribute_alloc(const void *owner, size_t size) {
+    if (gc_ptr_on_heap(owner)) {
+        return m_malloc(size);
+    }
+    size = (size + sizeof(uint64_t) - 1) & ~(sizeof(uint64_t) - 1);
+    if (_arena_used + size > sizeof(_arena)) {
+        // A table larger than the arena was sized for: a build-time mistake, not the program's.
+        reset_into_safe_mode(SAFE_MODE_NO_HEAP);
+    }
+    void *p = (uint8_t *)_arena + _arena_used;
+    _arena_used += size;
+    memset(p, 0, size);
+    return p;
+}
+
+mp_obj_t bleio_attribute_value_new(const void *owner, size_t capacity, const mp_buffer_info_t *initial) {
+    capacity = MAX(capacity, 1);
+    mp_obj_array_t *value = bleio_attribute_alloc(owner, sizeof(mp_obj_array_t));
+    value->base.type = &mp_type_bytearray;
+    value->typecode = BYTEARRAY_TYPECODE;
+    value->items = bleio_attribute_alloc(owner, capacity);
+    value->len = 0;
+    value->free = capacity;
+    if (initial != NULL) {
+        bleio_attribute_value_set(MP_OBJ_FROM_PTR(value), initial->buf, initial->len);
+    }
+    return MP_OBJ_FROM_PTR(value);
+}
+
+void bleio_attribute_value_set(mp_obj_t value_in, const uint8_t *data, size_t len) {
+    mp_obj_array_t *value = MP_OBJ_TO_PTR(value_in);
+    const size_t capacity = value->len + value->free;
+    len = MIN(len, capacity);
+    memmove(value->items, data, len);
+    value->len = len;
+    value->free = capacity - len;
+}
+
+mp_obj_list_t *bleio_attribute_list_new(const void *owner, size_t alloc) {
+    if (gc_ptr_on_heap(owner)) {
+        return MP_OBJ_TO_PTR(mp_obj_new_list(0, NULL));
+    }
+    mp_obj_list_t *list = bleio_attribute_alloc(owner, sizeof(mp_obj_list_t));
+    list->base.type = &mp_type_list;
+    list->alloc = alloc;
+    list->len = 0;
+    list->items = bleio_attribute_alloc(owner, alloc * sizeof(mp_obj_t));
+    return list;
+}
+
+// _bleio's own GAP and GATT services: the first attributes, in the static part.
+static bleio_uuid_obj_t _generic_access_uuid;
+static bleio_uuid_obj_t _device_name_uuid;
+static bleio_uuid_obj_t _appearance_uuid;
+static bleio_uuid_obj_t _generic_attribute_uuid;
+static bleio_uuid_obj_t _service_changed_uuid;
+static bleio_service_obj_t _generic_access_service;
+static bleio_service_obj_t _generic_attribute_service;
+static bleio_characteristic_obj_t _device_name_characteristic;
+static bleio_characteristic_obj_t _appearance_characteristic;
+static bleio_characteristic_obj_t _service_changed_characteristic;
+
 static void add_generic_services(bleio_adapter_obj_t *adapter) {
-    // Create Generic Access UUID, Service, and Characteristics.
-
     // Generic Access Service setup.
-
-    bleio_uuid_obj_t *generic_access_service_uuid = mp_obj_malloc(bleio_uuid_obj_t, &bleio_uuid_type);
-    common_hal_bleio_uuid_construct(generic_access_service_uuid, 0x1800, NULL);
-
-    bleio_uuid_obj_t *device_name_characteristic_uuid = mp_obj_malloc(bleio_uuid_obj_t, &bleio_uuid_type);
-    common_hal_bleio_uuid_construct(device_name_characteristic_uuid, 0x2A00, NULL);
-
-    bleio_uuid_obj_t *appearance_characteristic_uuid = mp_obj_malloc(bleio_uuid_obj_t, &bleio_uuid_type);
-    common_hal_bleio_uuid_construct(appearance_characteristic_uuid, 0x2A01, NULL);
+    _generic_access_uuid.base.type = &bleio_uuid_type;
+    common_hal_bleio_uuid_construct(&_generic_access_uuid, 0x1800, NULL);
+    _device_name_uuid.base.type = &bleio_uuid_type;
+    common_hal_bleio_uuid_construct(&_device_name_uuid, 0x2A00, NULL);
+    _appearance_uuid.base.type = &bleio_uuid_type;
+    common_hal_bleio_uuid_construct(&_appearance_uuid, 0x2A01, NULL);
 
     // Not implemented:
     // Peripheral Preferred Connection Parameters
     // Central Address Resolution
 
-    bleio_service_obj_t *generic_access_service = mp_obj_malloc(bleio_service_obj_t, &bleio_service_type);
-    common_hal_bleio_service_construct(generic_access_service, generic_access_service_uuid, false);
+    _generic_access_service.base.type = &bleio_service_type;
+    _common_hal_bleio_service_construct(&_generic_access_service, &_generic_access_uuid, false,
+        bleio_attribute_list_new(&_generic_access_service, 2));
 
-    adapter->device_name_characteristic = mp_obj_malloc(bleio_characteristic_obj_t, &bleio_characteristic_type);
+    adapter->device_name_characteristic = &_device_name_characteristic;
+    _device_name_characteristic.base.type = &bleio_characteristic_type;
 
     char generic_name[] = { 'C', 'I', 'R', 'C', 'U', 'I', 'T', 'P', 'Y', 'n', 'n', 'n', 'n' };
     mp_buffer_info_t generic_name_bufinfo = {
@@ -86,9 +160,9 @@ static void add_generic_services(bleio_adapter_obj_t *adapter) {
     // Will be added to service by constructor.
     common_hal_bleio_characteristic_construct(
         adapter->device_name_characteristic,
-        generic_access_service,
+        &_generic_access_service,
         BLE_GATT_HANDLE_INVALID,
-        device_name_characteristic_uuid,
+        &_device_name_uuid,
         CHAR_PROP_READ,
         SECURITY_MODE_OPEN,
         SECURITY_MODE_NO_ACCESS,
@@ -104,13 +178,14 @@ static void add_generic_services(bleio_adapter_obj_t *adapter) {
         .len = sizeof(zero_16),
     };
 
-    adapter->appearance_characteristic = mp_obj_malloc(bleio_characteristic_obj_t, &bleio_characteristic_type);
+    adapter->appearance_characteristic = &_appearance_characteristic;
+    _appearance_characteristic.base.type = &bleio_characteristic_type;
 
     common_hal_bleio_characteristic_construct(
         adapter->appearance_characteristic,
-        generic_access_service,
+        &_generic_access_service,
         BLE_GATT_HANDLE_INVALID,
-        appearance_characteristic_uuid,
+        &_appearance_uuid,
         CHAR_PROP_READ,
         SECURITY_MODE_OPEN,
         SECURITY_MODE_NO_ACCESS,
@@ -121,17 +196,17 @@ static void add_generic_services(bleio_adapter_obj_t *adapter) {
         );
 
     // Generic Attribute Service setup.
+    _generic_attribute_uuid.base.type = &bleio_uuid_type;
+    common_hal_bleio_uuid_construct(&_generic_attribute_uuid, 0x1801, NULL);
+    _service_changed_uuid.base.type = &bleio_uuid_type;
+    common_hal_bleio_uuid_construct(&_service_changed_uuid, 0x2A05, NULL);
 
-    bleio_uuid_obj_t *generic_attribute_service_uuid = mp_obj_malloc(bleio_uuid_obj_t, &bleio_uuid_type);
-    common_hal_bleio_uuid_construct(generic_attribute_service_uuid, 0x1801, NULL);
+    _generic_attribute_service.base.type = &bleio_service_type;
+    _common_hal_bleio_service_construct(&_generic_attribute_service, &_generic_attribute_uuid, false,
+        bleio_attribute_list_new(&_generic_attribute_service, 1));
 
-    bleio_uuid_obj_t *service_changed_characteristic_uuid = mp_obj_malloc(bleio_uuid_obj_t, &bleio_uuid_type);
-    common_hal_bleio_uuid_construct(service_changed_characteristic_uuid, 0x2A05, NULL);
-
-    bleio_service_obj_t *generic_attribute_service = mp_obj_malloc(bleio_service_obj_t, &bleio_service_type);
-    common_hal_bleio_service_construct(generic_attribute_service, generic_attribute_service_uuid, false);
-
-    adapter->service_changed_characteristic = mp_obj_malloc(bleio_characteristic_obj_t, &bleio_characteristic_type);
+    adapter->service_changed_characteristic = &_service_changed_characteristic;
+    _service_changed_characteristic.base.type = &bleio_characteristic_type;
 
     uint32_t zero_32 = 0;
     mp_buffer_info_t zero_32_value = {
@@ -141,9 +216,9 @@ static void add_generic_services(bleio_adapter_obj_t *adapter) {
 
     common_hal_bleio_characteristic_construct(
         adapter->service_changed_characteristic,
-        generic_attribute_service,
+        &_generic_attribute_service,
         BLE_GATT_HANDLE_INVALID,
-        service_changed_characteristic_uuid,
+        &_service_changed_uuid,
         CHAR_PROP_INDICATE,
         SECURITY_MODE_OPEN,
         SECURITY_MODE_NO_ACCESS,
@@ -257,12 +332,6 @@ static bool adapter_uses_extended_advertising(bleio_adapter_obj_t *adapter) {
 //     return true;
 // }
 
-static void _adapter_set_name(bleio_adapter_obj_t *self, mp_obj_str_t *name_obj) {
-    mp_buffer_info_t bufinfo;
-    mp_get_buffer_raise(name_obj, &bufinfo, MP_BUFFER_READ);
-    bleio_characteristic_set_local_value(self->device_name_characteristic, &bufinfo);
-}
-
 // Get various values and limits set by the adapter.
 // Set event mask.
 static void bleio_adapter_hci_init(bleio_adapter_obj_t *self) {
@@ -332,7 +401,6 @@ static void bleio_adapter_hci_init(bleio_adapter_obj_t *self) {
     }
 
     // The default name ends with the address, so it comes last; the generic services hold it.
-    self->name = NULL;
     bleio_adapter_reset_name(self);
 }
 
@@ -392,10 +460,12 @@ void common_hal_bleio_adapter_set_enabled(bleio_adapter_obj_t *self, bool enable
     if (enabled) {
         nlr_buf_t nlr;
         if (nlr_push(&nlr) == 0) {
-            // Reset list of known attributes.
-            // Indices into the list are handles. Handle 0x0000 designates an invalid handle,
-            // so store None there to skip it.
-            self->attributes = mp_obj_new_list(0, NULL);
+            // A new table, its static part open. Indices are handles. Handle 0x0000 designates
+            // an invalid handle, so store None there to skip it.
+            self->static_attribute_count = 0;
+            self->static_attributes_open = true;
+            self->attributes = NULL;
+            _arena_used = 0;
             bleio_adapter_add_attribute(self, mp_const_none);
             add_generic_services(self);
 
@@ -444,19 +514,32 @@ bool common_hal_bleio_adapter_set_address(bleio_adapter_obj_t *self, bleio_addre
     return true;
 }
 
-mp_obj_str_t *common_hal_bleio_adapter_get_name(bleio_adapter_obj_t *self) {
-    if (self->name == NULL) {
-        // A persistent adapter not used in this run yet: on, its name set; any other raises.
-        check_enabled(self);
+// The name is the value of the GAP service's Device Name, in the table's static part: reading it
+// needs no VM heap (the BLE workflow's advertisement takes it between two VMs).
+uint16_t bleio_adapter_get_name(char *buf, uint16_t len) {
+    bleio_adapter_obj_t *self = &common_hal_bleio_adapter_obj;
+    if (!self->enabled || self->device_name_characteristic == NULL) {
+        return 0;
     }
-    return self->name;
+    mp_buffer_info_t bufinfo;
+    mp_get_buffer(self->device_name_characteristic->value, &bufinfo, MP_BUFFER_READ);
+    memcpy(buf, bufinfo.buf, MIN(len, bufinfo.len));
+    return bufinfo.len;
+}
+
+mp_obj_str_t *common_hal_bleio_adapter_get_name(bleio_adapter_obj_t *self) {
+    // A persistent adapter not used in this run yet: on, its name set; any other raises.
+    check_enabled(self);
+    mp_buffer_info_t bufinfo;
+    mp_get_buffer(self->device_name_characteristic->value, &bufinfo, MP_BUFFER_READ);
+    return MP_OBJ_TO_PTR(mp_obj_new_str(bufinfo.buf, bufinfo.len));
 }
 
 void common_hal_bleio_adapter_set_name(bleio_adapter_obj_t *self, const char *name) {
     // The name lives in the GAP service, which enabling makes: a persistent adapter comes on.
     check_enabled(self);
-    self->name = mp_obj_new_str(name, strlen(name));
-    _adapter_set_name(self, self->name);
+    bleio_attribute_value_set(self->device_name_characteristic->value, (const uint8_t *)name,
+        strlen(name));
 }
 
 
@@ -997,9 +1080,19 @@ bool common_hal_bleio_adapter_is_bonded_to_central(bleio_adapter_obj_t *self) {
 uint16_t bleio_adapter_add_attribute(bleio_adapter_obj_t *adapter, mp_obj_t *attribute) {
     check_enabled(adapter);
 
-    // The handle is the index of this attribute in the attributes list.
-    uint16_t handle = (uint16_t)adapter->attributes->len;
-    mp_obj_list_append(adapter->attributes, attribute);
+    // The handle is the index of this attribute in the table.
+    uint16_t handle;
+    if (adapter->static_attributes_open && adapter->static_attribute_count < BLEIO_HCI_STATIC_ATTRIBUTES) {
+        handle = adapter->static_attribute_count++;
+        adapter->static_attributes[handle] = attribute;
+    } else {
+        adapter->static_attributes_open = false;
+        if (adapter->attributes == NULL) {
+            adapter->attributes = MP_OBJ_TO_PTR(mp_obj_new_list(0, NULL));
+        }
+        handle = (uint16_t)(adapter->static_attribute_count + adapter->attributes->len);
+        mp_obj_list_append(MP_OBJ_FROM_PTR(adapter->attributes), attribute);
+    }
 
     if (mp_obj_is_type(attribute, &bleio_service_type)) {
         adapter->last_added_service_handle = handle;
@@ -1011,19 +1104,32 @@ uint16_t bleio_adapter_add_attribute(bleio_adapter_obj_t *adapter, mp_obj_t *att
     return handle;
 }
 
+void bleio_adapter_close_static_attributes(bleio_adapter_obj_t *adapter) {
+    adapter->static_attributes_open = false;
+}
+
+void bleio_adapter_cut_attributes(bleio_adapter_obj_t *adapter) {
+    adapter->attributes = NULL;
+    adapter->last_added_service_handle = BLE_GATT_HANDLE_INVALID;
+    adapter->last_added_characteristic_handle = BLE_GATT_HANDLE_INVALID;
+}
+
 mp_obj_t *bleio_adapter_get_attribute(bleio_adapter_obj_t *adapter, uint16_t handle) {
     check_enabled(adapter);
 
-    if (handle == 0 || handle >= adapter->attributes->len) {
+    if (handle == 0 || handle > bleio_adapter_max_attribute_handle(adapter)) {
         return mp_const_none;
     }
-    return adapter->attributes->items[handle];
+    if (handle < adapter->static_attribute_count) {
+        return adapter->static_attributes[handle];
+    }
+    return adapter->attributes->items[handle - adapter->static_attribute_count];
 }
 
 uint16_t bleio_adapter_max_attribute_handle(bleio_adapter_obj_t *adapter) {
     check_enabled(adapter);
 
-    return adapter->attributes->len - 1;
+    return adapter->static_attribute_count + (adapter->attributes ? adapter->attributes->len : 0) - 1;
 }
 
 

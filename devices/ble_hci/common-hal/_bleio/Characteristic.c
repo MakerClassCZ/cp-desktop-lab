@@ -29,12 +29,10 @@ void common_hal_bleio_characteristic_construct(bleio_characteristic_obj_t *self,
     self->props = props;
     self->read_perm = read_perm;
     self->write_perm = write_perm;
-    self->descriptor_list = mp_obj_new_list(0, NULL);
     self->observer = mp_const_none;
     self->user_desc = NULL;
     self->cccd = NULL;
     self->sccd = NULL;
-    self->value = mp_obj_new_bytes(initial_value_bufinfo->buf, initial_value_bufinfo->len);
 
     const mp_int_t max_length_max = 512;
 
@@ -42,6 +40,11 @@ void common_hal_bleio_characteristic_construct(bleio_characteristic_obj_t *self,
 
     self->max_length = max_length;
     self->fixed_length = fixed_length;
+
+    // Off the VM heap for _bleio's own services and the BLE workflow's (Adapter.h). The value has
+    // room for max_length bytes and is written in place; the supervisor gives no initial value.
+    self->descriptor_list = bleio_attribute_list_new(self, 2);
+    self->value = bleio_attribute_value_new(self, service->is_remote ? 0 : max_length, initial_value_bufinfo);
 
     if (service->is_remote) {
         self->handle = handle;
@@ -202,7 +205,7 @@ bool bleio_characteristic_set_local_value(bleio_characteristic_obj_t *self, mp_b
         return false;
     }
 
-    self->value = mp_obj_new_bytes(bufinfo->buf, bufinfo->len);
+    bleio_attribute_value_set(self->value, bufinfo->buf, bufinfo->len);
 
     if (mp_obj_is_type(self->observer, &bleio_characteristic_buffer_type)) {
         bleio_characteristic_buffer_update(MP_OBJ_FROM_PTR(self->observer), bufinfo);

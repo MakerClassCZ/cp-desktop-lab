@@ -28,3 +28,6 @@ typedef struct _bleio_descriptor_obj {
     bleio_attribute_security_mode_t write_perm;
     struct _bleio_descriptor_obj *next;
 } bleio_descriptor_obj_t;
+
+// The value as a peer writes it: false, and nothing changed, when its length does not fit.
+bool bleio_descriptor_set_local_value(bleio_descriptor_obj_t *self, mp_buffer_info_t *bufinfo);
