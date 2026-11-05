@@ -1,2 +1,4 @@
 build-*/
 *.img
+/CIRCUITPY/
+boot_out.txt

@@ -1,0 +1,5 @@
+# Drives, bond files, traces and dumps the tests leave behind.
+*
+!.gitignore
+!*.py
+!README.md
