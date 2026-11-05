@@ -160,8 +160,14 @@ static uint32_t _gatt_hash(void) {
     return crc;
 }
 
+// The table read directly: bleio_adapter_get_attribute() would enable a port's adapter that is
+// off, from a handler too.
 static bleio_descriptor_obj_t *_cccd_at(uint16_t handle) {
-    mp_obj_t obj = bleio_adapter_get_attribute(&common_hal_bleio_adapter_obj, handle);
+    mp_obj_list_t *attributes = common_hal_bleio_adapter_obj.attributes;
+    if (attributes == NULL || handle == 0 || handle >= attributes->len) {
+        return NULL;
+    }
+    mp_obj_t obj = attributes->items[handle];
     if (!mp_obj_is_type(obj, &bleio_descriptor_type)) {
         return NULL;
     }
