@@ -95,6 +95,10 @@ for rotation, highlight, want in (
         )
         check(name + ": one refresh counted", epd(b)["refreshes"] == 1, epd(b))
         check(name + ": the trace has it", "EPD EPD refresh 1" in b.trace(since=0)["data"])
+        if rotation == 90:
+            b.wait("Code done running.", timeout=10)
+            left = b.after_run()["leaked_pins"]
+            check("the display kept after the run keeps its busy pin, no leak", left == [], left)
 
 STUCK = '[spi]\nEPD = "epaper cs=GPIO8 stuck"\n'
 with launch(SSD1680.replace("ROTATION", "270").replace("HIGHLIGHT", "0") + DRAW, board=STUCK) as b:

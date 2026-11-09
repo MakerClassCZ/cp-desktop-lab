@@ -10,6 +10,9 @@
 #include "py/gc.h"
 #include "py/obj.h"
 #include "shared-bindings/digitalio/DigitalInOut.h"
+#if CIRCUITPY_EPAPERDISPLAY
+#include "shared-bindings/epaperdisplay/EPaperDisplay.h"
+#endif
 #include "shared-bindings/microcontroller/Pin.h"
 #if CIRCUITPY_DISPLAYIO
 #include "shared-module/displayio/__init__.h"
@@ -84,6 +87,15 @@ static uint64_t _display_pins(void) {
         }
         #endif
     }
+    #if CIRCUITPY_EPAPERDISPLAY
+    // An e-paper display's busy pin is its own, inside the display.
+    for (size_t i = 0; i < CIRCUITPY_DISPLAY_LIMIT; i++) {
+        if (displays[i].display_base.type == &epaperdisplay_epaperdisplay_type &&
+            displays[i].epaper_display.busy.base.type == &digitalio_digitalinout_type) {
+            pins |= _bit(displays[i].epaper_display.busy.pin);
+        }
+    }
+    #endif
     return pins;
 }
 #endif
