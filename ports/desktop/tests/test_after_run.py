@@ -32,12 +32,20 @@ with launch(MANY) as b:
             b.reload()
         outs.append(b.wait("Code done running.", timeout=15))
         reports.append(b.after_run())
-    check("objects left undeinited are made again in the next run",
-        all("made 9" in o and "in use" not in o for o in outs), outs[-1])
-    check("the after-run report names no pin", all(r["leaked_pins"] == [] for r in reports), reports)
+    check(
+        "objects left undeinited are made again in the next run",
+        all("made 9" in o and "in use" not in o for o in outs),
+        outs[-1],
+    )
+    check(
+        "the after-run report names no pin", all(r["leaked_pins"] == [] for r in reports), reports
+    )
     check("the report waits for the VM's end", not any(r["vm_running"] for r in reports), reports)
-    check("nothing outside the heap grows from run to run",
-        all(r["outside_heap_change"] == 0 for r in reports[1:]), reports)
+    check(
+        "nothing outside the heap grows from run to run",
+        all(r["outside_heap_change"] == 0 for r in reports[1:]),
+        reports,
+    )
 
 KEPT = """import board, displayio, framebufferio, picodvi
 displayio.release_displays()
@@ -51,9 +59,16 @@ print("shown")
 with launch(KEPT) as b:
     first = b.wait("Code done running.", timeout=15)
     r = b.after_run()
-    check("a display kept for the terminal is no leak", "shown" in first and r["leaked_pins"] == [], r)
+    check(
+        "a display kept for the terminal is no leak",
+        "shown" in first and r["leaked_pins"] == [],
+        r,
+    )
     b.reload()
     again = b.wait("Code done running.", timeout=15)
-    check("released by the next run's release_displays(), its pins are taken again",
-        "shown" in again and "in use" not in again, again)
+    check(
+        "released by the next run's release_displays(), its pins are taken again",
+        "shown" in again and "in use" not in again,
+        again,
+    )
 print("DONE")

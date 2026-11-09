@@ -26,11 +26,19 @@ for fast in (False, True):
         r = recs[0] if recs else None
         check("%s: one recording of the output" % how, len(recs) == 1, recs)
         if r is not None:
-            check("%s: its rate and channels" % how, (r.rate, r.channels) == (22050, 1), (r.rate, r.channels))
+            check(
+                "%s: its rate and channels" % how,
+                (r.rate, r.channels) == (22050, 1),
+                (r.rate, r.channels),
+            )
             f = r.frequency()
             check("%s: the tone's frequency, 441 Hz" % how, f is not None and abs(f - 441) < 5, f)
             check("%s: about the half second played" % how, 0.4 < r.seconds < 0.75, r.seconds)
-            check("%s: its level" % how, 0.45 < r.peak() < 0.5 and 0.3 < r.rms() < 0.37, (r.peak(), r.rms()))
+            check(
+                "%s: its level" % how,
+                0.45 < r.peak() < 0.5 and 0.3 < r.rms() < 0.37,
+                (r.peak(), r.rms()),
+            )
 
 with launch(TONE) as b:
     b.wait("played", timeout=15)
@@ -55,7 +63,11 @@ with launch(GAP, audio_capture=True, fast_time=True) as b:
     b.wait("played", timeout=15)
     r = b.audio()[0]
     gaps = r.silences(min_ms=50)
-    check("a 100 ms silence between two tones is found", len(gaps) == 1 and 0.08 < gaps[0][1] - gaps[0][0] < 0.12, gaps)
+    check(
+        "a 100 ms silence between two tones is found",
+        len(gaps) == 1 and 0.08 < gaps[0][1] - gaps[0][0] < 0.12,
+        gaps,
+    )
 
 DEBUG = """import array, audiocore
 s = audiocore.RawSample(array.array("h", [1, 2, 3, 4]), sample_rate=8000)

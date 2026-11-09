@@ -174,17 +174,20 @@ class Recording:
 
     def summary(self):
         f = self.frequency()
-        return "%s: %d Hz, %d channel%s, %.2f s, peak %.2f, rms %.2f%s, %d silences, %d underruns" % (
-            self.pin,
-            self.rate,
-            self.channels,
-            "" if self.channels == 1 else "s",
-            self.seconds,
-            self.peak(),
-            self.rms(),
-            ", about %.0f Hz" % f if f else "",
-            len(self.silences()),
-            self.underruns,
+        return (
+            "%s: %d Hz, %d channel%s, %.2f s, peak %.2f, rms %.2f%s, %d silences, %d underruns"
+            % (
+                self.pin,
+                self.rate,
+                self.channels,
+                "" if self.channels == 1 else "s",
+                self.seconds,
+                self.peak(),
+                self.rms(),
+                ", about %.0f Hz" % f if f else "",
+                len(self.silences()),
+                self.underruns,
+            )
         )
 
 
@@ -2230,7 +2233,9 @@ def run(argv):
     ap.add_argument("--colors", action="store_true", help="print the display's pixels per colour")
     ap.add_argument("--fast-time", action="store_true")
     ap.add_argument("--code", dest="code_file", help="a file on the drive run in place of code.py")
-    ap.add_argument("--wav", help="record the audio outputs; save the first as this WAV after the last run")
+    ap.add_argument(
+        "--wav", help="record the audio outputs; save the first as this WAV after the last run"
+    )
     try:
         a = ap.parse_args(argv)
     except SystemExit as e:
@@ -2282,7 +2287,10 @@ def run(argv):
                     print("--- still claimed after the run: " + ", ".join(left["leaked_pins"]))
                 # The first run's change is against boot.py's VM, so it counts from the second.
                 if i and left["outside_heap_change"]:
-                    print("--- outside the heap: %+d bytes since the run before" % left["outside_heap_change"])
+                    print(
+                        "--- outside the heap: %+d bytes since the run before"
+                        % left["outside_heap_change"]
+                    )
         if a.wav and b.process.poll() is None:
             recordings = b.audio()
             for r in recordings:
