@@ -2,7 +2,7 @@
 # The HUB75 matrix (rgbmatrix.RGBMatrix on the MTX_ pins, as adafruit_matrixportal builds it)
 # shows on the panel as the display MATRIX. Its buttons UP and DOWN are the Up and Down keys
 # (pressed = low, as on the MatrixPortal); the accelerometer is a LIS3DH on the virtual I2C bus.
-# The ESP32 co-processor is not there: programs that go online stop at it.
+# Its ESP32 is an AirLift on the virtual SPI bus: programs go online through the computer.
 
 [pins]
 MTX_R1 = "GPIO14"
@@ -30,6 +30,10 @@ A2 = "GPIO12"
 A3 = "GPIO2"
 A4 = "GPIO3"
 ACCELEROMETER_INTERRUPT = "GPIO4"
+ESP_CS = "GPIO5"
+ESP_BUSY = "GPIO6"
+ESP_RESET = "GPIO7"
+ESP_GPIO0 = "GPIO13"
 
 [neopixel]
 NEOPIXEL = "1"
@@ -43,6 +47,9 @@ LED = "red"
 
 [i2c]
 ACCEL = "lis3dh 0x19"
+
+[spi]
+ESP = "airlift cs=ESP_CS busy=ESP_BUSY reset=ESP_RESET gpio0=ESP_GPIO0"
 
 [board]
 ble = "off"  # no Bluetooth on this board

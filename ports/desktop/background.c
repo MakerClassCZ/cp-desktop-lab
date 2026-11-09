@@ -6,6 +6,7 @@
 
 #include "supervisor/port.h"
 
+#include "airlift.h"
 #include "ble_host.h"
 #include "control_api.h"
 
@@ -32,6 +33,7 @@ void port_background_tick(void) {
 
 void port_background_task(void) {
     control_api_vm_task();
+    airlift_vm_task();
     ble_host_vm_task();
     #if CIRCUITPY_WATCHDOG
     desktop_watchdog_check();

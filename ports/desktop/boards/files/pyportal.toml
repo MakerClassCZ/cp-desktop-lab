@@ -4,8 +4,8 @@
 # adafruit_touchscreen reads them, with the calibration Adafruit's examples use. The light
 # sensor and A1/A4 are sliders, GPIO13 its speaker. SCL, SDA and board.I2C() are the virtual I2C
 # bus, SCK, MOSI, MISO and board.SPI() the virtual SPI bus, with the microSD card on SD_CS.
-# The TFT's parallel bus and the ESP32's UART pins are left out. Its ESP32 (ESP_CS, ESP_BUSY,
-# ESP_RESET) is not there yet, so programs that go online through it stop at it.
+# Its ESP32 is an AirLift on that bus: adafruit_esp32spi and adafruit_pyportal go online through
+# the computer's network. The TFT's parallel bus and the ESP32's UART pins are left out.
 
 [pins]
 TOUCH_XL = "GPIO0"
@@ -50,6 +50,7 @@ A4 = ""
 
 [spi]
 SD = "sdcard cs=SD_CS"   # its microSD slot: CIRCUITPY-SD.img beside the drive
+ESP = "airlift cs=ESP_CS busy=ESP_BUSY reset=ESP_RESET gpio0=ESP_GPIO0"
 
 [board]
 ble = "off"  # no Bluetooth on this board

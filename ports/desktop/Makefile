@@ -70,6 +70,8 @@ SRC_C += \
 	host/panel.c \
 	host/panel_control.c \
 	host/png_write.c \
+	virtual/airlift.c \
+	virtual/airlift_net.c \
 	virtual/ble_controller.c \
 	virtual/board_parts.c \
 	virtual/display_auto.c \

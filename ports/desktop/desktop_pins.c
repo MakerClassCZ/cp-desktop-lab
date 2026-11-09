@@ -10,6 +10,7 @@
 
 #include "py/runtime.h"
 #include "shared-bindings/microcontroller/Pin.h"
+#include "airlift.h"
 #include "i2c_virtual.h"
 #include "spi_virtual.h"
 #include "desktop_port.h"
@@ -115,6 +116,7 @@ static void _virtual_reset(uint32_t keep_mask) {
             _pins[i].out_value = false;
             _pins[i].pull = PULL_NONE;
             parts_pin_changed(i);
+            airlift_pin_changed(i);
         }
     }
 }
@@ -124,18 +126,20 @@ static digitalinout_result_t _virtual_configure(uint8_t pin, bool output, bool o
     _pins[pin].output = output;
     _pins[pin].pull = pull;
     parts_pin_changed(pin);
+    airlift_pin_changed(pin);
     return DIGITALINOUT_OK;
 }
 
 static bool _virtual_write(uint8_t pin, bool value) {
     _pins[pin].out_value = value;
     parts_pin_changed(pin);
+    airlift_pin_changed(pin);
     return true;
 }
 
 static bool _virtual_read(uint8_t pin, bool *level) {
     virtual_pin_t *p = &_pins[pin];
-    if (!p->output && parts_pin_level(pin, level)) {
+    if (!p->output && (parts_pin_level(pin, level) || airlift_pin_level(pin, level))) {
         return true;
     }
     if (p->output) {

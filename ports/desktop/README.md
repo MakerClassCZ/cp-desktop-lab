@@ -423,10 +423,10 @@ command line. On the virtual board pin 13 is also the speaker. `boards/files/` h
 Playground, a Trinket or Gemma M0, a Pico (`GP0`-`GP27`, the Pico's own numbers), a MagTag (its buttons the
 Z X A S keys), a CLUE (its five sensors on the virtual
 I2C bus), a PyBadge and a PyGamer (their buttons the gamepad's, through a shift register), a
-MatrixPortal (its HUB75 matrix on the panel), a PicoPad (its gamepad), a Metro and a Metro RP2350,
-a MacroPad (its keys, encoder and OLED), a NeoTrellis M4, a FunHouse, a Feather RP2040
-Prop-Maker, a QT Py, a Circuit Playground Bluefruit, a Fruit Jam and a PyPortal (its touchscreen
-the main window, below). Most of their `[pins]` come
+MatrixPortal (its HUB75 matrix on the panel), a PicoPad (its gamepad), a Metro, a Metro RP2350
+and a Metro M4 AirLift, a MacroPad (its keys, encoder and OLED), a NeoTrellis M4, a FunHouse, a
+Feather RP2040 Prop-Maker, a QT Py, a Circuit Playground Bluefruit, a Fruit Jam and a PyPortal
+(its touchscreen the main window, below), and an AirLift FeatherWing to add to a Feather's. Most of their `[pins]` come
 from the real boards' `pins.c`; where a board has more pins than the virtual board's 28, its file
 says which names it leaves out. A board file's `[board]` section names the real board where libraries
 ask: `platform = "Atmel SAMD21"` is `sys.platform` (adafruit_circuitplayground picks by it),
@@ -687,6 +687,32 @@ ping. An access point, `wifi.Monitor`, a static address and setting the DNS rais
 `NotImplementedError`. The web workflow keeps serving on the computer's network with no
 `CIRCUITPY_WIFI_SSID`.
 
+### AirLift
+
+A board that goes online through an ESP32 co-processor running nina-fw (PyPortal, MatrixPortal,
+Metro M4 AirLift, Fruit Jam, an AirLift FeatherWing or breakout) has one on the virtual SPI bus:
+`[spi] ESP = "airlift cs=ESP_CS busy=ESP_BUSY reset=ESP_RESET gpio0=ESP_GPIO0"` (`gpio0=` may be
+left out). It answers nina-fw's SPI commands as `adafruit_esp32spi` sends them, so that library,
+`adafruit_requests` over it and `adafruit_pyportal`/`adafruit_matrixportal` run unchanged, on the
+computer's network as `wifi` is: any network name connects, the address, scan and time are the
+computer's. Its ten sockets are TCP and UDP clients, TCP servers (a port the computer will not
+give moves to 8080 as `wifi`'s do) and TLS, which the ESP32 does itself: the program names the
+host, the lab checks the server against the certificates `ssl` trusts.
+`CIRCUITPY_AIRLIFT_CAFILE=ca.pem` trusts that CA instead, for a local test server. A command it
+does not know answers nina-fw's error (the library raises `BrokenPipeError`) and is named once on
+stderr. The ESP32's own pins (its RGB LED) go to the trace with what it does on the network:
+
+```
+AIRLIFT reset
+AIRLIFT connect Home
+AIRLIFT socket 0 TLS api.github.com:443
+AIRLIFT socket 0 closed
+AIRLIFT pin 25 pwm 127
+```
+
+A reset of the ESP32 (RESET low, as `ESP_SPIcontrol()` does) or of the program closes its sockets.
+Bluetooth through the ESP32 and the ESP32 as an access point are not there.
+
 ## Tracing the buses
 
 `--trace-bus PATH` writes every I2C, SPI and UART transfer to PATH (`-` for stderr), one line
@@ -912,7 +938,7 @@ file. `CIRCUITPY_SDL_KEYS` names a file or FIFO of panel lines (above; `down Z`,
 
 - Native `.mpy` files (turbo): loading them needs executable memory.
 - On Windows: `audiomp3` (its decoder's inline assembly is for MSVC).
-- mDNS; an AirLift (ESP32 co-processor) for boards that reach the network through one.
+- mDNS; CircuitPython's own use of an AirLift (`_airlift`, the web workflow over it).
 - Bluetooth LE: pairing as a central, LE Secure Connections (numeric comparison, passkeys), long
   writes.
 - `pwmio`, `touchio`, `pulseio`, `rgbmatrix`, `picodvi` and the SD card on the virtual board

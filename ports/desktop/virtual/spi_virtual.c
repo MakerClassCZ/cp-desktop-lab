@@ -7,9 +7,11 @@
 #include "spi_virtual.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
+#include "airlift.h"
 #include "sdcard_virtual.h"
 #include "vdisplay.h"
 
@@ -49,6 +51,21 @@ bool spi_virtual_add(const char *name, const char *spec, int cs, int dc, const c
     char model[16] = "";
     unsigned w = 0, h = 0;
     sscanf(spec, "%15s %ux%u", model, &w, &h);
+    // An AirLift: its chip select, ready and reset pins (busy=, reset=, gpio0= as GPIO numbers).
+    if (strcasecmp(model, "airlift") == 0) {
+        int busy = -1, reset = -1, gpio0 = -1;
+        const char *o;
+        if ((o = strstr(spec, "busy=")) != NULL) {
+            busy = atoi(o + 5);
+        }
+        if ((o = strstr(spec, "reset=")) != NULL) {
+            reset = atoi(o + 6);
+        }
+        if ((o = strstr(spec, "gpio0=")) != NULL) {
+            gpio0 = atoi(o + 6);
+        }
+        return airlift_add(cs, busy, reset, gpio0, why);
+    }
     // An SD card: only its chip select.
     if (strcasecmp(model, "sdcard") == 0) {
         if (cs < 0) {
@@ -100,6 +117,9 @@ bool spi_virtual_add(const char *name, const char *spec, int cs, int dc, const c
 }
 
 bool spi_virtual_uses_pin(int pin) {
+    if (airlift_uses_pin(pin)) {
+        return true;
+    }
     for (int i = 0; i < _count; i++) {
         if (_devices[i].cs == pin || _devices[i].dc == pin) {
             return true;
@@ -233,6 +253,10 @@ static desktop_spi_result_t _configure(uint32_t hz, uint8_t polarity, uint8_t ph
 }
 
 static bool _transfer(const uint8_t *out, uint8_t fill, uint8_t *in, size_t len) {
+    if (airlift_selected()) {
+        airlift_transfer(out, fill, in, len);
+        return true;
+    }
     // An SD card answers on MISO; a reset sent to no card puts one on its chip select.
     int card = sdcard_virtual_selected();
     if (card < 0 && sdcard_virtual_attach_default(out, len)) {

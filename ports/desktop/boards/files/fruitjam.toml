@@ -2,8 +2,8 @@
 # Its DVI output (picodvi.Framebuffer on CKP ... D2N) is the board panel's display DVI; its three
 # buttons are 1, 2 and 3 (pressed = low), its five NeoPixels a row. The virtual board's 28 pins
 # take the names programs use most: A4, A5, D7, D10 and the SD card's SDIO pins are left out. Its
-# ESP32-C6 and its TLV320 DAC are not there, so programs that go online or play through
-# adafruit_fruitjam stop at them.
+# ESP32-C6 is an AirLift on the virtual SPI bus (programs go online through the computer); its
+# TLV320 DAC is not there, so programs that play through adafruit_fruitjam stop at it.
 
 [pins]
 CKP = "GPIO0"
@@ -56,6 +56,7 @@ LED = "red"
 
 [spi]
 SD = "sdcard cs=SD_CS"   # its microSD slot: CIRCUITPY-SD.img beside the drive
+ESP = "airlift cs=ESP_CS busy=ESP_BUSY reset=ESP_RESET"
 
 [board]
 ble = "off"  # no Bluetooth on this board

@@ -202,18 +202,28 @@ static bool _add_part(const char *where, part_kind_t kind, const char *name, con
     return true;
 }
 
-// "MODEL WxH cs=PIN dc=PIN": the pins looked up as [pins] names are.
+// "MODEL WxH cs=PIN dc=PIN", "airlift cs=PIN busy=PIN reset=PIN [gpio0=PIN]": the pins looked
+// up as [pins] names are; an AirLift's others passed on as GPIO numbers.
 static bool _add_spi(const char *where, const char *name, const char *spec) {
     char copy[128], rest[128] = "";
     int cs = -1, dc = -1;
     snprintf(copy, sizeof(copy), "%s", spec);
     for (char *word = strtok(copy, " "); word != NULL; word = strtok(NULL, " ")) {
         bool is_cs = strncmp(word, "cs=", 3) == 0, is_dc = strncmp(word, "dc=", 3) == 0;
-        if (is_cs || is_dc) {
-            const mcu_pin_obj_t *pin = _pin(word + 3);
+        char *eq = strchr(word, '=');
+        bool other = eq != NULL && (strncmp(word, "busy=", 5) == 0 || strncmp(word, "reset=", 6) == 0
+            || strncmp(word, "gpio0=", 6) == 0);
+        if (is_cs || is_dc || other) {
+            const mcu_pin_obj_t *pin = _pin(eq + 1);
             if (pin == NULL || !desktop_pin_is_gpio(pin->number)) {
-                fprintf(stderr, "circuitpython: %s: no pin %s\n", where, word + 3);
+                fprintf(stderr, "circuitpython: %s: no pin %s\n", where, eq + 1);
                 return false;
+            }
+            if (other) {
+                char number[24];
+                snprintf(number, sizeof(number), "%.*s%u ", (int)(eq + 1 - word), word, (unsigned)pin->number);
+                strncat(rest, number, sizeof(rest) - strlen(rest) - 1);
+                continue;
             }
             *(is_cs ? &cs : &dc) = pin->number;
         } else {

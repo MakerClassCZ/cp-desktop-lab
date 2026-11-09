@@ -164,7 +164,9 @@ else:
         size = re.search(r'^display = "(\d+)x(\d+)"', open(os.path.join(files, name)).read(), re.M)
         if size:
             src = 'import board\nprint("size", board.DISPLAY.width, board.DISPLAY.height)\n' + src
-        out, trace = run(src, "", "loaded", args=["--board-file", os.path.join(files, name)])
+        # A FeatherWing's file adds to a Feather's.
+        base = ["--board-file", os.path.join(files, "feather.toml")] if "featherwing" in name else []
+        out, trace = run(src, "", "loaded", args=base + ["--board-file", os.path.join(files, name)])
         check("board file " + name, "loaded True True" in out, out)
         if size:
             check(

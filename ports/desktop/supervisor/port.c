@@ -37,6 +37,12 @@
 #include "common-hal/alarm/__init__.h"
 #endif
 
+#if CIRCUITPY_SSL
+#include "shared-module/ssl/__init__.h"
+#include "psa/crypto.h"
+#endif
+
+#include "airlift.h"
 #include "ble_host.h"
 #include "control_api.h"
 #include "desktop_pins.h"
@@ -109,6 +115,12 @@ void reset_port(void) {
     #endif
     parts_reset();
     midi_in_reset();
+    airlift_reset();
+    #if CIRCUITPY_SSL
+    // The root bundle and PSA's key slots are on the VM heap: freed with it, made again on demand.
+    ssl_reset();
+    mbedtls_psa_crypto_free();
+    #endif
     reset_all_pins();
     #if CIRCUITPY_FILESYSTEM_POSIX
     // Once CIRCUITPY is up, a directory drive starts reloading on host edits.

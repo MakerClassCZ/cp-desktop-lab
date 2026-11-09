@@ -1,0 +1,56 @@
+# A Metro M4 AirLift Lite's names on the virtual board:
+# circuitpython --board-file boards/files/metro_m4_airlift.toml
+# Its header (D0-D13, A0-A5) as a Metro's; its ESP32 is an AirLift on the virtual SPI bus, so
+# adafruit_esp32spi goes online through the computer. The board panel shows the NeoPixel, the LED
+# and the analog pins as sliders.
+
+[pins]
+A0 = "GPIO0"
+A1 = "GPIO1"
+A2 = "GPIO2"
+A3 = "GPIO3"
+A4 = "GPIO4"
+A5 = "GPIO5"
+D0 = "GPIO6"
+RX = "GPIO6"
+D1 = "GPIO7"
+TX = "GPIO7"
+D2 = "GPIO8"
+D3 = "GPIO9"
+D4 = "GPIO10"
+D5 = "GPIO11"
+D6 = "GPIO12"
+D7 = "GPIO14"
+D8 = "GPIO15"
+D9 = "GPIO16"
+D10 = "GPIO17"
+D11 = "GPIO18"
+D12 = "GPIO19"
+LED = "GPIO20"
+D13 = "GPIO20"
+NEOPIXEL = "GPIO21"
+ESP_CS = "GPIO22"
+ESP_BUSY = "GPIO23"
+ESP_RESET = "GPIO24"
+ESP_GPIO0 = "GPIO25"
+
+[neopixel]
+NEOPIXEL = "1"
+
+[led]
+LED = "red"
+
+[analog]
+A0 = ""
+A1 = ""
+A2 = ""
+A3 = ""
+A4 = ""
+A5 = ""
+
+[spi]
+ESP = "airlift cs=ESP_CS busy=ESP_BUSY reset=ESP_RESET gpio0=ESP_GPIO0"
+
+[board]
+ble = "off"  # no Bluetooth on this board
+machine = "Adafruit Metro M4 Airlift Lite with samd51j19"

@@ -1,0 +1,13 @@
+# An AirLift FeatherWing on a Feather, added to its board file:
+# circuitpython --board-file boards/files/feather.toml --board-file boards/files/airlift_featherwing.toml
+# Its ESP32 on the Feather's SPI bus with the FeatherWing's pins (ESP_CS D13, ESP_BUSY D11,
+# ESP_RESET D12, ESP_GPIO0 D10): adafruit_esp32spi goes online through the computer.
+
+[pins]
+ESP_CS = "D13"
+ESP_BUSY = "D11"
+ESP_RESET = "D12"
+ESP_GPIO0 = "D10"
+
+[spi]
+ESP = "airlift cs=ESP_CS busy=ESP_BUSY reset=ESP_RESET gpio0=ESP_GPIO0"

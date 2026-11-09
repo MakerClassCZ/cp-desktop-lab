@@ -3,3 +3,6 @@
 !.gitignore
 !*.py
 !README.md
+!airlift_ca.pem
+!airlift_server.pem
+!airlift_server.key
