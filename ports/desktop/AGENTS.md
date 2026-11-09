@@ -87,6 +87,8 @@ with Board.launch("ports/desktop/build-linux/circuitpython", "/tmp/repro/CIRCUIT
 
 ## Good evidence for an issue or a PR
 
+- `cpapi.py ab MAIN FIX repro.py --runs 5` prints the before-and-after table; `tools/build-variant.sh
+  NAME COMMIT|RANGE|FILE.diff` builds the lab with the fix (HEAD of this checkout plus it).
 - Before and after, the same script: the console, the pixels that differ (`diff()`), the number
   of runs that fail (`reload()` in a loop for bugs of a second run).
 - A crash prints `hard fault`, the command for its backtrace (`addr2line -f -e circuitpython`,
@@ -101,7 +103,9 @@ with Board.launch("ports/desktop/build-linux/circuitpython", "/tmp/repro/CIRCUIT
   board's driver would, not the chips.
 - Faults a Cortex-M has and a PC has not (an unaligned access, a stack that overflows in a few
   KB). A wild pointer often crashes here too, but not always.
-- A board's memory: the heap is 16 MB unless `--ram MB` (`args=["--ram", "1"]`) says less.
+- A board's memory: the heap may grow to 16 MB; `--profile rp2040` (`samd51`, `esp32s3`,
+  `rp2350`; `args=["--profile", "rp2040"]`) stops it where that board's stops, so
+  `MemoryError` comes where it would there; small objects still take more room here.
 - 64-bit sizes: use the i386 program when `size_t`, pointers or `mp_int_t` may matter.
 - The nRF port's own `_bleio`: BLE here is the HCI host stack the AirLift boards use
   (`devices/ble_hci`), as a peripheral and as a central, at an MTU of 23; it pairs (LE Legacy,

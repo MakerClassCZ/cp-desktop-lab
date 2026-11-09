@@ -2322,6 +2322,131 @@ def run(argv):
     return status
 
 
+def _code_output(out):
+    """What code.py printed in one run's console, without the supervisor's lines."""
+    text = plain(out)
+    if "code.py output:" in text:
+        text = text.split("code.py output:", 1)[1]
+    return text.split("Code done running.", 1)[0].strip()
+
+
+def _trials(program, code, a):
+    """Each run of code on program: {"outcome", "detail", "last", "leaked"}."""
+    import shutil
+    import tempfile
+
+    drive = os.path.join(tempfile.mkdtemp(), "CIRCUITPY")
+    if os.path.isdir(code):
+        shutil.copytree(code, drive)
+    else:
+        os.makedirs(drive)
+        shutil.copy(code, os.path.join(drive, "code.py"))
+    texts = [a.wait] if a.wait else ["Code done running."]
+    texts.append("You are in safe mode")
+    results = []
+    with Board.launch(
+        program,
+        drive,
+        board_file=a.board_file,
+        board=a.board,
+        fast_time=a.fast_time,
+        code_file=a.code_file,
+    ) as b:
+        for i in range(a.runs):
+            if i:
+                b.reload()
+            out, seen = _until(b, texts, a.timeout)
+            printed = _code_output(out)
+            lines = [x for x in printed.splitlines() if x.strip()]
+            r = {"outcome": "ok", "detail": "", "last": lines[-1] if lines else "", "leaked": []}
+            if seen == "You are in safe mode" or any("hard fault" in x for x in b.stderr):
+                r["outcome"] = "hard fault"
+            elif b.process is not None and b.process.poll() is not None:
+                r["outcome"] = "program ended"
+            elif seen is None:
+                r["outcome"] = "not ended in time"
+            elif "Traceback (most recent call last)" in printed:
+                r["outcome"] = "exception"
+                r["detail"] = r["last"]
+            if r["outcome"] in ("ok", "exception") and not a.wait:
+                r["leaked"] = b.after_run()["leaked_pins"]
+            results.append(r)
+            if r["outcome"] in ("hard fault", "program ended"):
+                break
+    return results
+
+
+def ab(argv):
+    """cpapi.py ab PROGRAM_A PROGRAM_B CODE: CODE run --runs times on each program (Ctrl-D
+    between runs), and a Markdown table of how the runs ended, for an issue or a PR: the same
+    script before and after a change (tools/build-variant.sh builds the second program)."""
+    import argparse
+    from collections import Counter
+
+    ap = argparse.ArgumentParser(prog="cpapi.py ab", description=ab.__doc__)
+    ap.add_argument("program_a")
+    ap.add_argument("program_b")
+    ap.add_argument("code")
+    ap.add_argument("--names", help="the columns' names, A,B (default: the programs' directories)")
+    ap.add_argument("--runs", type=int, default=5, help="runs on each program (default 5)")
+    ap.add_argument("--board-file")
+    ap.add_argument("--board")
+    ap.add_argument("--wait", help="a run ends at this console text, not when code.py ends")
+    ap.add_argument("--timeout", type=float, default=30, help="seconds for each run (default 30)")
+    ap.add_argument("--fast-time", action="store_true")
+    ap.add_argument("--code", dest="code_file", help="a file on the drive run in place of code.py")
+    try:
+        a = ap.parse_args(argv)
+    except SystemExit as e:
+        return 64 if e.code else 0
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
+    programs = [a.program_a, a.program_b]
+    names = (
+        a.names.split(",")
+        if a.names
+        else [os.path.basename(os.path.dirname(os.path.abspath(p))) for p in programs]
+    )
+    columns = [_trials(p, a.code, a) for p in programs]
+
+    def counted(results, outcome):
+        hits = [r for r in results if r["outcome"] == outcome]
+        if not hits:
+            return "0/%d" % len(results)
+        detail = Counter(r["detail"] for r in hits).most_common(1)[0][0]
+        return "%d/%d" % (len(hits), len(results)) + (" `%s`" % detail if detail else "")
+
+    rows = [("runs", [str(len(c)) for c in columns])]
+    for outcome in ("ok", "exception", "hard fault", "not ended in time", "program ended"):
+        if outcome == "ok" or any(r["outcome"] == outcome for c in columns for r in c):
+            rows.append((outcome, [counted(c, outcome) for c in columns]))
+    if any(r["leaked"] for c in columns for r in c):
+        rows.append(
+            (
+                "pins left claimed",
+                [
+                    ", ".join(sorted({p for r in c for p in r["leaked"]})) or "none"
+                    for c in columns
+                ],
+            )
+        )
+    rows.append(("each run", [" ".join(r["outcome"].split()[0] for r in c) for c in columns]))
+    rows.append(
+        (
+            "last line",
+            [
+                "`%s`" % Counter(r["last"] for r in c).most_common(1)[0][0] if c else ""
+                for c in columns
+            ],
+        )
+    )
+    print("| %s | %s | %s |" % (os.path.basename(a.code), names[0], names[1]))
+    print("|---|---|---|")
+    for label, cells in rows:
+        print("| %s | %s | %s |" % (label, cells[0], cells[1]))
+    return 0
+
+
 def air(argv):
     """cpapi.py air PORT PORT...: the programs started by hand with --api PORT (and the same
     CIRCUITPY_API_TOKEN in the environment) on one air, until Ctrl-C: what one advertises the
@@ -2367,10 +2492,11 @@ def air(argv):
 
 
 if __name__ == "__main__":
-    commands = {"run": run, "air": air}
+    commands = {"run": run, "ab": ab, "air": air}
     if sys.argv[1:2] == [] or sys.argv[1] not in commands:
         print(
             "usage: python cpapi.py run PROGRAM CODE [options]  (run --help)\n"
+            "       python cpapi.py ab PROGRAM_A PROGRAM_B CODE [options]  (ab --help)\n"
             "       python cpapi.py air PORT PORT...  (air --help)",
             file=sys.stderr,
         )

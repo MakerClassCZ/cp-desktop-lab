@@ -22,6 +22,8 @@
 #define malloc_usable_size _msize
 #endif
 
+#include "py/gc.h"
+#include "py/mpstate.h"
 #include "supervisor/board.h"
 #include "supervisor/filesystem.h"
 #include "supervisor/port.h"
@@ -213,7 +215,17 @@ size_t desktop_port_ram_used(void) {
 }
 
 size_t port_heap_get_largest_free_size(void) {
-    return _ram_used < desktop_options.ram_size ? desktop_options.ram_size - _ram_used : 0;
+    size_t room = _ram_used < desktop_options.ram_size ? desktop_options.ram_size - _ram_used : 0;
+    if (desktop_options.heap_limit > 0 && gc_alloc_possible()) {
+        // --profile: the VM's heap areas grow no further than the board's heap.
+        size_t areas = 0;
+        for (mp_state_mem_area_t *a = &MP_STATE_MEM(area); a != NULL; a = a->next) {
+            areas += (size_t)(a->gc_pool_end - a->gc_alloc_table_start);
+        }
+        size_t left = areas < desktop_options.heap_limit ? desktop_options.heap_limit - areas : 0;
+        room = left < room ? left : room;
+    }
+    return room;
 }
 
 void port_set_saved_word(uint32_t value) {

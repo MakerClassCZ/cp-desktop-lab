@@ -48,6 +48,13 @@ build-linux/circuitpython [--board NAME] [--drive PATH] [--drive-size MB] [--nvm
 `--board` is `virtual` (the default: the window, the keyboard and game controllers as buttons),
 `ft232h` or `mcp2221` (real pins through that chip on USB, see below).
 
+The heap may take all of `--ram` (16 MB), far more than a board has. `--profile NAME` lets it grow
+only as large as a board's, so a program runs out of memory where it would there: `rp2040`
+(a PicoPad), `samd51` (a PyBadge), `esp32s3` (a Feather ESP32-S3 TFT, 2 MB PSRAM) and `rp2350`
+(a Fruit Jam, 8 MB PSRAM), each set so that as many 4 KB buffers fit as at the board's REPL.
+Pointers are 8 bytes here, so small objects (lists, dicts, instances) take up to twice the room;
+the i386 program has the board's object sizes. `--heap KB` sets the limit directly.
+
 CIRCUITPY is a directory, `./CIRCUITPY` by default. A missing directory is created on first start
 with what a blank board has: `code.py`, `settings.toml` and `lib/`. Edit the files with any editor
 or copy a project in, and `code.py` reloads after each change, as when a computer saves to a
@@ -898,6 +905,23 @@ place of `code.py`, and `--board-file`, `--board`, `--display`, `--fast-time` an
 as above. The exit status is 0; 1 when it did not end in time
 or the program ended; 2 after a hard fault, whose backtrace comes last; 3 when `code.py` ended in
 an exception; 64 for wrong arguments.
+
+`python3 tools/cpapi.py ab PROGRAM_A PROGRAM_B CODE` runs CODE `--runs` times (5) on each of two
+programs and prints a Markdown table for an issue or a PR: how many runs ended well, in an
+exception (the most common one), a hard fault or not in time, the pins left claimed, each run's
+outcome and the last line printed. `--names main,fix` names the columns; `--board-file`,
+`--board`, `--wait`, `--timeout`, `--fast-time` and `--code` are as for `run`.
+`tools/build-variant.sh NAME CHANGE...` builds the second program: a temporary worktree of
+HEAD with the submodules of this checkout linked in, each CHANGE (a commit, a range `A..B`, or
+a `.patch`/`.diff` file) applied, the program left in `build-variants/NAME/`. A fix on a branch
+of adafruit/circuitpython applies as its commits or `gh pr diff N > fix.diff`:
+
+```
+gh pr diff 11808 -R adafruit/circuitpython > fix.diff
+ports/desktop/tools/build-variant.sh fix ../../fix.diff
+python3 ports/desktop/tools/cpapi.py ab ports/desktop/build-linux/circuitpython \
+    ports/desktop/build-variants/fix/circuitpython repro.py --names main,fix
+```
 
 `--wav FILE` records the audio outputs, prints a line per recording and saves the first. After
 each run it prints the pins its objects left claimed and, from the second run on, a change of
