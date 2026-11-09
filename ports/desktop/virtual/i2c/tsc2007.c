@@ -29,5 +29,5 @@ static void _tsc2007_read(i2c_virtual_device_t *dev, uint8_t *data, size_t len) 
 
 const i2c_virtual_model_t i2c_model_tsc2007 = {
     "tsc2007", 0x48, 3, { { "x", "", 0, 4095, 2048, 0 }, { "y", "", 0, 4095, 2048, 0 }, { "pressure", "", 0, 4095, 0, 0 } },
-    _tsc2007_write, _tsc2007_read, .driver = "adafruit_tsc2007"
+    _tsc2007_write, _tsc2007_read, .driver = "adafruit_tsc2007", .touch = I2C_TOUCH_RAW12
 };

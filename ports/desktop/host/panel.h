@@ -23,7 +23,8 @@ void panel_close(void);             // hidden, as its close button does, until a
 bool panel_event(const SDL_Event *event);   // true when the event was the panel's
 // The panel's lines (host/panel_control.c), the same from the control API and the key script:
 // "set NAME VALUE", "press NAME", "release NAME", "tap KEYS NOTE", "turn NAME DETENTS",
-// "send NAME [CODE]", "down KEY", "up KEY", "dump DISPLAY PATH", "close".
+// "send NAME [CODE]", "down KEY", "up KEY", "dump DISPLAY PATH", "close", "touch DISPLAY X Y",
+// "untouch DISPLAY".
 bool panel_accepts(const char *line);
 // A line queued for the VM thread, from any thread; false when it is not a panel line.
 bool panel_command(const char *line);

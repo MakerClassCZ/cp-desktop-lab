@@ -27,6 +27,7 @@
 #include "neopixel_emu.h"
 #include "parts.h"
 #include "sdl_host.h"
+#include "touch.h"
 #include "vdisplay.h"
 
 extern const fontio_builtinfont_t supervisor_terminal_font;
@@ -63,6 +64,7 @@ static int _parts_top;              // where the rows start, under the gamepad
 static int _held_button = -1;       // a gamepad button the mouse holds
 static int _keyboard_top;           // where the MIDI keyboard starts, under the gamepad
 static bool _playing;               // the mouse went down on the keyboard and is still down
+static char _touching[16];          // the display the mouse touches, or ""
 static int _held_note = -1;         // the note it holds, -1 while it is off the keys
 
 void panel_changed(void) {
@@ -222,6 +224,26 @@ static void _draw_displays(void) {
         _frame(r.x - 1, r.y - 1, r.w + 2, r.h + 2, 0x505050);
         y += d->height * s + PAD;
     }
+}
+
+// The panel's x, y in a display's pixels: the display under it, or (dragging) the one being
+// touched with the point kept on it; NULL when neither.
+static vdisplay_t *_display_at(int x, int y, bool dragging, int *dx, int *dy) {
+    int top = _displays_top;
+    for (int i = 0; i < vdisplay_count(); i++) {
+        vdisplay_t *d = vdisplay_at(i);
+        int s = _display_scale(d);
+        top += ROW;
+        int px = x >= PAD ? (x - PAD) / s : -1, py = y >= top ? (y - top) / s : -1;
+        bool inside = px >= 0 && py >= 0 && px < d->width && py < d->height;
+        if (dragging ? strcmp(d->name, _touching) == 0 : inside) {
+            *dx = px < 0 ? 0 : px >= d->width ? d->width - 1 : px;
+            *dy = py < 0 ? 0 : py >= d->height ? d->height - 1 : py;
+            return d;
+        }
+        top += d->height * s + PAD;
+    }
+    return NULL;
 }
 
 // The BLE row: while the program has the adapter on.
@@ -722,6 +744,16 @@ static void _command(char *line) {
     free(line);
 }
 
+// A display's touch, when something reads it, and the object's end.
+static void _touch_json(api_buf_t *b, const char *display) {
+    bool down;
+    int x, y;
+    if (touch_state(display, &down, &x, &y)) {
+        api_buf_printf(b, ", \"touch\": {\"down\": %s, \"x\": %d, \"y\": %d}", down ? "true" : "false", x, y);
+    }
+    api_buf_add(b, "}", 1);
+}
+
 static const char *_kind_name(part_kind_t kind) {
     static const char *const names[] = {
         [PART_BUTTON] = "button", [PART_SWITCH] = "switch", [PART_LED] = "led", [PART_ANALOG] = "analog",
@@ -847,15 +879,17 @@ void panel_state_json(api_buf_t *b) {
     const uint16_t *pixels;
     bool first = true;
     if (desktop_sdl_frame(&w, &h, &pixels)) {
-        api_buf_printf(b, "{\"name\": \"DISPLAY\", \"width\": %u, \"height\": %u}", (unsigned)w, (unsigned)h);
+        api_buf_printf(b, "{\"name\": \"DISPLAY\", \"width\": %u, \"height\": %u", (unsigned)w, (unsigned)h);
+        _touch_json(b, TOUCH_MAIN_DISPLAY);
         first = false;
     }
     for (int i = 0; i < vdisplay_count(); i++) {
         const vdisplay_t *d = vdisplay_at(i);
         api_buf_printf(b, "%s{\"name\": ", first ? "" : ", ");
         api_buf_json_string(b, d->name, strlen(d->name));
-        api_buf_printf(b, ", \"width\": %u, \"height\": %u, \"on\": %s}", (unsigned)d->width, (unsigned)d->height,
+        api_buf_printf(b, ", \"width\": %u, \"height\": %u, \"on\": %s", (unsigned)d->width, (unsigned)d->height,
             d->on ? "true" : "false");
+        _touch_json(b, d->name);
         first = false;
     }
     api_buf_add(b, "], \"gamepad\": {\"pressed\": [", 27);
@@ -901,6 +935,12 @@ bool panel_event(const SDL_Event *e) {
         case SDL_MOUSEBUTTONDOWN: {
             if (!_ours(e->button.windowID)) {
                 return false;
+            }
+            int dx, dy;
+            vdisplay_t *d = e->button.button == SDL_BUTTON_LEFT ? _display_at(e->button.x, e->button.y, false, &dx, &dy) : NULL;
+            if (d != NULL && touch_set(d->name, true, dx, dy)) {
+                snprintf(_touching, sizeof(_touching), "%s", d->name);
+                return true;
             }
             int velocity;
             int key = _key_at(e->button.x, e->button.y, &velocity);
@@ -951,6 +991,12 @@ bool panel_event(const SDL_Event *e) {
             if (_drag != NULL) {
                 _slide(_drag, e->motion.x);
             }
+            if (_touching[0] != '\0') {
+                int dx, dy;
+                if (_display_at(e->motion.x, e->motion.y, true, &dx, &dy) != NULL) {
+                    touch_set(_touching, true, dx, dy);
+                }
+            }
             if (_playing) {
                 // Dragged across the keys: each one under the mouse plays in turn.
                 int velocity;
@@ -972,6 +1018,10 @@ bool panel_event(const SDL_Event *e) {
             }
             if (_held_button >= 0) {
                 gamepad_press(_held_button, false);
+            }
+            if (_touching[0] != '\0') {
+                touch_set(_touching, false, 0, 0);
+                _touching[0] = '\0';
             }
             midi_keyboard_note(_held_note, false, 0);
             _playing = false;

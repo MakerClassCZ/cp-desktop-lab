@@ -21,6 +21,7 @@
 #include "panel.h"
 #include "parts.h"
 #include "sdl_host.h"
+#include "touch.h"
 
 #define FRAME_MS 16
 // Pixels that changed this recently are still changing.
@@ -267,6 +268,38 @@ void desktop_sdl_request_screenshot(void) {
     __atomic_store_n(&_screenshot_requested, 1, __ATOMIC_RELEASE);
 }
 
+// The left button on the display is a touch there. SDL hands the renderer's logical pixels; the
+// letterbox around the picture is no touch, though a drag from the picture stays at its edge.
+static void _mouse_touch(const SDL_Event *e) {
+    static bool held;
+    if (_window == NULL || _pixels == NULL) {
+        return;
+    }
+    bool down = held;
+    int x, y;
+    if (e->type == SDL_MOUSEMOTION) {
+        x = e->motion.x;
+        y = e->motion.y;
+    } else {
+        if (e->button.button != SDL_BUTTON_LEFT) {
+            return;
+        }
+        x = e->button.x;
+        y = e->button.y;
+        down = e->type == SDL_MOUSEBUTTONDOWN;
+        if (down && (x < 0 || y < 0 || x >= _width || y >= _height)) {
+            return;
+        }
+    }
+    if (!down && !held) {
+        return;
+    }
+    held = down;
+    x = x < 0 ? 0 : x >= _width ? _width - 1 : x;
+    y = y < 0 ? 0 : y >= _height ? _height - 1 : y;
+    touch_set(TOUCH_MAIN_DISPLAY, down, x, y);
+}
+
 void desktop_sdl_task(void) {
     panel_task();
     if (_window == NULL && !panel_open()) {
@@ -301,10 +334,16 @@ void desktop_sdl_task(void) {
                     parts_press(parts_key_button(event.key.keysym.sym), pressed);
                 }
                 break;
+            case SDL_MOUSEBUTTONDOWN:
+            case SDL_MOUSEBUTTONUP:
+            case SDL_MOUSEMOTION:
+                _mouse_touch(&event);
+                break;
             case SDL_WINDOWEVENT:
-                // The display's window (the panel takes its own events): no cursor over it.
+                // The display's window (the panel takes its own events): no cursor over it, unless
+                // a touchscreen reads the mouse there.
                 if (event.window.event == SDL_WINDOWEVENT_ENTER) {
-                    SDL_ShowCursor(SDL_DISABLE);
+                    SDL_ShowCursor(touch_display_bound(TOUCH_MAIN_DISPLAY) ? SDL_ENABLE : SDL_DISABLE);
                 } else if (event.window.event == SDL_WINDOWEVENT_EXPOSED
                            || event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
                     _stale = true;

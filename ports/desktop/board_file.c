@@ -40,6 +40,7 @@
 #include "desktop_port.h"
 #include "neopixel_emu.h"
 #include "parts.h"
+#include "touch.h"
 
 #define MAX_NAMES 128
 
@@ -172,8 +173,9 @@ static char *_unquote(char *s) {
 #define BOARD 5
 #define SHIFTREG 6
 #define MIDI 17
-static const char *const _sections[] = { "[pins]", "[neopixel]", "[gamepad]", "[i2c]", "[spi]", "[board]", "[shiftreg]", "[button]", "[switch]", "[led]", "[analog]", "[pwm]", "[touch]", "[i2s]", "[mic]", "[encoder]", "[ir]", "[midi]" };
-static const part_kind_t _kinds[] = { 0, 0, 0, 0, 0, 0, 0, PART_BUTTON, PART_SWITCH, PART_LED, PART_ANALOG, PART_PWM, PART_TOUCH, PART_SPEAKER, PART_MIC, PART_ENCODER, PART_IR, 0 };
+#define TOUCHSCREEN 18
+static const char *const _sections[] = { "[pins]", "[neopixel]", "[gamepad]", "[i2c]", "[spi]", "[board]", "[shiftreg]", "[button]", "[switch]", "[led]", "[analog]", "[pwm]", "[touch]", "[i2s]", "[mic]", "[encoder]", "[ir]", "[midi]", "[touchscreen]" };
+static const part_kind_t _kinds[] = { 0, 0, 0, 0, 0, 0, 0, PART_BUTTON, PART_SWITCH, PART_LED, PART_ANALOG, PART_PWM, PART_TOUCH, PART_SPEAKER, PART_MIC, PART_ENCODER, PART_IR, 0, 0 };
 
 static bool _add_part(const char *where, part_kind_t kind, const char *name, const char *options) {
     const mcu_pin_obj_t *pin = _pin(name);
@@ -222,6 +224,32 @@ static bool _add_spi(const char *where, const char *name, const char *spec) {
     const char *why = NULL;
     if (!spi_virtual_add(name, rest, cs, dc, &why)) {
         fprintf(stderr, "circuitpython: %s: %s\n", where, why);
+        return false;
+    }
+    return true;
+}
+
+// NAME = "resistive X1 X2 Y1 Y2 [options]": a resistive panel on four pins (touch.c).
+static bool _add_touchscreen(const char *where, const char *name, const char *spec) {
+    char kind[16], names[4][32];
+    int used = 0;
+    if (sscanf(spec, "%15s %31s %31s %31s %31s%n", kind, names[0], names[1], names[2], names[3], &used) != 5
+        || strcmp(kind, "resistive") != 0) {
+        fprintf(stderr, "circuitpython: %s: %s: a [touchscreen] is \"resistive X1 X2 Y1 Y2\"\n", where, name);
+        return false;
+    }
+    uint8_t pins[4];
+    for (int i = 0; i < 4; i++) {
+        const mcu_pin_obj_t *pin = _pin(names[i]);
+        if (pin == NULL || !desktop_pin_is_gpio(pin->number)) {
+            fprintf(stderr, "circuitpython: %s: %s: no pin %s\n", where, name, names[i]);
+            return false;
+        }
+        pins[i] = pin->number;
+    }
+    const char *why = NULL;
+    if (!touch_add_resistive(name, pins, spec + used, &why)) {
+        fprintf(stderr, "circuitpython: %s: %s: %s\n", where, name, why);
         return false;
     }
     return true;
@@ -360,7 +388,7 @@ static bool _load(const char *path) {
             }
             if (section == NONE) {
                 fprintf(stderr, "circuitpython: %s: unknown section %s ([pins], [neopixel], [gamepad], [i2c], [spi], [board], [shiftreg], [button], "
-                    "[switch], [led], [analog], [pwm], [touch], [i2s], [mic], [encoder], [ir] or [midi])\n", where, s);
+                    "[switch], [led], [analog], [pwm], [touch], [i2s], [mic], [encoder], [ir], [midi] or [touchscreen])\n", where, s);
                 ok = false;
             } else if (section == GAMEPAD) {
                 gamepad_show();
@@ -408,6 +436,8 @@ static bool _load(const char *path) {
             ok = _add_spi(where, key, value);
         } else if (section == MIDI) {
             ok = _add_midi(where, key, value);
+        } else if (section == TOUCHSCREEN) {
+            ok = _add_touchscreen(where, key, value);
         } else if (section == GAMEPAD) {
             ok = _add_gamepad(where, key, value);
         } else if (section == I2C) {

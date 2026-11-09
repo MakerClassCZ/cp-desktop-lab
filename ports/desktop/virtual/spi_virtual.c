@@ -121,6 +121,7 @@ void spi_virtual_set_rotation(int cs, uint16_t rotation) {
     for (int i = 0; i < _count; i++) {
         if (_devices[i].cs == cs) {
             _devices[i].rotation = rotation % 360;
+            _devices[i].display->rotation = rotation % 360;
         }
     }
 }

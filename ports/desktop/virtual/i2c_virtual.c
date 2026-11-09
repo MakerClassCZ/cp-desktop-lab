@@ -17,6 +17,7 @@
 #include "bus_trace.h"
 #include "desktop_port.h"
 #include "parts.h"
+#include "touch.h"
 #include "i2c/models.h"
 
 #define DEVICES_MAX 12
@@ -32,6 +33,7 @@ static const i2c_virtual_model_t *const _models[] = {
     &i2c_model_lc709203f, &i2c_model_lsm6ds33, &i2c_model_lis3mdl, &i2c_model_apds9960, &i2c_model_sht31d,
     &i2c_model_sht4x, &i2c_model_scd41, &i2c_model_scd40, &i2c_model_aht20, &i2c_model_max17048, &i2c_model_drv2605,
     &i2c_model_pca9685, &i2c_model_ht16k33, &i2c_model_is31fl3741, &i2c_model_tsc2007,
+    &i2c_model_ft6206, &i2c_model_cst816,
     // A seesaw library at an address no model has gets the rotary encoder, a seesaw like most.
     &i2c_model_rotary, &i2c_model_soil, &i2c_model_crickit, &i2c_model_ssd1306,
     #endif
@@ -145,10 +147,16 @@ bool i2c_virtual_add(const char *name, const char *spec, const char **why) {
     unsigned address = 0, width = 0, height = 0;
     bool addressed = false;
     snprintf(words, sizeof(words), "%s", spec);
-    // MODEL, then a size (a display's) and an address, in either order.
+    char display[16] = "";
+    // MODEL, then a size (a display's) and an address, in either order; a touch controller's
+    // display=NAME, swap, flip_x and flip_y.
     for (char *word = strtok(words, " "); word != NULL; word = strtok(NULL, " ")) {
         if (model_name[0] == '\0') {
             snprintf(model_name, sizeof(model_name), "%s", word);
+        } else if (strncmp(word, "display=", 8) == 0) {
+            snprintf(display, sizeof(display), "%s", word + 8);
+        } else if (strcmp(word, "swap") == 0 || strncmp(word, "flip_", 5) == 0) {
+            continue;
         } else if (strncasecmp(word, "0x", 2) != 0 && sscanf(word, "%ux%u", &width, &height) == 2) {
             continue;
         } else {
@@ -205,6 +213,9 @@ bool i2c_virtual_add(const char *name, const char *spec, const char **why) {
         for (int c = 0; c < model->channel_count; c++) {
             parts_add_sensor(dev, c);
         }
+        if (model->touch != I2C_TOUCH_NONE) {
+            touch_bind_i2c(dev, display, spec);
+        }
         return true;
     }
     bool fresh = dev == NULL;
@@ -227,6 +238,9 @@ bool i2c_virtual_add(const char *name, const char *spec, const char **why) {
             *why = "too many parts";
             return false;
         }
+    }
+    if (model->touch != I2C_TOUCH_NONE) {
+        touch_bind_i2c(dev, display, spec);
     }
     dev->present = true;
     return true;

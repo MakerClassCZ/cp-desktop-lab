@@ -18,6 +18,7 @@ typedef struct {
     uint16_t *pixels;           // width * height
     bool on;                    // the display was told to show its memory
     bool dirty;                 // pixels changed since the panel last uploaded them
+    uint16_t rotation;          // the program's: the picture is the controller's memory turned back by it
 } vdisplay_t;
 
 #define VDISPLAYS_MAX 4

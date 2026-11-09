@@ -30,6 +30,8 @@ typedef struct {
 } seesaw_product_t;
 void i2c_model_seesaw_write(i2c_virtual_device_t *dev, const uint8_t *data, size_t len, const seesaw_product_t *p);
 void i2c_model_seesaw_read(i2c_virtual_device_t *dev, uint8_t *data, size_t len, const seesaw_product_t *p);
+// A capacitive touch controller's point registers 0x00-0x0f (ft6206.c), from channels x, y, touched.
+uint8_t i2c_model_touch_reg(i2c_virtual_device_t *dev, uint8_t reg);
 // A Sensirion sensor's word as it reads: most significant byte first, then its CRC.
 void i2c_model_sensirion_word(uint8_t *out, uint16_t word);
 
@@ -57,3 +59,5 @@ extern const i2c_virtual_model_t i2c_model_soil;
 extern const i2c_virtual_model_t i2c_model_ht16k33;
 extern const i2c_virtual_model_t i2c_model_is31fl3741;
 extern const i2c_virtual_model_t i2c_model_tsc2007;
+extern const i2c_virtual_model_t i2c_model_ft6206;
+extern const i2c_virtual_model_t i2c_model_cst816;

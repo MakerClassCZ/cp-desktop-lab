@@ -28,6 +28,12 @@ typedef struct {
 
 struct i2c_virtual_device;
 
+// A touch controller's channels 0-2 follow a touch on its display (touch.c): x, y and
+// pressure over 0-4095, or x, y in the display's pixels and touched.
+#define I2C_TOUCH_NONE 0
+#define I2C_TOUCH_RAW12 1
+#define I2C_TOUCH_PIXELS 2
+
 typedef struct {
     const char *name;
     uint8_t address;            // the default
@@ -42,6 +48,7 @@ typedef struct {
     // The library that drives the chip (adafruit_mcp9808, its submodules too): of the models at
     // an address, a driver's scan attaches the one whose library it is.
     const char *driver;
+    uint8_t touch;              // I2C_TOUCH_*
 } i2c_virtual_model_t;
 
 typedef struct i2c_virtual_device {
@@ -70,6 +77,10 @@ typedef struct i2c_virtual_device {
     uint64_t gpio_output, gpio_level, gpio_pull;
     uint16_t pwm[16], pwm_hz[16];
     int32_t encoder_read;       // a seesaw encoder's position when last read
+    // a touch controller: the display it reads (empty: the default) and its panel's swap/flips
+    char touch_display[16];
+    uint8_t touch_flags;
+    uint8_t touch_event;        // what its last read said (a capacitive controller's press/contact)
 } i2c_virtual_device_t;
 
 extern const desktop_i2c_ops_t i2c_virtual_ops;

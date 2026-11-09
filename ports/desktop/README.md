@@ -425,7 +425,8 @@ Z X A S keys), a CLUE (its five sensors on the virtual
 I2C bus), a PyBadge and a PyGamer (their buttons the gamepad's, through a shift register), a
 MatrixPortal (its HUB75 matrix on the panel), a PicoPad (its gamepad), a Metro and a Metro RP2350,
 a MacroPad (its keys, encoder and OLED), a NeoTrellis M4, a FunHouse, a Feather RP2040
-Prop-Maker, a QT Py, a Circuit Playground Bluefruit and a Fruit Jam. Most of their `[pins]` come
+Prop-Maker, a QT Py, a Circuit Playground Bluefruit, a Fruit Jam and a PyPortal (its touchscreen
+the main window, below). Most of their `[pins]` come
 from the real boards' `pins.c`; where a board has more pins than the virtual board's 28, its file
 says which names it leaves out. A board file's `[board]` section names the real board where libraries
 ask: `platform = "Atmel SAMD21"` is `sys.platform` (adafruit_circuitplayground picks by it),
@@ -441,7 +442,7 @@ Every change goes to `--trace-bus`, the user's and the program's: `NEOPIXEL GPIO
 (`CIRCUITPY_SDL_KEYS`) takes `set NAME VALUE`, `press NAME` and `release NAME` (a part, or a
 gamepad button: `press START`) `turn NAME DETENTS` (an encoder, negative counter-clockwise), `send NAME [CODE]` (an IR receiver: its
 code, or `255,2,127,128`), `tap KEYS C4` (a MIDI keyboard's note), `down KEY`/`up KEY` (a computer key, by its
-position on a US keyboard), `dump NAME PATH` and `close` (the panel window, as its close button does), so a test moves
+position on a US keyboard), `touch NAME X Y` and `untouch NAME` (a touchscreen, below), `dump NAME PATH` and `close` (the panel window, as its close button does), so a test moves
 the panel without a window. These panel lines are the same in `POST /api/panel`. `pwmio`, `touchio` and `pulseio` exist on the virtual board only, `audiobusio` on every board (a record of
 the generator takes as long as its samples last, as on a board); `analogio`
 uses the MCP2221's ADC and DAC on `--board mcp2221`.
@@ -509,7 +510,9 @@ value is a slider on the board panel (`ACCEL.x`, `ENV.temp` ...), set from the k
 | `soil` | 0x36 | moisture (about 200 dry to 2000 wet), temp (C): the seesaw soil sensor |
 | `ht16k33` | 0x70 | none: the matrix and segment backpacks take what is written (the bus trace has it) |
 | `is31fl3741` | 0x30 | none: the LED Glasses and the 13x9 RGB matrix take what is written, page by page |
-| `tsc2007` | 0x48 | x, y (0-4095), pressure (0 untouched, over 100 touched) |
+| `tsc2007` | 0x48 | x, y (0-4095), pressure (0 untouched, over 100 touched); a touch on its display sets them (below) |
+| `ft6206` | 0x38 | x, y (pixels), touched: a FocalTouch capacitive controller (`adafruit_focaltouch`), one point |
+| `cst816` | 0x15 | x, y (pixels), touched: a CST816T capacitive controller (`adafruit_cst8xx`), one point |
 | `crickit` | 0x49 | touch1-touch4 (raw, 300 untouched); a seesaw with the Crickit's pins: servos, motors and drives (PWM) and its NeoPixels go to the bus trace (`CRICKIT SERVO1 4915/65535 at 50 Hz: 1.50 ms high`), signals read their pull |
 
 ```
@@ -554,6 +557,35 @@ A display no board file names appears when the program makes it: a `busdisplay.B
 `fourwire` bus with any cs pin gets a colour TFT (`TFT`, `TFT2`...) as large as the program says,
 an `i2cdisplaybus` at any address an SSD1306 (`OLED`...), 128x32 when the driver says so. The
 program's `rotation` is turned back, so the panel shows the picture upright, as on the module.
+
+### Touchscreens
+
+A click or a drag with the left mouse button on a display, in the main window or on a display
+of the panel, is a touch there, read by what the board file binds to that display. The main
+window shows the mouse cursor when something reads touches on it.
+
+```
+[touchscreen]
+TOUCH = "resistive TOUCH_XL TOUCH_XR TOUCH_YD TOUCH_YU calibration=5200,59000,5800,57000"
+[i2c]
+CTP = "ft6206 display=TFT"               # also cst816, tsc2007
+```
+
+A resistive panel sits on four pins, in `adafruit_touchscreen`'s order (X1 X2 Y1 Y2): an
+`AnalogIn` on one of them reads the voltage the panel's two plates give for the pins the program
+drives, so the library's pressure check and both axes work as on the glass. `calibration=` is
+the library's raw minimum and maximum per axis, where the display's edges fall (default
+0,65535,0,65535). An I2C controller takes the touch as its channels, so the panel's sliders
+follow. `display=NAME` binds either to a display; without it, the board file's first display,
+else the main window (`DISPLAY`). A touch reports in the controller's frame, the glass's: a
+display the program turns (`rotation=90`) reports as the unturned module does, and the program
+turns the point as it would on the module. `swap`, `flip_x` and `flip_y` mount a panel the other
+way. `boards/files/pyportal.toml` has the PyPortal's panel.
+
+The panel lines `touch NAME X Y` (down there, or moved there) and `untouch NAME` touch a display
+without the mouse, in what it shows; `cpapi.Board.touch(x, y)`, `untouch()` and `tap(x, y)` send
+them. The bus trace has `TOUCHSCREEN DISPLAY 120,45` and `TOUCHSCREEN DISPLAY up`, and the
+panel's state each display's `touch`.
 
 `rgbmatrix.RGBMatrix` on any of the virtual board's pins shows on the panel as the display `MATRIX` (HUB75
 panels have no controller to model: what the program refreshes is what the panel shows, dark

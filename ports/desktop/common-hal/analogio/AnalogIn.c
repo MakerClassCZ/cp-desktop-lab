@@ -11,6 +11,7 @@
 #include "desktop_pins.h"
 #include "mcp2221.h"
 #include "parts.h"
+#include "touch.h"
 
 static void _need_mcp2221(void) {
     if (desktop_pin_backend != &desktop_mcp2221_backend) {
@@ -20,10 +21,18 @@ static void _need_mcp2221(void) {
 
 void common_hal_analogio_analogin_construct(analogio_analogin_obj_t *self, const mcu_pin_obj_t *pin) {
     self->part = NULL;
+    self->touch = false;
     if (desktop_pin_backend == &desktop_virtual_backend) {
         // A slider of the board panel.
         if (!desktop_pin_is_gpio(pin->number)) {
             raise_ValueError_invalid_pin();
+        }
+        if (touch_owns_pin(pin->number)) {
+            // A resistive touchscreen's pin: its circuit, not a slider.
+            common_hal_mcu_pin_claim(pin);
+            self->pin = pin;
+            self->touch = true;
+            return;
         }
         part_t *part = parts_for_pin(pin->number, PART_ANALOG);
         if (part == NULL) {
@@ -63,6 +72,9 @@ void common_hal_analogio_analogin_deinit(analogio_analogin_obj_t *self) {
 }
 
 uint16_t common_hal_analogio_analogin_get_value(analogio_analogin_obj_t *self) {
+    if (self->touch) {
+        return touch_pin_value(self->pin->number);
+    }
     if (self->part != NULL) {
         part_t *part = self->part;
         return part->detached ? 0 : part->value;

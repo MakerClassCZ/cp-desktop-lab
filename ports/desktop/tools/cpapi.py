@@ -505,6 +505,21 @@ class Board:
     def release(self, name):
         self.panel("release " + name)
 
+    def touch(self, x, y, display="DISPLAY"):
+        """A touch at x, y of the display (down, or moved there while down)."""
+        self.panel("touch %s %d %d" % (display, x, y))
+
+    def untouch(self, display="DISPLAY"):
+        self.panel("untouch " + display)
+
+    def tap(self, x, y, display="DISPLAY", hold=0.15):
+        """Down at x, y, held for hold seconds (a program polls), then lifted."""
+        import time
+
+        self.touch(x, y, display)
+        time.sleep(hold)
+        self.untouch(display)
+
     def turn(self, name, detents):
         self.panel("turn %s %d" % (name, detents))
 

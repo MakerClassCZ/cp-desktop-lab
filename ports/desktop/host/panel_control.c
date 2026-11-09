@@ -17,10 +17,11 @@
 #include "gamepad.h"
 #include "midi_in.h"
 #include "parts.h"
+#include "touch.h"
 #include "vdisplay.h"
 
 static const char *const _verbs[] = {
-    "set", "press", "release", "tap", "turn", "send", "down", "up", "dump", "close",
+    "set", "press", "release", "tap", "turn", "send", "down", "up", "dump", "close", "touch", "untouch",
 };
 
 // "dump NAME PATH": what a display shows, as a PPM.
@@ -66,6 +67,20 @@ bool panel_apply(const char *line, char *err, size_t errlen) {
     }
     if (strcmp(verb, "dump") == 0) {
         return _dump(line, err, errlen);
+    }
+    if (strcmp(verb, "touch") == 0 || strcmp(verb, "untouch") == 0) {
+        // "touch DISPLAY X Y": down there, or moved there; "untouch DISPLAY": lifted.
+        int x = 0, y = 0;
+        bool down = verb[0] == 't';
+        if (n < 2 || (down && sscanf(line, "%*s %*s %d %d", &x, &y) != 2)) {
+            snprintf(err, errlen, down ? "touch needs a display, x and y" : "untouch needs a display");
+            return false;
+        }
+        if (!touch_set(name, down, x, y)) {
+            snprintf(err, errlen, "no touchscreen on the display %s", name);
+            return false;
+        }
+        return true;
     }
     if (n == 1 && strcmp(verb, "close") == 0) {
         panel_close();

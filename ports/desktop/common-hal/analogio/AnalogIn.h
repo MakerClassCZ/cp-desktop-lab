@@ -16,4 +16,5 @@ typedef struct {
     const mcu_pin_obj_t *pin;
     uint8_t channel;
     void *part;                 // the panel's part, on the virtual board
+    bool touch;                 // a resistive touchscreen's pin (virtual/touch.c)
 } analogio_analogin_obj_t;

@@ -80,6 +80,7 @@ SRC_C += \
 	virtual/rgbmatrix_virtual.c \
 	virtual/sdcard_virtual.c \
 	virtual/spi_virtual.c \
+	virtual/touch.c \
 	virtual/vdisplay.c \
 	boards/$(BOARD)/board.c \
 	boards/$(BOARD)/pins.c \
@@ -190,8 +191,9 @@ ifneq ($(CLANG),1)
 CFLAGS += -Wno-error=maybe-uninitialized
 # glibc 2.43's strchr returns const char * for a const argument; this shared file keeps char *.
 $(BUILD)/shared-bindings/adafruit_pixelbuf/PixelBuf.o: CFLAGS += -Wno-error=discarded-qualifiers
-# The virtual I2C devices compute in doubles, the BME280's compensation as its library does.
-$(patsubst %.c,$(BUILD)/%.o,$(wildcard virtual/i2c/*.c)): CFLAGS := $(filter-out -fsingle-precision-constant,$(CFLAGS))
+# The virtual I2C devices compute in doubles, the BME280's compensation as its library does, and
+# so does the resistive touchscreen's circuit.
+$(patsubst %.c,$(BUILD)/%.o,$(wildcard virtual/i2c/*.c) virtual/touch.c): CFLAGS := $(filter-out -fsingle-precision-constant,$(CFLAGS))
 endif
 
 ifeq ($(CIRCUITPY_HOSTNETWORK),1)
