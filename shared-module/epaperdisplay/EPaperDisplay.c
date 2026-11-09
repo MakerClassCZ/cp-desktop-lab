@@ -25,6 +25,14 @@
 
 #define DELAY 0x80
 
+// CIRCUITPY-CHANGE: a port can attach a model of the panel to the bus (one it emulates) before
+// the start sequence goes out, from what the driver declares.
+void epaperdisplay_port_attach(epaperdisplay_epaperdisplay_obj_t *self, const epaperdisplay_construct_args_t *args);
+MP_WEAK void epaperdisplay_port_attach(epaperdisplay_epaperdisplay_obj_t *self, const epaperdisplay_construct_args_t *args) {
+    (void)self;
+    (void)args;
+}
+
 void common_hal_epaperdisplay_epaperdisplay_construct(epaperdisplay_epaperdisplay_obj_t *self,
     const epaperdisplay_construct_args_t *args) {
     uint16_t color_depth = 1;
@@ -97,6 +105,9 @@ void common_hal_epaperdisplay_epaperdisplay_construct(epaperdisplay_epaperdispla
     if (args->highlight_color == 0x00 && args->highlight_color2 == 0x00 && args->write_color_ram_command != NO_COMMAND) {
         // TODO: Clear
     }
+
+    // CIRCUITPY-CHANGE: the port's model of the panel, if any.
+    epaperdisplay_port_attach(self, args);
 
     // Set the group after initialization otherwise we may send pixels while we delay in
     // initialization.

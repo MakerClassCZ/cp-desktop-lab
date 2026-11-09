@@ -55,6 +55,9 @@ with Board.launch("ports/desktop/build-linux/circuitpython", "/tmp/repro/CIRCUIT
 - `b.pixels(name)`: a display's pixels (`width`, `height`, `rgb`, `p[x, y]` as 0xRRGGBB),
   `count_colors()`, `diff(expected)` against another picture or a function of (x, y).
 - `b.trace()`/`b.trace_wait(text)`: every I2C, SPI and UART transfer.
+- An `EPaperDisplay` gets a modelled panel, `b.pixels("EPD")`, shown only at a refresh, with
+  its busy pin; `b.state()` counts its `refreshes`. A board file's `epaper cs=PIN refresh_ms=N`
+  or `stuck` changes how long it is busy.
 - `b.state()`, `b.panel("set ENV.temp 24.5", "press A")`: parts, buttons, sensors.
 - `fast_time=True`: sleeps return at once and move the clock on, for code that waits long.
 - `b.after_run()` once `code.py` has ended: `leaked_pins`, the pins objects left claimed (as

@@ -889,6 +889,10 @@ void panel_state_json(api_buf_t *b) {
         api_buf_json_string(b, d->name, strlen(d->name));
         api_buf_printf(b, ", \"width\": %u, \"height\": %u, \"on\": %s", (unsigned)d->width, (unsigned)d->height,
             d->on ? "true" : "false");
+        if (d->epaper) {
+            api_buf_printf(b, ", \"epaper\": true, \"busy\": %s, \"refreshes\": %lu", d->busy ? "true" : "false",
+                (unsigned long)d->refreshes);
+        }
         _touch_json(b, d->name);
         first = false;
     }

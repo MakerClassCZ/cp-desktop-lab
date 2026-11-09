@@ -12,6 +12,7 @@
 #include <strings.h>
 
 #include "airlift.h"
+#include "epaper_virtual.h"
 #include "sdcard_virtual.h"
 #include "vdisplay.h"
 
@@ -74,6 +75,10 @@ bool spi_virtual_add(const char *name, const char *spec, int cs, int dc, const c
         }
         return sdcard_virtual_add(cs, why);
     }
+    // An e-paper panel: its options; the size and the rest come from the program's EPaperDisplay.
+    if (strcasecmp(model, "epaper") == 0) {
+        return epaper_virtual_declare(name, spec, cs, why);
+    }
     bool known = false;
     int n = snprintf(message, sizeof(message), "unknown SPI display %s (", model);
     for (size_t i = 0; _models[i] != NULL; i++) {
@@ -117,7 +122,7 @@ bool spi_virtual_add(const char *name, const char *spec, int cs, int dc, const c
 }
 
 bool spi_virtual_uses_pin(int pin) {
-    if (airlift_uses_pin(pin)) {
+    if (airlift_uses_pin(pin) || epaper_virtual_uses_pin(pin)) {
         return true;
     }
     for (int i = 0; i < _count; i++) {
@@ -266,6 +271,7 @@ static bool _transfer(const uint8_t *out, uint8_t fill, uint8_t *in, size_t len)
         sdcard_virtual_transfer(card, out, fill, in, len);
         return true;
     }
+    epaper_virtual_transfer(out, fill, len);
     for (int i = 0; i < _count; i++) {
         tft_t *t = &_devices[i];
         if (!_low(t->cs)) {

@@ -558,6 +558,32 @@ A display no board file names appears when the program makes it: a `busdisplay.B
 an `i2cdisplaybus` at any address an SSD1306 (`OLED`...), 128x32 when the driver says so. The
 program's `rotation` is turned back, so the panel shows the picture upright, as on the module.
 
+### E-paper
+
+An `epaperdisplay.EPaperDisplay` on a `fourwire` bus of the virtual board gets a panel, `EPD`
+(`EPD2` for a second), from what the driver declares: its size, RAM, window and RAM commands,
+busy pin and colours. The panel takes the commands as the controller would: the black and the
+colour RAM are written through the windows the driver sets (or row after row when it sets
+none), and only the refresh command shows them, upright; then the busy pin reads busy for the
+refresh time. Monochrome, a highlight colour, four greys, 7-colour ACeP and Spectra 6 show in
+their colours. `adafruit_ssd1680`, `adafruit_uc8151d`, `adafruit_spd1656` and the like run
+unchanged. The panel decodes the bits with the driver's own inversion flags, so a wrong flag in
+a driver does not show; the controller's other settings (data entry direction, LUTs) are not
+modelled.
+
+`/api/state` has `epaper`, `busy` and `refreshes` for each such display, and the trace a line
+`EPD EPD refresh N` at each refresh (`EPD EPD refresh while busy` when one comes too soon).
+A board file's line sets the refresh time (100 ms by default) or keeps the panel busy for ever,
+to see what a program does with a panel that never answers:
+
+```
+[spi]
+EPD = "epaper cs=EPD_CS refresh_ms=1500"    # or: "epaper cs=EPD_CS stuck"
+```
+
+`tests/test_epaper.py` checks the pictures of the SSD1680 and SPD1656 drivers' settings, the
+busy pin and both options.
+
 ### Touchscreens
 
 A click or a drag with the left mouse button on a display, in the main window or on a display

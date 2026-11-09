@@ -77,6 +77,7 @@ SRC_C += \
 	virtual/ble_controller.c \
 	virtual/board_parts.c \
 	virtual/display_auto.c \
+	virtual/epaper_virtual.c \
 	virtual/i2c_virtual.c \
 	virtual/midi_in.c \
 	virtual/neopixel_emu.c \

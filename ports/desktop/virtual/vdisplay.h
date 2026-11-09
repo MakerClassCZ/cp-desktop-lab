@@ -19,6 +19,9 @@ typedef struct {
     bool on;                    // the display was told to show its memory
     bool dirty;                 // pixels changed since the panel last uploaded them
     uint16_t rotation;          // the program's: the picture is the controller's memory turned back by it
+    bool epaper;                // shows its memory only at a refresh (epaper_virtual.c)
+    bool busy;                  // an e-paper panel's refresh is under way
+    uint32_t refreshes;
 } vdisplay_t;
 
 #define VDISPLAYS_MAX 4
