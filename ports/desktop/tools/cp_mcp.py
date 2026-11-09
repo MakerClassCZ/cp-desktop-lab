@@ -74,6 +74,10 @@ TOOLS = [
                     "description": "the program's sleeps return at once and "
                     "move its clock on, for tests that wait; virtual board only, sound silent",
                 },
+                "audio_capture": {
+                    "type": "boolean",
+                    "description": "record what the audio outputs play from the start, for the audio tool",
+                },
                 "args": {
                     "type": "array",
                     "items": STRING,
@@ -123,6 +127,21 @@ TOOLS = [
     ),
     ("interrupt", "Ctrl-C: stops code.py (KeyboardInterrupt).", _schema()),
     ("reload", "Ctrl-D: runs code.py again.", _schema()),
+    (
+        "audio",
+        "What the audio outputs (AudioOut, I2SOut, PWMAudioOut) played since recording started: per "
+        "output its rate, length, peak and rms level (0-1), tone frequency, silent stretches and "
+        "underruns (ran dry with more to play). start=true clears and records from now on (launch "
+        "with audio_capture to record from the start); save writes the first recording as a WAV file.",
+        _schema({"start": {"type": "boolean"}, "save": STRING}),
+    ),
+    (
+        "after_run",
+        "What the last run left behind once its VM ended: pins still claimed by objects that did not "
+        "release them (a board keeps them claimed into the next run too), and the bytes outside the "
+        "VM's heap with their change since the VM before. Call it after code.py ends or after reload.",
+        _schema(),
+    ),
     (
         "state",
         "The virtual board's parts as JSON: LEDs, PWM (servo angles), sensors, analog pins, "
@@ -371,6 +390,7 @@ class Server:
         program=None,
         fast_time=False,
         code_file=None,
+        audio_capture=False,
     ):
         if self.board is not None:
             if not self._ended():
@@ -387,6 +407,7 @@ class Server:
                 args=[str(a) for a in args],
                 fast_time=bool(fast_time),
                 code_file=code_file,
+                audio_capture=bool(audio_capture),
             )
         except (OSError, RuntimeError) as e:
             raise ToolError("the program did not start: %s" % e)
@@ -474,6 +495,36 @@ class Server:
     def t_reload(self):
         self._api(self._need().reload)
         return "code.py runs again"
+
+    def t_audio(self, start=False, save=None):
+        b = self._need()
+        if start:
+            self._api(b.audio_start)
+            return "recording from now on"
+        out = []
+        recordings = self._api(b.audio)
+        for r in recordings:
+            f = r.frequency()
+            out.append(
+                {
+                    "pin": r.pin,
+                    "rate": r.rate,
+                    "channels": r.channels,
+                    "seconds": round(r.seconds, 3),
+                    "peak": round(r.peak(), 3),
+                    "rms": round(r.rms(), 3),
+                    "frequency": round(f, 1) if f else None,
+                    "silences": [[round(a, 3), round(e, 3)] for a, e in r.silences()[:20]],
+                    "underruns": r.underruns,
+                    "dropped": r.dropped,
+                }
+            )
+        if save and recordings:
+            recordings[0].save(save)
+        return json.dumps(out, indent=1)
+
+    def t_after_run(self):
+        return json.dumps(self._api(self._need().after_run), indent=1)
 
     def t_state(self):
         return json.dumps(self._api(self._need().state), indent=1)

@@ -121,7 +121,6 @@ void reset_port(void) {
     ssl_reset();
     mbedtls_psa_crypto_free();
     #endif
-    reset_all_pins();
     #if CIRCUITPY_FILESYSTEM_POSIX
     // Once CIRCUITPY is up, a directory drive starts reloading on host edits.
     if (filesystem_present() && supervisor_filesystem_posix_root() != NULL) {
@@ -207,6 +206,10 @@ void *port_realloc(void *ptr, size_t size, bool dma_capable) {
         _ram_used = _ram_used - old + malloc_usable_size(block);
     }
     return block;
+}
+
+size_t desktop_port_ram_used(void) {
+    return _ram_used;
 }
 
 size_t port_heap_get_largest_free_size(void) {

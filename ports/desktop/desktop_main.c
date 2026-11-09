@@ -24,6 +24,7 @@
 
 #include "py/runtime.h"
 
+#include "audio_capture.h"
 #include "ble_host.h"
 #include "bus_trace.h"
 #include "control_api.h"
@@ -84,6 +85,7 @@ static void usage(const char *prog) {
         "  --api [PORT]      the control API on 127.0.0.1:PORT (default 8765, 0 = any free port)\n"
         "  --api-host ADDR   listen on ADDR instead; needs CIRCUITPY_API_TOKEN\n"
         "  --fast-time       sleeps return at once and move the program's clock on (virtual board)\n"
+        "  --audio-capture   record what the audio outputs play, for the API's /api/audio\n"
         "Ctrl-\\ on the console powers off.\n", prog);
 }
 
@@ -206,6 +208,8 @@ int main(int argc, char **argv) {
             desktop_options.api_host = argv[++i];
         } else if (strcmp(argv[i], "--fast-time") == 0) {
             desktop_options.fast_time = true;
+        } else if (strcmp(argv[i], "--audio-capture") == 0) {
+            desktop_options.audio_capture = true;
         } else {
             usage(argv[0]);
             return strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0 ? 0 : 2;
@@ -222,6 +226,10 @@ int main(int argc, char **argv) {
     if (desktop_options.fast_time && !fast_time_allowed()) {
         fprintf(stderr, "circuitpython: --fast-time runs only on the virtual board without --uart, --ble PORT or a microphone: real hardware needs real time\n");
         return 2;
+    }
+
+    if (desktop_options.audio_capture) {
+        audio_capture_start();
     }
 
     // VfsPosix moves the working directory into CIRCUITPY, so keep paths absolute.

@@ -58,6 +58,8 @@ SRC_C += \
 	hardware/mpsse_i2c.c \
 	hardware/mpsse_spi.c \
 	hardware/usb_host.c \
+	host/after_run.c \
+	host/audio_capture.c \
 	host/api_json.c \
 	host/api_ring.c \
 	host/ble_host.c \

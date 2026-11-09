@@ -39,9 +39,11 @@ void common_hal_mcu_pin_reset_number(uint8_t pin_no) {
     }
 }
 
+#if CIRCUITPY_BULK_RESET
 void common_hal_never_reset_pin(const mcu_pin_obj_t *pin) {
     _never_reset |= 1ull << pin->number;
 }
+#endif
 
 bool common_hal_mcu_pin_is_free(const mcu_pin_obj_t *pin) {
     return !(_claimed & (1ull << pin->number));
@@ -53,4 +55,8 @@ uint8_t common_hal_mcu_pin_number(const mcu_pin_obj_t *pin) {
 
 void common_hal_mcu_pin_claim(const mcu_pin_obj_t *pin) {
     _claimed |= 1ull << pin->number;
+}
+
+uint64_t desktop_pins_claimed(void) {
+    return _claimed & ~_never_reset;
 }

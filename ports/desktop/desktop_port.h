@@ -37,6 +37,7 @@ typedef struct {
     int api_port;               // --api: the control API's port, 0 = any free one, -1 = off
     const char *api_host;       // --api-host: the address it listens on, NULL = 127.0.0.1
     bool fast_time;             // --fast-time: sleeps return at once and move the program's clock on
+    bool audio_capture;         // --audio-capture: record what the audio outputs play from the start
     char **argv;                // reset re-executes the process with these
 } desktop_options_t;
 
@@ -109,6 +110,9 @@ void desktop_watch_start(const char *root);
 // For each system's watcher (platform/*/watch.c): a host change seen, its thread started.
 void desktop_watch_changed(void);
 void desktop_watch_thread(void *(*main)(void *), void *arg);
+
+// Bytes of the port heap in use: what is allocated outside the VM's heap (supervisor/port.c).
+size_t desktop_port_ram_used(void);
 
 void desktop_serial_restore(void);
 __attribute__((noreturn)) void desktop_power_off(int status);

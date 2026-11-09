@@ -814,6 +814,9 @@ naming another `Host`, or a browser's preflight, is refused, so a web page canno
 | `POST /api/panel` | key script lines (`set ENV.temp 24.5`, `press A`, `turn ENC 2`, `send IR_RX`, `down Z`), applied before the answer |
 | `GET /api/display?name=NAME` | the window (`DISPLAY`), or a board file's display, as PNG |
 | `GET /api/trace?since=N&wait=TEXT&timeout=MS` | the bus trace, as the console; with or without `--trace-bus` |
+| `GET /api/after-run` | what the last run left behind once its VM ended: `leaked_pins`, `outside_heap` and `outside_heap_change` (bytes), `runs` (VMs seen ending), `vm_running` |
+| `GET /api/audio`, `POST /api/audio/start`, `/stop` | the recordings of the audio outputs (`pin`, `rate`, `channels`, `frames`, `underruns`, `dropped`); start clears them and records from then on |
+| `GET /api/audio/wav?index=N` | a recording as a WAV file |
 | `GET /api/ble` | the Bluetooth controller (`virtual`, `serial`, `off`), what is advertised (`data`, `scan_response` in hex, `name`, `connectable`), the address, the connection, whether it is `scanning`; `links`: each connection's `handle`, `peer`, the program's `role` and whether it is `encrypted`; `encrypted` and `key_size` of the first encrypted one; `bonds`, their number for this controller; the BLE workflow's state (`workflow`: `off`, `discovery`, `reconnecting`, `connected`, `on`) and `bonded` |
 | `POST /api/ble/discover` | the BLE workflow's discovery mode: the lab resets, bonds erased, advertised as `CIRCUITPYxxxx` (409 when the workflow is off) |
 | `POST /api/ble/connect`, `/disconnect` | the phone joins what the program advertises, or leaves (409 with a real controller); `{"address": "4a:...", "type": "random"}`: the phone connects from that address; with `{"address": ...}` alone (and `"random"`) a peer of that address does, as a central, or that peer's link ends |
@@ -870,6 +873,10 @@ as above. The exit status is 0; 1 when it did not end in time
 or the program ended; 2 after a hard fault, whose backtrace comes last; 3 when `code.py` ended in
 an exception; 64 for wrong arguments.
 
+`--wav FILE` records the audio outputs, prints a line per recording and saves the first. After
+each run it prints the pins its objects left claimed and, from the second run on, a change of
+the memory outside the heap (see "What a run leaves behind" below).
+
 `tests/test_api.py` and the button and encoder cases of `tests/test_panel.py` use it.
 
 ### For AI agents: an MCP server
@@ -891,6 +898,31 @@ a time; it runs headless unless `launch` asks for the window. `stop`, or the ser
 board it launched; one it attached to keeps running. Console text comes without escape sequences,
 at most its last 20000 characters, and a call waits at most 60 s. `tests/test_mcp.py` drives it
 as a host would. `--code` is `code_file` in `cpapi`'s `Board.launch` and the MCP `launch`.
+
+### What a run leaves behind
+
+The objects free their pins themselves when a run ends (their finalizers), as on the boards'
+ports since they stopped resetting every pin (`CIRCUITPY_BULK_RESET = 0`). A pin that no object
+released stays claimed into the next run, which gets `ValueError: GPIO5 in use` as a board would,
+and the program says so on stderr: `still claimed after the run: GPIO5`. `GET /api/after-run`
+(`after_run()` in `cpapi`, `after_run` in MCP) has it after each VM: the pins (a display kept
+for the terminal keeps its own, which is no leak), the bytes allocated outside the VM's heap and
+their change since the VM before. A change that repeats from run to run is memory a board loses
+on every reload. `tests/test_after_run.py` makes every kind of object without `deinit()` and
+makes them again.
+
+### Recording the sound
+
+`--audio-capture` (`audio_capture=True` in `cpapi`'s `launch`, in the MCP `launch` too) keeps
+what `AudioOut`, `I2SOut` and `PWMAudioOut` play, as 16-bit samples, one recording per output
+pin; `POST /api/audio/start` clears them and records from then on. `audio()` in `cpapi` gives a
+`Recording` per output: `samples`, `rate`, `channels`, `seconds`, `peak()` and `rms()` (0 to 1),
+`frequency()` of a tone, `silences(min_ms, level)` (gaps and drop-outs), `underruns` (the output
+ran dry with more to play, in real time) and `save(path)` as WAV; each takes a `start` and an
+`end` in seconds. With `--fast-time` the recording is what the program's clock played, made
+as fast as the computer allows: a looped sample is kept whole, not skipped as when silent.
+`audiocore.get_buffer()` and `reset_buffer()` are there too, as in the unix coverage build.
+`tests/test_audio_capture.py` checks a tone's frequency, length and level and a gap.
 
 ### Fast time
 

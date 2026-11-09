@@ -101,6 +101,93 @@ class Picture:
         return out
 
 
+class Recording:
+    """What one audio output played (/api/audio): pin, rate, channels, samples (an array of
+    signed 16-bit values, channels interleaved), underruns (times it ran dry with more to play,
+    in real time) and dropped (frames past the recording's limit). Times are in seconds."""
+
+    def __init__(self, meta, wav):
+        import array
+
+        self.pin, self.rate, self.channels = meta["pin"], meta["rate"], meta["channels"]
+        self.underruns, self.dropped = meta["underruns"], meta["dropped"]
+        self.wav = wav
+        self.samples = array.array("h", wav[44:])
+        if sys.byteorder != "little":
+            self.samples.byteswap()
+
+    @property
+    def seconds(self):
+        return len(self.samples) / self.channels / self.rate
+
+    def channel(self, n=0, start=0, end=None):
+        """One channel's samples from start to end."""
+        a = int(start * self.rate)
+        b = len(self.samples) // self.channels if end is None else int(end * self.rate)
+        return self.samples[a * self.channels + n : b * self.channels : self.channels]
+
+    def peak(self, start=0, end=None, n=0):
+        """The largest level, 0 to 1."""
+        s = self.channel(n, start, end)
+        return max((abs(x) for x in s), default=0) / 32768
+
+    def rms(self, start=0, end=None, n=0):
+        """The root mean square level, 0 to 1."""
+        s = self.channel(n, start, end)
+        return (sum(x * x for x in s) / len(s)) ** 0.5 / 32768 if s else 0.0
+
+    def frequency(self, start=0, end=None, n=0):
+        """The tone's frequency in Hz: the median period between its rising zero crossings, so
+        silences and other notes around it do not count; None in silence."""
+        s = self.channel(n, start, end)
+        level = max(64, int(self.peak(start, end, n) * 32768 * 0.1))
+        low, last, periods = False, None, []
+        for i, x in enumerate(s):
+            if x < -level:
+                low = True
+            elif x > level and low:
+                low = False
+                if last is not None:
+                    periods.append(i - last)
+                last = i
+        if not periods:
+            return None
+        periods.sort()
+        return self.rate / periods[len(periods) // 2]
+
+    def silences(self, min_ms=20, level=0.01, n=0):
+        """[(start, end)] of each stretch at least min_ms long below level: gaps and drop-outs."""
+        s = self.channel(n)
+        limit, need = level * 32768, int(self.rate * min_ms / 1000)
+        out, run = [], None
+        for i, x in enumerate(list(s) + [32767]):
+            if abs(x) < limit:
+                run = i if run is None else run
+            elif run is not None:
+                if i - run >= need:
+                    out.append((run / self.rate, i / self.rate))
+                run = None
+        return out
+
+    def save(self, path):
+        open(path, "wb").write(self.wav)
+
+    def summary(self):
+        f = self.frequency()
+        return "%s: %d Hz, %d channel%s, %.2f s, peak %.2f, rms %.2f%s, %d silences, %d underruns" % (
+            self.pin,
+            self.rate,
+            self.channels,
+            "" if self.channels == 1 else "s",
+            self.seconds,
+            self.peak(),
+            self.rms(),
+            ", about %.0f Hz" % f if f else "",
+            len(self.silences()),
+            self.underruns,
+        )
+
+
 def upto_next(r):
     """A stream answer's text up to its next offset. Cut from the end: a byte that was not UTF-8
     comes back as one 3-byte character, and those are rarer after the match than before it."""
@@ -260,10 +347,12 @@ class Board:
         env=None,
         fast_time=False,
         code_file=None,
+        audio_capture=False,
     ):
         """Start program on drive with --api 0 and a token of its own; stderr is read for the port.
         fast_time: its sleeps return at once and move its clock on (--fast-time). code_file: a
-        file on the drive run in place of code.py (--code)."""
+        file on the drive run in place of code.py (--code). audio_capture: record what the audio
+        outputs play from the start, for audio() (--audio-capture)."""
         token = secrets.token_hex(16)
         e = dict(os.environ if env is None else env, CIRCUITPY_API_TOKEN=token)
         if headless:
@@ -282,6 +371,8 @@ class Board:
             command += ["--fast-time"]
         if code_file:
             command += ["--code", code_file]
+        if audio_capture:
+            command += ["--audio-capture"]
         command += list(args)
         p = subprocess.Popen(
             command,
@@ -522,6 +613,36 @@ class Board:
 
     def turn(self, name, detents):
         self.panel("turn %s %d" % (name, detents))
+
+    def audio_start(self):
+        """Clear the recordings and record what the audio outputs play from now on (from the start
+        with launch(audio_capture=True))."""
+        return self.request("POST", "/api/audio/start")
+
+    def audio_stop(self):
+        return self.request("POST", "/api/audio/stop")
+
+    def audio(self):
+        """[Recording] of what each audio output played since recording started, one per output
+        pin, rate and channel count."""
+        listed = self.request("GET", "/api/audio")["recordings"]
+        return [
+            Recording(m, self.request("GET", "/api/audio/wav?index=%d" % m["index"], raw=True))
+            for m in listed
+        ]
+
+    def after_run(self, timeout=5):
+        """What the last run left behind, once its VM has ended (waited for up to timeout s):
+        leaked_pins (claimed by objects that did not release them; a board keeps them claimed
+        too), outside_heap and outside_heap_change (bytes allocated outside the VM's heap, and the
+        change since the VM before), runs (the VMs ended so far: boot.py, code.py and the REPL each
+        count) and vm_running (true when it did not end in time)."""
+        end = time.time() + timeout
+        while True:
+            r = self.request("GET", "/api/after-run")
+            if not r["vm_running"] or time.time() > end:
+                return r
+            time.sleep(0.05)
 
     def interrupt(self):
         self.request("POST", "/api/interrupt")
@@ -2109,6 +2230,7 @@ def run(argv):
     ap.add_argument("--colors", action="store_true", help="print the display's pixels per colour")
     ap.add_argument("--fast-time", action="store_true")
     ap.add_argument("--code", dest="code_file", help="a file on the drive run in place of code.py")
+    ap.add_argument("--wav", help="record the audio outputs; save the first as this WAV after the last run")
     try:
         a = ap.parse_args(argv)
     except SystemExit as e:
@@ -2133,6 +2255,7 @@ def run(argv):
         board=a.board,
         fast_time=a.fast_time,
         code_file=a.code_file,
+        audio_capture=bool(a.wav),
     ) as b:
         for i in range(a.runs):
             if i:
@@ -2153,6 +2276,22 @@ def run(argv):
                 break
             if "Traceback (most recent call last)" in out:
                 status = 3
+            if not a.wait:
+                left = b.after_run()
+                if left["leaked_pins"]:
+                    print("--- still claimed after the run: " + ", ".join(left["leaked_pins"]))
+                # The first run's change is against boot.py's VM, so it counts from the second.
+                if i and left["outside_heap_change"]:
+                    print("--- outside the heap: %+d bytes since the run before" % left["outside_heap_change"])
+        if a.wav and b.process.poll() is None:
+            recordings = b.audio()
+            for r in recordings:
+                print("--- audio " + r.summary())
+            if recordings:
+                recordings[0].save(a.wav)
+                print("--- audio saved:", a.wav)
+            else:
+                print("--- no audio played")
         if status in (0, 3) and (a.png or a.colors):
             data = b.display(a.display)
             if a.png:

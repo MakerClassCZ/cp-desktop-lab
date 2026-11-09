@@ -6,8 +6,10 @@
 
 #include "desktop_pins.h"
 
+#include <stdio.h>
 #include <string.h>
 
+#include "py/qstr.h"
 #include "py/runtime.h"
 #include "shared-bindings/microcontroller/Pin.h"
 #include "airlift.h"
@@ -70,6 +72,24 @@ const mcu_pin_obj_t *desktop_pin_obj(uint8_t number) {
         return _gpio[number];
     }
     return desktop_pin_is_gpio(number) ? _virtual_only[number - DESKTOP_PIN_UART_TX] : NULL;
+}
+
+extern const mp_obj_dict_t board_module_globals;
+
+// The pin's first name in board, or GPIOn. Only names compiled in: a board file's names are
+// strings of the VM that just ended.
+void desktop_pin_name(uint8_t number, char *out, size_t cap) {
+    const mcu_pin_obj_t *pin = desktop_pin_obj(number);
+    const mp_map_t *map = &board_module_globals.map;
+    for (size_t i = 0; pin != NULL && i < map->alloc; i++) {
+        mp_obj_t key = map->table[i].key;
+        if (map->table[i].value == MP_OBJ_FROM_PTR(pin) && mp_obj_is_qstr(key) &&
+            MP_OBJ_QSTR_VALUE(key) < MP_QSTRnumber_of) {
+            snprintf(out, cap, "%s", qstr_str(MP_OBJ_QSTR_VALUE(key)));
+            return;
+        }
+    }
+    snprintf(out, cap, "GPIO%u", number);
 }
 
 const mcu_pin_obj_t *desktop_bus_pin(const mcu_pin_obj_t *pin) {

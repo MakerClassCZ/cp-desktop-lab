@@ -57,6 +57,13 @@ with Board.launch("ports/desktop/build-linux/circuitpython", "/tmp/repro/CIRCUIT
 - `b.trace()`/`b.trace_wait(text)`: every I2C, SPI and UART transfer.
 - `b.state()`, `b.panel("set ENV.temp 24.5", "press A")`: parts, buttons, sensors.
 - `fast_time=True`: sleeps return at once and move the clock on, for code that waits long.
+- `b.after_run()` once `code.py` has ended: `leaked_pins`, the pins objects left claimed (as
+  on the boards' ports, a run frees nothing in bulk: the next run gets "in use"), and
+  `outside_heap_change`, memory outside the heap gained since the run before; with `reload()` in
+  a loop for the bugs of resources that outlive their VM.
+- `audio_capture=True`, then `b.audio()`: a `Recording` per audio output with `peak()`, `rms()`,
+  `frequency()`, `silences()`, `underruns` and `save("x.wav")`; `audiocore.get_buffer()` is there
+  as in the unix coverage build. `cpapi.py run ... --wav x.wav` does it from the command line.
 - `code_file="games/snake.py"`: a file of the drive run in place of `code.py`, every run.
 - `b.ble`: the phone of a Bluetooth LE program (`BLERadio()`, `_bleio`). `scan()` is what it
   advertises (`name`, `services`); `p = b.ble.connect()`, then `p.services()`, `p.read(uuid)`,

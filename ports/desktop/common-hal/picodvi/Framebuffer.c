@@ -56,8 +56,10 @@ void common_hal_picodvi_framebuffer_construct(picodvi_framebuffer_obj_t *self,
         self->framebuffer = NULL;
         mp_raise_RuntimeError(MP_ERROR_TEXT("too many displays"));
     }
+    self->pins = 0;
     for (size_t i = 0; i < MP_ARRAY_SIZE(pins); i++) {
         common_hal_mcu_pin_claim(pins[i]);
+        self->pins |= 1ull << pins[i]->number;
     }
 }
 
@@ -67,6 +69,12 @@ void common_hal_picodvi_framebuffer_deinit(picodvi_framebuffer_obj_t *self) {
     }
     free(self->framebuffer);
     self->framebuffer = NULL;
+    for (uint8_t n = 0; n < 64; n++) {
+        if (self->pins & (1ull << n)) {
+            common_hal_mcu_pin_reset_number(n);
+        }
+    }
+    self->pins = 0;
     if (self->display != NULL) {
         self->display->on = false;
         vdisplay_changed(self->display);

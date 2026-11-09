@@ -23,4 +23,5 @@ typedef struct {
     uint16_t pitch;             // words from one row to the next
     uint8_t color_depth;
     vdisplay_t *display;
+    uint64_t pins;              // one bit per claimed pin number
 } picodvi_framebuffer_obj_t;

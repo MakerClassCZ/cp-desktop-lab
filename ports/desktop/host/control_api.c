@@ -36,6 +36,8 @@ typedef int sock_t;
 
 #include "py/mpconfig.h"
 
+#include "after_run.h"
+#include "audio_capture.h"
 #include "api_json.h"
 #include "api_ring.h"
 #include "ble_controller.h"
@@ -672,6 +674,9 @@ typedef enum {
     VM_DISPLAY,                 // in: the display's name; out: width, height (16 bits each), RGB565
     VM_BLE_BONDS,               // in: "1" for the keys too
     VM_BLE_ERASE,
+    VM_AFTER_RUN,
+    VM_AUDIO,                   // in: "start", "stop" or NULL for the list
+    VM_AUDIO_WAV,               // in: the recording's index
 } vm_kind_t;
 
 // A request the VM runs: the server thread queues it and waits; whichever of the two is done
@@ -843,6 +848,17 @@ void control_api_vm_task(void) {
             _vm_ble_bonds(q);
         } else if (q->kind == VM_BLE_ERASE) {
             _vm_ble_erase(q);
+        } else if (q->kind == VM_AFTER_RUN) {
+            after_run_json(&q->out);
+        } else if (q->kind == VM_AUDIO) {
+            if (q->in != NULL && strcmp(q->in, "start") == 0) {
+                audio_capture_start();
+            } else if (q->in != NULL) {
+                audio_capture_stop();
+            }
+            audio_capture_json(&q->out);
+        } else if (q->kind == VM_AUDIO_WAV) {
+            q->status = audio_capture_wav((size_t)atoi(q->in), &q->out) ? 200 : 404;
         }
         #if CIRCUITPY_SDL
         if (q->kind == VM_STATE) {
@@ -899,6 +915,10 @@ static void _vm_call(request_t *r, vm_kind_t kind, const char *in) {
         _error(r, 503, "out of memory");
     } else if (kind == VM_DISPLAY && q->status == 404) {
         _error(r, 404, "no such display");
+    } else if (kind == VM_AUDIO_WAV && q->status == 404) {
+        _error(r, 404, "no such recording");
+    } else if (kind == VM_AUDIO_WAV) {
+        _answer(r, 200, "audio/wav", q->out.data, q->out.len);
     } else if (kind == VM_DISPLAY) {
         uint16_t size[2];
         memcpy(size, q->out.data, sizeof(size));
@@ -1468,6 +1488,18 @@ static void _route(request_t *r) {
         if (_panel_board(r)) {
             _vm_call(r, VM_STATE, NULL);
         }
+    } else if (strcmp(r->path, "/api/audio") == 0 && get) {
+        _vm_call(r, VM_AUDIO, NULL);
+    } else if ((strcmp(r->path, "/api/audio/start") == 0 || strcmp(r->path, "/api/audio/stop") == 0) && post) {
+        _vm_call(r, VM_AUDIO, r->path + strlen("/api/audio/"));
+    } else if (strcmp(r->path, "/api/audio/wav") == 0 && get) {
+        char index[16];
+        if (!_param(r, "index", index, sizeof(index)) || index[0] == '\0') {
+            strcpy(index, "0");
+        }
+        _vm_call(r, VM_AUDIO_WAV, index);
+    } else if (strcmp(r->path, "/api/after-run") == 0 && get) {
+        _vm_call(r, VM_AFTER_RUN, NULL);
     } else if (strcmp(r->path, "/api/display") == 0 && get) {
         char name[32];
         if (!_param(r, "name", name, sizeof(name)) || name[0] == '\0') {

@@ -31,6 +31,10 @@ CIRCUITPY_BLE_FILE_SERVICE = 1
 CIRCUITPY_BLE_SERIAL_SERVICE = 1
 CIRCUITPY_BLE_DISCOVERY_WAIT = 0
 
+# Objects free their pins themselves (their finalizers), as on the boards' ports; a pin left
+# claimed after a run stays claimed, and host/after_run.c says so.
+CIRCUITPY_BULK_RESET = 0
+
 # A desktop has no reset button to hold for safe mode.
 CIRCUITPY_SKIP_SAFE_MODE_WAIT = 1
 
@@ -87,6 +91,9 @@ CIRCUITPY_SDL = 1
 # Sound is audioio.AudioOut on an SDL2 audio device (common-hal/audioio), so audiocore samples,
 # audiomixer and synthio play.
 CIRCUITPY_AUDIOIO = 1
+# audiocore.get_buffer() and reset_buffer(): a sample's buffers read from Python, as the unix
+# coverage build has them.
+CIRCUITPY_AUDIOCORE_DEBUG = 1
 
 # Displays on a bus: real ones on an FT232H's SPI or an I2C adapter, virtual ones on the virtual
 # board's buses (spi_virtual.c, i2c_virtual.c), shown on the board panel.

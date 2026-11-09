@@ -76,6 +76,10 @@ void desktop_pin_backend_raise_if_lost(void);
 // board.SPI() pass placeholders (pin_BUS_SCL ...) that stand for the chosen board's bus pins.
 const mcu_pin_obj_t *desktop_pin_obj(uint8_t number);
 const mcu_pin_obj_t *desktop_bus_pin(const mcu_pin_obj_t *pin);
+// The pins claimed now that are not kept for the supervisor (never_reset), one bit per number.
+uint64_t desktop_pins_claimed(void);
+// A pin's first name in board, else GPIOn; safe outside a VM.
+void desktop_pin_name(uint8_t number, char *out, size_t cap);
 
 // board.exit(status=0): the way out of code or the REPL on a host, on every board (desktop_board.c).
 extern const mp_obj_fun_builtin_var_t desktop_board_exit_obj;

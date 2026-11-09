@@ -15,6 +15,7 @@
 #include "shared/runtime/interrupt_char.h"
 #include "supervisor/shared/tick.h"
 
+#include "audio_capture.h"
 #include "desktop_port.h"
 #include "sdl_host.h"
 
@@ -86,6 +87,7 @@ static uint32_t _queue(audioio_audioout_obj_t *self, const uint8_t *data, uint32
         if (self->device != 0) {
             SDL_QueueAudio(self->device, out, n * sizeof(int16_t));
         }
+        audio_capture_add(self->left_channel->number, self->sample_rate, self->channel_count, out, n);
         queued += n * sizeof(int16_t);
         done += n;
     }
@@ -104,14 +106,19 @@ static void _fill(audioio_audioout_obj_t *self) {
     int64_t queued;
     if (desktop_options.fast_time) {
         // Behind after a skipped sleep: a sample takes up what the program's clock played, a
-        // loop drops its skipped turns, which would only be made to be thrown away.
+        // loop drops its skipped turns, which would only be made to be thrown away (unless they
+        // are recorded).
         uint64_t due = _fast_due(self);
-        if (self->loop && self->fast_frames < due) {
+        if (self->loop && self->fast_frames < due && !audio_capture_on()) {
             self->fast_frames = due;
         }
         queued = ((int64_t)self->fast_frames - (int64_t)due) * frame;
     } else {
         queued = SDL_GetQueuedAudioSize(self->device);
+        // Played dry with more to come: a gap the listener hears.
+        if (queued == 0 && self->fast_frames > 0 && !self->sample_done) {
+            audio_capture_underrun(self->left_channel->number);
+        }
     }
     while (!self->sample_done && queued < target && !mp_hal_is_interrupted()) {
         uint8_t *buffer;
