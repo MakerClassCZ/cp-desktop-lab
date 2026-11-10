@@ -41,7 +41,7 @@ static void _autoconnect(wifi_radio_obj_t *self) {
 // The computer's interface, when the radio is on a network.
 static bool _info(wifi_radio_obj_t *self, host_net_info_t *info) {
     _autoconnect(self);
-    return self->connected && net_link_up() && host_net_info(info);
+    return self->connected && net_link_is_up() && host_net_info(info);
 }
 
 static mp_obj_t _address(uint32_t address) {
@@ -209,7 +209,7 @@ wifi_radio_error_t common_hal_wifi_radio_connect(wifi_radio_obj_t *self, uint8_t
 
 bool common_hal_wifi_radio_get_connected(wifi_radio_obj_t *self) {
     _autoconnect(self);
-    return self->connected && net_link_up();
+    return self->connected && net_link_is_up();
 }
 
 mp_obj_t common_hal_wifi_radio_get_ap_info(wifi_radio_obj_t *self) {

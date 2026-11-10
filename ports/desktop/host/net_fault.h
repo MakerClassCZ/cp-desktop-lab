@@ -15,8 +15,10 @@
 
 // The Wi-Fi link. Each network call asks first: "fault wifi.link drop" takes the link down
 // there, and every connection made before it is reset. It stays down until the radio connects
-// again or the run ends (net_link_restore).
+// again or the run ends (net_link_restore). net_link_is_up only looks: for what the supervisor
+// asks too (the status bar's address), which must not fire a rule meant for the program.
 bool net_link_up(void);
+bool net_link_is_up(void);
 void net_link_restore(void);
 
 // A connection, as its side keeps it.

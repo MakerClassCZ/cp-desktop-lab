@@ -212,6 +212,28 @@ for args, n in ((("--sockets", "2"), 2), (("--profile", "esp32s3"), 8)):
         out,
     )
 
+# A rule from outside waits for the program's network call: asking wifi.radio.connected (as the
+# supervisor asks for the address) does not fire it.
+OUTSIDE = (
+    COMMON
+    + """
+wifi.radio.connect("Lab", "secret12")
+print("before", wifi.radio.connected, lab.fired())
+print("after", attempt(lambda: conn(5).close()), wifi.radio.connected, lab.fired())
+"""
+)
+with launch(OUTSIDE) as b:
+    b.wait("after", timeout=30)
+    b.panel("fault wifi.link drop once")
+    b.reload()
+    b.wait("before", timeout=30)
+    out = "before" + b.wait("Code done running.", timeout=30)
+check(
+    "wifi.link drop from outside: across a reload, fired by the program's first network call",
+    "before True []" in out and "after gaierror False [('wifi.link', 'drop', 1)]" in out,
+    out,
+)
+
 # The same points on an AirLift: what nina-fw reports, raised as adafruit_esp32spi raises it.
 BOARDS = next(
     p

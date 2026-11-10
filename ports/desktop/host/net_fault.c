@@ -25,6 +25,10 @@ bool net_link_up(void) {
     return !_down;
 }
 
+bool net_link_is_up(void) {
+    return !_down;
+}
+
 void net_link_restore(void) {
     _down = false;
 }

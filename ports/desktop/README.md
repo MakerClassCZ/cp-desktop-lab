@@ -1009,8 +1009,8 @@ fault clear [POINT]
 `after=N` lets the first N matching calls through, `count=N` fires N times (`once`: one),
 without either every time; a filter narrows a rule to a block, an address, a network, a host or
 a port (the host as the program named it). Rules are checked in the order given, and the first
-that fires decides. `net.recv` counts the receives that bring data, the other points their
-calls. The waits run on the program's clock, so `--fast-time` takes no real time for them.
+that fires decides. `net.recv` counts the receives that bring data, `wifi.link` each network
+call and each wait inside a receive, the other points their calls. The waits run on the program's clock, so `--fast-time` takes no real time for them.
 
 The network's points act on both of the lab's networks: `wifi` and `socketpool` on the
 computer's, and an AirLift's, where nina-fw's answers (a status, a failed start, no socket)
