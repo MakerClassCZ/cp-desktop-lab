@@ -373,8 +373,7 @@ static mp_obj_t bleio_adapter_start_scan(size_t n_args, const mp_obj_t *pos_args
         mp_raise_ValueError(MP_ERROR_TEXT("window must be <= interval"));
     }
 
-    mp_buffer_info_t prefix_bufinfo;
-    prefix_bufinfo.len = 0;
+    mp_buffer_info_t prefix_bufinfo = { .buf = NULL, .len = 0 };
     if (args[ARG_prefixes].u_obj != MP_OBJ_NULL) {
         mp_get_buffer_raise(args[ARG_prefixes].u_obj, &prefix_bufinfo, MP_BUFFER_READ);
         // An empty buffer may not be on the heap, but that doesn't matter.

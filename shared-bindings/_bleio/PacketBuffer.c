@@ -128,8 +128,7 @@ static mp_obj_t bleio_packet_buffer_write(mp_uint_t n_args, const mp_obj_t *pos_
     mp_buffer_info_t data_bufinfo;
     mp_get_buffer_raise(args[ARG_data].u_obj, &data_bufinfo, MP_BUFFER_READ);
 
-    mp_buffer_info_t header_bufinfo;
-    header_bufinfo.len = 0;
+    mp_buffer_info_t header_bufinfo = { .buf = NULL, .len = 0 };
     if (args[ARG_header].u_obj != mp_const_none) {
         mp_get_buffer_raise(args[ARG_header].u_obj, &header_bufinfo, MP_BUFFER_READ);
     }
