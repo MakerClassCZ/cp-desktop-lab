@@ -719,10 +719,12 @@ s = _bleio.Service(_bleio.UUID(0x1250))
 ch = C.add_to_service(s, _bleio.UUID(0x1251), properties=C.INDICATE, max_length=20)
 pb = _bleio.PacketBuffer(ch, buffer_size=4)
 _bleio.adapter.start_advertising(bytes([2, 1, 6]), connectable=True)
+probe = b"i%d" % 1
+print("probe", type(probe), repr(probe))
 print("ready")
 n = 0
 while True:
-    if pb.write(b"i%d" % n) > 0:
+    if pb.write(bytes("i%d" % n, "ascii")) > 0:
         print("sent", n)
         n += 1
     time.sleep(0.3)
@@ -742,6 +744,7 @@ with launch(INDICATING) as b:
         p._take(0.3)  # each indication confirmed
     sent = b.console(since=0)["data"]
     got = p._notified.get(c.handle, [])
+print([x for x in sent.splitlines() if "probe" in x])
 check(
     "a PacketBuffer's indications, confirmed: the program goes on writing",
     "sent 3" in sent and len(got) >= 3,
