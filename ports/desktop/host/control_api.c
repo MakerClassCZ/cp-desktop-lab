@@ -37,6 +37,7 @@ typedef int sock_t;
 #include "py/mpconfig.h"
 
 #include "after_run.h"
+#include "fault.h"
 #include "audio_capture.h"
 #include "api_json.h"
 #include "api_ring.h"
@@ -675,6 +676,7 @@ typedef enum {
     VM_BLE_BONDS,               // in: "1" for the keys too
     VM_BLE_ERASE,
     VM_AFTER_RUN,
+    VM_FAULTS,
     VM_AUDIO,                   // in: "start", "stop" or NULL for the list
     VM_AUDIO_WAV,               // in: the recording's index
 } vm_kind_t;
@@ -850,6 +852,8 @@ void control_api_vm_task(void) {
             _vm_ble_erase(q);
         } else if (q->kind == VM_AFTER_RUN) {
             after_run_json(&q->out);
+        } else if (q->kind == VM_FAULTS) {
+            fault_json(&q->out);
         } else if (q->kind == VM_AUDIO) {
             if (q->in != NULL && strcmp(q->in, "start") == 0) {
                 audio_capture_start();
@@ -1500,6 +1504,8 @@ static void _route(request_t *r) {
         _vm_call(r, VM_AUDIO_WAV, index);
     } else if (strcmp(r->path, "/api/after-run") == 0 && get) {
         _vm_call(r, VM_AFTER_RUN, NULL);
+    } else if (strcmp(r->path, "/api/faults") == 0 && get) {
+        _vm_call(r, VM_FAULTS, NULL);
     } else if (strcmp(r->path, "/api/display") == 0 && get) {
         char name[32];
         if (!_param(r, "name", name, sizeof(name)) || name[0] == '\0') {

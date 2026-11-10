@@ -14,14 +14,17 @@
 #include <string.h>
 #include <strings.h>
 
+#include "epaper_virtual.h"
+#include "fault.h"
 #include "gamepad.h"
 #include "midi_in.h"
 #include "parts.h"
+#include "sdcard_virtual.h"
 #include "touch.h"
 #include "vdisplay.h"
 
 static const char *const _verbs[] = {
-    "set", "press", "release", "tap", "turn", "send", "down", "up", "dump", "close", "touch", "untouch",
+    "set", "press", "release", "tap", "turn", "send", "down", "up", "dump", "close", "touch", "untouch", "fault",
 };
 
 // "dump NAME PATH": what a display shows, as a PPM.
@@ -57,13 +60,34 @@ bool panel_accepts(const char *line) {
     return false;
 }
 
-bool panel_apply(const char *line, char *err, size_t errlen) {
+// "set NAME ATTR VALUE" for a device that is no part: true when one took it, *done when it was
+// one's (false with err set when the value was wrong).
+static bool _device_set(const char *line, bool *done, char *err, size_t errlen) {
+    char name[32], attr[16], value[16];
+    if (sscanf(line, "set %31s %15s %15s", name, attr, value) != 3) {
+        return *done = false;
+    }
+    err[0] = '\0';
+    bool ok = sdcard_virtual_set(name, attr, value, err, errlen) || epaper_virtual_set(name, attr, value, err, errlen);
+    *done = ok || err[0] != '\0';
+    return ok;
+}
+
+static bool _apply(const char *line, bool inside, char *err, size_t errlen) {
     char verb[16], name[32];
     long value = 0;
     int n = sscanf(line, "%15s %31s %ld", verb, name, &value);
     if (!panel_accepts(line)) {
         snprintf(err, errlen, "not a panel command: %s", line);
         return false;
+    }
+    if (strcmp(verb, "fault") == 0) {
+        return fault_line(line, inside, err, errlen);
+    }
+    bool done;
+    bool ok = strcmp(verb, "set") == 0 && _device_set(line, &done, err, errlen);
+    if (strcmp(verb, "set") == 0 && done) {
+        return ok;
     }
     if (strcmp(verb, "dump") == 0) {
         return _dump(line, err, errlen);
@@ -163,4 +187,12 @@ bool panel_apply(const char *line, char *err, size_t errlen) {
         return false;
     }
     return true;
+}
+
+bool panel_apply(const char *line, char *err, size_t errlen) {
+    return _apply(line, false, err, errlen);
+}
+
+bool panel_apply_inside(const char *line, char *err, size_t errlen) {
+    return _apply(line, true, err, errlen);
 }

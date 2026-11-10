@@ -64,6 +64,10 @@ with Board.launch("ports/desktop/build-linux/circuitpython", "/tmp/repro/CIRCUIT
   `lab.panel("press A")`, and `lab.result("fail", detail)` for a test that says itself whether
   it passed; `b.result()`, `cpapi.py run` (exit 4) and `ab` read it. `board` has only what a
   board has.
+- Faults, for the bugs of what goes wrong: `lab.panel("fault sd.write error after=3 once")` in
+  the program or `b.panel(...)` from outside; points `sd.read`, `sd.write` (`error`, `timeout`),
+  `i2c` (`nack`, `hold`, `addr=`); `set SD present 0`, `set EPD busy stuck`. `lab.fired()`,
+  `b.fired()`, `faults_fired` in `b.after_run()`, a row in `ab`. README.md, Faults.
 - `fast_time=True`: sleeps return at once and move the clock on, for code that waits long.
 - `b.after_run()` once `code.py` has ended: `leaked_pins`, the pins objects left claimed (as
   on the boards' ports, a run frees nothing in bulk: the next run gets "in use"), and

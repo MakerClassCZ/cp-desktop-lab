@@ -16,7 +16,8 @@
 void after_run_task(void);
 // The result the running program reports (lab.result): "pass", "fail" or "skip", and a detail.
 void after_run_report(const char *status, const char *detail);
-// {"vm_running": bool, "runs": N, "result": null or {"status", "detail"}, "leaked_pins": [...],
+// {"vm_running": bool, "runs": N, "result": null or {"status", "detail"}, "faults_fired": [...],
+// "leaked_pins": [...],
 // "outside_heap": bytes, "outside_heap_change": bytes} of the last VM that ended; runs counts the VMs ended so far
 // (boot.py, code.py and the REPL each one), vm_running says whether one runs now.
 void after_run_json(api_buf_t *b);

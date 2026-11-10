@@ -151,7 +151,9 @@ TOOLS = [
     (
         "panel",
         "Move the virtual board's panel: lines such as 'set ENV.temp 24.5', 'press BUTTON_A', "
-        "'release BUTTON_A', 'turn ENC 2', 'send IR_RX', 'down Z', 'up Z'. Applied in order before this returns.",
+        "'release BUTTON_A', 'turn ENC 2', 'send IR_RX', 'down Z', 'up Z'; faults such as "
+        "'fault sd.write error after=3 once', 'fault i2c nack addr=0x44', 'fault clear'; "
+        "'set SD present 0' (the card pulled out), 'set EPD busy stuck'. Applied in order before this returns.",
         _schema(
             {
                 "commands": {

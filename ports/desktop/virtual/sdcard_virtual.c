@@ -12,6 +12,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 #include "py/mpconfig.h"
 #include "extmod/vfs.h"
@@ -22,6 +23,7 @@
 #include "common-hal/microcontroller/Pin.h"
 #include "desktop_pins.h"
 #include "desktop_port.h"
+#include "fault.h"
 #include "panel.h"
 #include "parts.h"
 #include "spi_virtual.h"
@@ -39,7 +41,10 @@ typedef enum {
 } card_mode_t;
 
 typedef struct {
+    char name[16];
     int cs;
+    bool removed;           // pulled out: it answers nothing
+    bool stuck;             // a write that never ends: busy until CMD0
     FILE *image;
     uint32_t blocks;
     card_mode_t mode;
@@ -70,7 +75,7 @@ static void _send1(card_t *c, uint8_t b) {
 
 static uint8_t _next(card_t *c) {
     if (c->q_len == 0) {
-        return 0xff;
+        return c->stuck ? 0x00 : 0xff;
     }
     uint8_t b = c->queue[c->q_head];
     c->q_head = (c->q_head + 1) % QUEUE;
@@ -149,7 +154,7 @@ static FILE *_open_image(uint32_t *blocks) {
     return f;
 }
 
-bool sdcard_virtual_add(int cs, const char **why) {
+bool sdcard_virtual_add(const char *name, int cs, const char **why) {
     for (int i = 0; i < _count; i++) {
         if (_cards[i].cs == cs) {
             return true;
@@ -161,6 +166,7 @@ bool sdcard_virtual_add(int cs, const char **why) {
     }
     card_t *c = &_cards[_count];
     memset(c, 0, sizeof(*c));
+    snprintf(c->name, sizeof(c->name), "%s", name);
     c->cs = cs;
     c->idle = true;
     _count++;
@@ -189,6 +195,15 @@ static void _r1(card_t *c, uint8_t r1) {
 }
 
 static void _block_out(card_t *c, uint32_t block) {
+    fault_t f = fault_check("sd.read", &(fault_ctx_t) { .block = block, .addr = -1 });
+    if (f.fired) {
+        c->mode = COMMAND;  // a multi-block read stops there
+        if (strcmp(f.action, "error") == 0) {
+            uint8_t token[2] = { 0xff, 0x01 };   // a data error token: "error"
+            _send(c, token, 2);
+        }
+        return;     // a timeout: no token comes
+    }
     uint8_t data[BLOCK];
     memset(data, 0, sizeof(data));
     if (block < c->blocks && fseek(c->image, (long)block * BLOCK, SEEK_SET) == 0) {
@@ -232,6 +247,7 @@ static void _command(card_t *c) {
     switch (cmd) {
         case 0:
             c->idle = true;
+            c->stuck = false;
             c->mode = COMMAND;
             _r1(c, 0x01);
             break;
@@ -312,7 +328,14 @@ static void _byte_in(card_t *c, uint8_t b) {
         case WRITE_DATA:
             c->data[c->data_len++] = b;
             if (c->data_len == BLOCK + 2) {
-                bool ok = c->block < c->blocks && fseek(c->image, (long)c->block * BLOCK, SEEK_SET) == 0
+                fault_t f = fault_check("sd.write", &(fault_ctx_t) { .block = c->block, .addr = -1 });
+                if (f.fired && strcmp(f.action, "timeout") == 0) {
+                    c->stuck = true;    // accepted, then busy for good
+                    _send1(c, 0xe5);
+                    c->mode = COMMAND;
+                    return;
+                }
+                bool ok = !f.fired && c->block < c->blocks && fseek(c->image, (long)c->block * BLOCK, SEEK_SET) == 0
                     && fwrite(c->data, 1, BLOCK, c->image) == BLOCK;
                 fflush(c->image);
                 bus_trace_text("SD write %lu", (unsigned long)c->block);
@@ -337,6 +360,12 @@ static void _byte_in(card_t *c, uint8_t b) {
 
 void sdcard_virtual_transfer(int card, const uint8_t *out, uint8_t fill, uint8_t *in, size_t len) {
     card_t *c = &_cards[card];
+    if (c->removed) {
+        if (in != NULL) {
+            memset(in, 0xff, len);  // nothing on the lines
+        }
+        return;
+    }
     // The image at the card's first use, not when a board file names it.
     if (c->image == NULL) {
         c->image = _open_image(&c->blocks);
@@ -380,11 +409,38 @@ bool sdcard_virtual_attach_default(const uint8_t *out, size_t len) {
         }
     }
     const char *why;
-    if (cs < 0 || !sdcard_virtual_add(cs, &why)) {
+    if (cs < 0 || !sdcard_virtual_add("SD", cs, &why)) {
         return false;
     }
     char name[24];
     parts_pin_name((uint8_t)cs, name, sizeof(name));
     fprintf(stderr, "virtual: SD card attached at %s (automatic; [spi] SD = \"sdcard cs=%s\")\r\n", name, name);
+    return true;
+}
+
+bool sdcard_virtual_set(const char *name, const char *attr, const char *value, char *err, size_t errlen) {
+    card_t *c = NULL;
+    for (int i = 0; i < _count; i++) {
+        if (strcasecmp(_cards[i].name, name) == 0) {
+            c = &_cards[i];
+        }
+    }
+    if (c == NULL) {
+        return false;
+    }
+    if (strcmp(attr, "present") != 0 || (strcmp(value, "0") != 0 && strcmp(value, "1") != 0)) {
+        snprintf(err, errlen, "an SD card takes: set %s present 0|1", c->name);
+        return false;
+    }
+    bool removed = value[0] == '0';
+    if (removed != c->removed) {
+        // Pushed in, it starts as a new card: idle, nothing sent, nothing half received.
+        c->removed = removed;
+        c->idle = true;
+        c->mode = COMMAND;
+        c->app = c->stuck = false;
+        c->cmd_len = c->q_len = 0;
+        bus_trace_text("SD %s %s", c->name, removed ? "pulled out" : "pushed in");
+    }
     return true;
 }

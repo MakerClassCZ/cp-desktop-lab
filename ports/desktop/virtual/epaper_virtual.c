@@ -389,3 +389,25 @@ void epaper_virtual_task(void) {
         }
     }
 }
+
+bool epaper_virtual_set(const char *name, const char *attr, const char *value, char *err, size_t errlen) {
+    panel_t *p = NULL;
+    for (int i = 0; i < PANELS_MAX; i++) {
+        if (_panels[i].used && strcasecmp(_panels[i].name, name) == 0) {
+            p = &_panels[i];
+        }
+    }
+    if (p == NULL) {
+        return false;
+    }
+    if (strcmp(attr, "busy") != 0 || (strcmp(value, "stuck") != 0 && strcmp(value, "auto") != 0)) {
+        snprintf(err, errlen, "an e-paper panel takes: set %s busy stuck|auto", p->name);
+        return false;
+    }
+    p->stuck = value[0] == 's';
+    if (p->stuck && p->attached) {
+        _set_busy(p, true);
+    }
+    bus_trace_text("EPD %s busy %s", p->name, value);
+    return true;
+}

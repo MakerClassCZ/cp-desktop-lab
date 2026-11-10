@@ -6,6 +6,7 @@ shown only at a refresh, after which the busy pin is held for the refresh time. 
 "epaper cs=PIN refresh_ms=N stuck" sets that time or keeps the panel busy.
 """
 
+import time
 from harness import check, launch
 
 COMMON = """import board, displayio, epaperdisplay, fourwire, time
@@ -105,6 +106,11 @@ with launch(SSD1680.replace("ROTATION", "270").replace("HIGHLIGHT", "0") + DRAW,
     out = b.wait("refreshed", timeout=20)
     out += b.wait("\n", timeout=5)
     check("stuck: busy for ever", "refreshed, busy True" in out and epd(b)["busy"], out[-200:])
+    b.panel("set EPD busy auto")
+    time.sleep(0.3)
+    check("set EPD busy auto: the refresh's time over, BUSY is let go", not epd(b)["busy"], epd(b))
+    b.panel("set EPD busy stuck")
+    check("set EPD busy stuck: held again", epd(b)["busy"], epd(b))
 
 SLOW = '[spi]\nEPD = "epaper cs=GPIO8 refresh_ms=1500"\n'
 TIMED = DRAW.replace(

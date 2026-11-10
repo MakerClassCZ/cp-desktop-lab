@@ -68,6 +68,7 @@ SRC_C += \
 	host/bus_trace.c \
 	host/control_api.c \
 	host/debug_hook.c \
+	host/fault.c \
 	host/gamepad.c \
 	host/host_net.c \
 	host/panel.c \

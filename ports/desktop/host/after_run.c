@@ -21,6 +21,7 @@
 #include "after_run.h"
 #include "desktop_pins.h"
 #include "desktop_port.h"
+#include "fault.h"
 
 static bool _vm_was_up;
 static uint64_t _claimed_at_start;
@@ -118,6 +119,7 @@ static void _ended(void) {
     _last.outside_change = _last.runs == 1 ? 0 : (long)outside - (long)_outside_at_end;
     _outside_at_end = outside;
     _last.result = _reported;
+    fault_run_ended();
     _reported = (result_t) {0};
     if (leaked != 0) {
         fprintf(stderr, "circuitpython: still claimed after the run:");
@@ -159,6 +161,8 @@ void after_run_json(api_buf_t *b) {
         api_buf_json_string(b, _last.result.detail, strlen(_last.result.detail));
         api_buf_add(b, "}", 1);
     }
+    api_buf_add(b, ", \"faults_fired\": ", 18);
+    fault_last_run_json(b);
     api_buf_add(b, ", \"leaked_pins\": [", 18);
     bool first = true;
     for (uint8_t n = 0; n < 64; n++) {

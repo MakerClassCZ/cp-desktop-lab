@@ -640,7 +640,8 @@ class Board:
         too), outside_heap and outside_heap_change (bytes allocated outside the VM's heap, and the
         change since the VM before), runs (the VMs ended so far: boot.py, code.py and the REPL each
         count), result (what the program reported with lab.result: {"status", "detail"}, or
-        None) and vm_running (true when it did not end in time)."""
+        None), faults_fired ([{"point", "action", "times"}]) and vm_running (true when it did not
+        end in time)."""
         end = time.time() + timeout
         while True:
             r = self.request("GET", "/api/after-run")
@@ -652,6 +653,15 @@ class Board:
         """What the last run reported with lab.result: {"status": "pass", "fail" or "skip",
         "detail"}, or None. A run that ended in an exception has failed whatever it reported."""
         return self.after_run(timeout)["result"]
+
+    def faults(self):
+        """The fault rules now ("rule", "inside": set by the run, "hits", "fired") and the faults
+        fired in this run. Rules come as panel lines: b.panel("fault sd.write error once")."""
+        return self.request("GET", "/api/faults")
+
+    def fired(self):
+        """The faults fired in this run: [{"point", "action", "times"}]."""
+        return self.faults()["fired"]
 
     def interrupt(self):
         self.request("POST", "/api/interrupt")
@@ -2295,6 +2305,8 @@ def run(argv):
                     print("--- result: " + ": ".join(x for x in reported.values() if x))
                     if reported["status"] == "fail" and status == 0:
                         status = 4
+                if left["faults_fired"]:
+                    print("--- faults fired: " + _faults(left["faults_fired"]))
                 if left["leaked_pins"]:
                     print("--- still claimed after the run: " + ", ".join(left["leaked_pins"]))
                 # The first run's change is against boot.py's VM, so it counts from the second.
@@ -2342,6 +2354,19 @@ def _code_output(out):
     return text.split("Code done running.", 1)[0].strip()
 
 
+def _summed(fired):
+    """Faults fired over several runs, each point and action once with its times added up."""
+    times = {}
+    for f in fired:
+        times[(f["point"], f["action"])] = times.get((f["point"], f["action"]), 0) + f["times"]
+    return [{"point": p, "action": a, "times": t} for (p, a), t in times.items()]
+
+
+def _faults(fired):
+    """Faults fired, as a line: \"sd.write error x3, i2c nack x1\"."""
+    return ", ".join("%s %s x%d" % (f["point"], f["action"], f["times"]) for f in fired)
+
+
 # A run's outcome when it ended well and reported a result with lab.result.
 REPORTED = {"pass": "passed", "fail": "failed", "skip": "skipped"}
 
@@ -2374,7 +2399,13 @@ def _trials(program, code, a):
             out, seen = _until(b, texts, a.timeout)
             printed = _code_output(out)
             lines = [x for x in printed.splitlines() if x.strip()]
-            r = {"outcome": "ok", "detail": "", "last": lines[-1] if lines else "", "leaked": []}
+            r = {
+                "outcome": "ok",
+                "detail": "",
+                "last": lines[-1] if lines else "",
+                "leaked": [],
+                "faults": [],
+            }
             if seen == "You are in safe mode" or any("hard fault" in x for x in b.stderr):
                 r["outcome"] = "hard fault"
             elif b.process is not None and b.process.poll() is not None:
@@ -2387,6 +2418,7 @@ def _trials(program, code, a):
             if r["outcome"] in ("ok", "exception") and not a.wait:
                 left = b.after_run()
                 r["leaked"] = left["leaked_pins"]
+                r["faults"] = left["faults_fired"]
                 # What the program reported, unless it ended in an exception.
                 if r["outcome"] == "ok" and left["result"]:
                     r["outcome"] = REPORTED[left["result"]["status"]]
@@ -2450,6 +2482,13 @@ def ab(argv):
                     ", ".join(sorted({p for r in c for p in r["leaked"]})) or "none"
                     for c in columns
                 ],
+            )
+        )
+    if any(r["faults"] for c in columns for r in c):
+        rows.append(
+            (
+                "faults fired",
+                [_faults(_summed([f for r in c for f in r["faults"]])) or "none" for c in columns],
             )
         )
     rows.append(("each run", [" ".join(r["outcome"].split()[0] for r in c) for c in columns]))

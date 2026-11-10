@@ -450,7 +450,8 @@ Every change goes to `--trace-bus`, the user's and the program's: `NEOPIXEL GPIO
 gamepad button: `press START`) `turn NAME DETENTS` (an encoder, negative counter-clockwise), `send NAME [CODE]` (an IR receiver: its
 code, or `255,2,127,128`), `tap KEYS C4` (a MIDI keyboard's note), `down KEY`/`up KEY` (a computer key, by its
 position on a US keyboard), `touch NAME X Y` and `untouch NAME` (a touchscreen, below), `dump NAME PATH` and `close` (the panel window, as its close button does), so a test moves
-the panel without a window. These panel lines are the same in `POST /api/panel`. `pwmio`, `touchio` and `pulseio` exist on the virtual board only, `audiobusio` on every board (a record of
+the panel without a window. These panel lines are the same in `POST /api/panel` and the
+program's `lab.panel()`; faults are panel lines too (see [Faults](#faults)). `pwmio`, `touchio` and `pulseio` exist on the virtual board only, `audiobusio` on every board (a record of
 the generator takes as long as its samples last, as on a board); `analogio`
 uses the MCP2221's ADC and DAC on `--board mcp2221`.
 
@@ -847,7 +848,8 @@ naming another `Host`, or a browser's preflight, is refused, so a web page canno
 | `POST /api/panel` | key script lines (`set ENV.temp 24.5`, `press A`, `turn ENC 2`, `send IR_RX`, `down Z`), applied before the answer |
 | `GET /api/display?name=NAME` | the window (`DISPLAY`), or a board file's display, as PNG |
 | `GET /api/trace?since=N&wait=TEXT&timeout=MS` | the bus trace, as the console; with or without `--trace-bus` |
-| `GET /api/after-run` | what the last run left behind once its VM ended: `result` (what it reported with `lab.result`, or null), `leaked_pins`, `outside_heap` and `outside_heap_change` (bytes), `runs` (VMs seen ending), `vm_running` |
+| `GET /api/faults` | the fault rules (`rule`, `inside`: set by the run, `hits`, `fired`) and the faults fired in this run |
+| `GET /api/after-run` | what the last run left behind once its VM ended: `result` (what it reported with `lab.result`, or null), `faults_fired`, `leaked_pins`, `outside_heap` and `outside_heap_change` (bytes), `runs` (VMs seen ending), `vm_running` |
 | `GET /api/audio`, `POST /api/audio/start`, `/stop` | the recordings of the audio outputs (`pin`, `rate`, `channels`, `frames`, `underruns`, `dropped`); start clears them and records from then on |
 | `GET /api/audio/wav?index=N` | a recording as a WAV file |
 | `GET /api/ble` | the Bluetooth controller (`virtual`, `serial`, `off`), what is advertised (`data`, `scan_response` in hex, `name`, `connectable`), the address, the connection, whether it is `scanning`; `links`: each connection's `handle`, `peer`, the program's `role` and whether it is `encrypted`; `encrypted` and `key_size` of the first encrypted one; `bonds`, their number for this controller; the BLE workflow's state (`workflow`: `off`, `discovery`, `reconnecting`, `connected`, `on`) and `bonded` |
@@ -959,7 +961,8 @@ lab's own things are here:
 - `lab.parts`, `lab.attach`, `lab.detach`, `lab.attached`: parts on the virtual board (see
   [Plugging parts in from Python](#plugging-parts-in-from-python)).
 - `lab.panel(*lines)`: panel lines, as `POST /api/panel` and `b.panel()` take them
-  (`press A`, `set ENV.temp 30`); a line that is not one raises `ValueError`.
+  (`press A`, `set ENV.temp 30`, `fault sd.write error once`); a line that is not one raises
+  `ValueError`. `lab.fired()`: the faults fired in this run, `(point, action, times)`.
 - `lab.result(status, detail="")`: the run's result, `"pass"`, `"fail"` or `"skip"`; a
   later call replaces it. The after-run report has it (`b.result()` in `cpapi`), `cpapi.py run`
   exits 4 on a fail and `ab` counts it. A run that ends in an exception has failed whatever it
@@ -974,6 +977,43 @@ except ImportError:
 ...
 if lab:
     lab.result("pass" if ok else "fail", detail)
+```
+
+### Faults
+
+A fault is a panel line: at a named point a call fails, on a count, never at random, so a run
+repeats exactly and `ab` compares two programs on the same failure.
+
+```
+fault POINT ACTION [block=N] [addr=N] [after=N] [count=N|once]
+fault clear [POINT]
+```
+
+| point | actions | what the program sees |
+|---|---|---|
+| `sd.read` | `error`, `timeout` | the card's error token, or no data token: sdcardio's `OSError` |
+| `sd.write` | `error`, `timeout` | the write refused, or the card busy for good (until a new `SDCard` resets it) |
+| `i2c` | `nack`, `hold` | the address not acknowledged (`ENODEV`), or SDA held low (`ETIMEDOUT`) |
+
+`after=N` lets the first N matching calls through, `count=N` fires N times (`once`: one),
+without either every time; `block=` and `addr=` narrow a rule to a block or an address. Rules are
+checked in the order given, and the first that fires decides. Rules from the program
+(`lab.panel`) end with its run and its `fault clear` clears only those; rules from the API or
+the key script stay, counting on across reloads, until a `fault clear` from outside. Each
+firing is in the trace (`FAULT i2c 0x18: nack`), `lab.fired()` and `b.fired()` list this
+run's, the after-run report has the last run's (`faults_fired`), `cpapi.py run` prints them and
+`ab` adds a row.
+
+Some states are not calls but a part's: `set SD present 0` pulls the board file's SD card out
+(it answers nothing) and `set SD present 1` pushes it in again, as a new card; `set EPD busy
+stuck` holds an e-paper panel's BUSY from now, `set EPD busy auto` lets it follow the refresh
+again.
+
+```python
+import lab
+lab.panel("fault sd.write error after=3 once")
+...                          # the fourth block written fails
+print(lab.fired())           # [('sd.write', 'error', 1)]
 ```
 
 ### What a run leaves behind

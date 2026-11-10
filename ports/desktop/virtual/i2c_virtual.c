@@ -6,6 +6,8 @@
 
 #include "i2c_virtual.h"
 
+#include "fault.h"
+
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,6 +18,7 @@
 
 #include "bus_trace.h"
 #include "desktop_port.h"
+#include "fault.h"
 #include "parts.h"
 #include "touch.h"
 #include "i2c/models.h"
@@ -263,8 +266,19 @@ static bool _construct(uint32_t frequency, uint32_t *actual) {
 static void _deinit(void) {
 }
 
+// "fault i2c nack": the address is not acknowledged, as with no device there; "hold": SDA held
+// low, every transfer times out.
+static int _fault(uint16_t address) {
+    fault_t f = fault_check("i2c", &(fault_ctx_t) { .block = -1, .addr = address });
+    return !f.fired ? 0 : strcmp(f.action, "nack") == 0 ? -MP_ENODEV : -MP_ETIMEDOUT;
+}
+
 static int _write(uint16_t address, const uint8_t *data, size_t len, bool stop) {
     (void)stop;
+    int fault = _fault(address);
+    if (fault != 0) {
+        return fault;
+    }
     i2c_virtual_device_t *dev = i2c_virtual_at(address);
     if (dev == NULL) {
         return -MP_ENODEV;
@@ -280,6 +294,10 @@ static int _write(uint16_t address, const uint8_t *data, size_t len, bool stop) 
 }
 
 static int _read(uint16_t address, uint8_t *data, size_t len) {
+    int fault = _fault(address);
+    if (fault != 0) {
+        return fault;
+    }
     i2c_virtual_device_t *dev = i2c_virtual_at(address);
     if (dev == NULL) {
         return -MP_ENODEV;

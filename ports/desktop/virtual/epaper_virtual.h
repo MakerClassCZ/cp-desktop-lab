@@ -27,3 +27,6 @@ bool epaper_virtual_transfer(const uint8_t *out, uint8_t fill, size_t len);
 // From the background task: a refresh's busy time ends.
 void epaper_virtual_task(void);
 bool epaper_virtual_uses_pin(int pin);
+// "set NAME busy stuck|auto": BUSY held from now, or following the refresh again. False when no
+// panel has that name; false with err set for a bad attribute or value.
+bool epaper_virtual_set(const char *name, const char *attr, const char *value, char *err, size_t errlen);

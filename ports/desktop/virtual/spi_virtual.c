@@ -73,7 +73,7 @@ bool spi_virtual_add(const char *name, const char *spec, int cs, int dc, const c
             *why = "an SD card needs its cs= pin";
             return false;
         }
-        return sdcard_virtual_add(cs, why);
+        return sdcard_virtual_add(name, cs, why);
     }
     // An e-paper panel: its options; the size and the rest come from the program's EPaperDisplay.
     if (strcasecmp(model, "epaper") == 0) {

@@ -24,12 +24,15 @@ bool panel_event(const SDL_Event *event);   // true when the event was the panel
 // The panel's lines (host/panel_control.c), the same from the control API and the key script:
 // "set NAME VALUE", "press NAME", "release NAME", "tap KEYS NOTE", "turn NAME DETENTS",
 // "send NAME [CODE]", "down KEY", "up KEY", "dump DISPLAY PATH", "close", "touch DISPLAY X Y",
-// "untouch DISPLAY".
+// "untouch DISPLAY", "fault POINT ACTION ..." (fault.h), "set SD present 0|1", "set EPD busy stuck|auto".
 bool panel_accepts(const char *line);
 // A line queued for the VM thread, from any thread; false when it is not a panel line.
 bool panel_command(const char *line);
-// A line applied now, on the VM thread; false: why in err.
+// A line applied now, on the VM thread; false: why in err. From outside the run (the API, the
+// key script): its faults stay until a fault clear.
 bool panel_apply(const char *line, char *err, size_t errlen);
+// The same from inside the run (lab.panel, a playbook): its faults end with the run.
+bool panel_apply_inside(const char *line, char *err, size_t errlen);
 
 // What the panel shows, as JSON: the parts, the NeoPixels, the displays, the gamepad's buttons.
 // On the VM thread.

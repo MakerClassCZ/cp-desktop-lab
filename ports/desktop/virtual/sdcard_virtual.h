@@ -14,8 +14,13 @@
 // adafruit_sdcard work. Its blocks are an image file beside the drive (CIRCUITPY-SD.img, 16 MB),
 // made and FAT-formatted at the card's first use, as a new card comes formatted.
 
-// A card listening on cs; a second on the same cs is the same card. False with *why set.
-bool sdcard_virtual_add(int cs, const char **why);
+// A card listening on cs, named name (a board file's, "SD" for the automatic one); a second on
+// the same cs is the same card. False with *why set.
+bool sdcard_virtual_add(const char *name, int cs, const char **why);
+// "set NAME present 0|1": the card pulled out (it answers nothing) or pushed in (it starts
+// again, as a new card does). False when no card has that name; false with err set for a bad
+// attribute or value.
+bool sdcard_virtual_set(const char *name, const char *attr, const char *value, char *err, size_t errlen);
 // The card selected now (its cs low), or -1.
 int sdcard_virtual_selected(void);
 // A transfer to the selected card: out (or fill) from the host, in (when not NULL) its answers.

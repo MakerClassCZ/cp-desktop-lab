@@ -22,7 +22,7 @@ with launch('print("ready")\n') as b:
     check("board has none of the lab's names", "[]" in out.splitlines()[0], out)
     check(
         "lab has them",
-        "['attach', 'attached', 'detach', 'exit', 'panel', 'parts', 'result']" in out,
+        "['attach', 'attached', 'detach', 'exit', 'fired', 'panel', 'parts', 'result']" in out,
         out,
     )
     out = b.exec(
