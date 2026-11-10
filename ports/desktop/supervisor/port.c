@@ -51,6 +51,9 @@
 #include "desktop_port.h"
 #include "midi_in.h"
 #include "parts.h"
+#if CIRCUITPY_COUNTIO
+#include "common-hal/countio/Counter.h"
+#endif
 #include "platform.h"
 
 #define SAVED_WORD_ENV "CIRCUITPY_DESKTOP_SAVED_WORD"
@@ -116,6 +119,9 @@ void reset_port(void) {
     audioout_reset();
     #endif
     parts_reset();
+    #if CIRCUITPY_COUNTIO
+    countio_reset();
+    #endif
     midi_in_reset();
     airlift_reset();
     #if CIRCUITPY_SSL

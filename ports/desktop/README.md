@@ -448,14 +448,16 @@ MagTag's 296x128 (`CIRCUITPY_DISPLAY_WIDTH` and `_HEIGHT` in `settings.toml` sti
 
 Every change goes to `--trace-bus`, the user's and the program's: `NEOPIXEL GPIO14 3: ff0000
 00ff00 0000ff`, `BUTTON D9 pressed`, `GAMEPAD A pressed`, `PANEL A0 = 40000 (2.014 V)`, `PWM D5 duty 32768 (50.0%)
-1000 Hz 500 us`, `TOUCH T1 on`, `LED D13 on`, `I2S I2S_DATA play 22050 Hz 16-bit mono`, `PWMAUDIO SPEAKER play ...`, `ENCODER ENC 3`, `IR IR_RX 255,2,247,8`, `PULSEOUT GPIO6 38000 Hz 67: 9000 4500 ...` (a
+1000 Hz 500 us`, `TOUCH T1 on`, `LED D13 on`, `I2S I2S_DATA play 22050 Hz 16-bit mono`, `PWMAUDIO SPEAKER play ...`, `ENCODER ENC 3`, `IR IR_RX 255,2,247,8`, `PULSES IR_RX 3`, `COUNT D5 +10`, `PULSEOUT GPIO6 38000 Hz 67: 9000 4500 ...` (a
 `pulseio.PulseOut`'s pulses in microseconds; `send()` takes as long as they last). Reads are not traced. The key script
 (`CIRCUITPY_SDL_KEYS`) takes `set NAME VALUE`, `press NAME` and `release NAME` (a part, or a
 gamepad button: `press START`) `turn NAME DETENTS` (an encoder, negative counter-clockwise), `send NAME [CODE]` (an IR receiver: its
-code, or `255,2,127,128`), `tap KEYS C4` (a MIDI keyboard's note), `down KEY`/`up KEY` (a computer key, by its
+code, or `255,2,127,128`), `pulses PIN 9000,4500,560` (any durations in microseconds into the
+`PulseIn` on that pin, the first away from idle), `count PIN N` (N edges for the
+`countio.Counter` on that pin, which also counts the edges a button there makes), `tap KEYS C4` (a MIDI keyboard's note), `down KEY`/`up KEY` (a computer key, by its
 position on a US keyboard), `touch NAME X Y` and `untouch NAME` (a touchscreen, below), `dump NAME PATH` and `close` (the panel window, as its close button does), so a test moves
 the panel without a window. These panel lines are the same in `POST /api/panel` and the
-program's `lab.panel()`; faults are panel lines too (see [Faults](#faults)). `pwmio`, `touchio` and `pulseio` exist on the virtual board only, `audiobusio` on every board (a record of
+program's `lab.panel()`; faults are panel lines too (see [Faults](#faults)). `pwmio`, `touchio`, `pulseio` and `countio` exist on the virtual board only, `audiobusio` on every board (a record of
 the generator takes as long as its samples last, as on a board); `analogio`
 uses the MCP2221's ADC and DAC on `--board mcp2221`.
 
@@ -1139,7 +1141,7 @@ file. `CIRCUITPY_SDL_KEYS` names a file or FIFO of panel lines (above; `down Z`,
 - mDNS; CircuitPython's own use of an AirLift (`_airlift`, the web workflow over it).
 - Bluetooth LE: pairing as a central, LE Secure Connections (numeric comparison, passkeys), long
   writes.
-- `pwmio`, `touchio`, `pulseio`, `rgbmatrix`, `picodvi` and the SD card on the virtual board
+- `pwmio`, `touchio`, `pulseio`, `countio`, `rgbmatrix`, `picodvi` and the SD card on the virtual board
   only; `usb` (USB host) and `espcamera` not at all; `alarm` without touch alarms.
 - Builds and packages for handhelds: the port needs a cross compiler with the device's SDL2
   (PortMaster for Anbernic and others, the OnionOS toolchain for the Miyoo Mini).

@@ -19,12 +19,16 @@
 #include "gamepad.h"
 #include "midi_in.h"
 #include "parts.h"
+#if CIRCUITPY_COUNTIO
+#include "common-hal/countio/Counter.h"
+#endif
 #include "sdcard_virtual.h"
 #include "touch.h"
 #include "vdisplay.h"
 
 static const char *const _verbs[] = {
     "set", "press", "release", "tap", "turn", "send", "down", "up", "dump", "close", "touch", "untouch", "fault",
+    "pulses", "count",
 };
 
 // "dump NAME PATH": what a display shows, as a PPM.
@@ -83,6 +87,31 @@ static bool _apply(const char *line, bool inside, char *err, size_t errlen) {
     }
     if (strcmp(verb, "fault") == 0) {
         return fault_line(line, inside, err, errlen);
+    }
+    if (strcmp(verb, "pulses") == 0) {
+        char list[1024] = "";
+        if (n < 2 || sscanf(line, "%*s %*s %1023s", list) != 1) {
+            snprintf(err, errlen, "pulses needs a pin and durations, as pulses IR_RX 9000,4500,560");
+            return false;
+        }
+        return parts_pulses(name, list, err, errlen);
+    }
+    if (strcmp(verb, "count") == 0) {
+        // "count PIN N": N edges a countio.Counter on the pin counts.
+        uint8_t pin;
+        if (n != 3 || value <= 0) {
+            snprintf(err, errlen, "count needs a pin and a number of edges, as count D5 10");
+            return false;
+        }
+        #if CIRCUITPY_COUNTIO
+        if (parts_pin_number(name, &pin) && countio_add(pin, value)) {
+            return true;
+        }
+        #else
+        (void)pin;
+        #endif
+        snprintf(err, errlen, "no Counter on %s", name);
+        return false;
     }
     bool done;
     bool ok = strcmp(verb, "set") == 0 && _device_set(line, &done, err, errlen);

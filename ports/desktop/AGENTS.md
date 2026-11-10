@@ -59,7 +59,8 @@ with Board.launch("ports/desktop/build-linux/circuitpython", "/tmp/repro/CIRCUIT
 - An `EPaperDisplay` gets a modelled panel, `b.pixels("EPD")`, shown only at a refresh, with
   its busy pin; `b.state()` counts its `refreshes`. A board file's `epaper cs=PIN refresh_ms=N`
   or `stuck` changes how long it is busy.
-- `b.state()`, `b.panel("set ENV.temp 24.5", "press A")`: parts, buttons, sensors.
+- `b.state()`, `b.panel("set ENV.temp 24.5", "press A")`: parts, buttons, sensors;
+  `pulses PIN 9000,4500,560` into a `PulseIn`, `count PIN 10` edges for a `countio.Counter`.
 - In the program, `import lab` (none on a board): `lab.attach(lab.parts.LED(board.GPIO5))`,
   `lab.panel("press A")`, and `lab.result("fail", detail)` for a test that says itself whether
   it passed; `b.result()`, `cpapi.py run` (exit 4) and `ab` read it. `board` has only what a

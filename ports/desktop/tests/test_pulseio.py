@@ -105,4 +105,30 @@ check(
     trace,
 )
 check("PulseOut: send() takes as long as the pulses", "took True" in out, out)
+
+# "pulses PIN US,...": any durations into a PulseIn, by a pin's name or a receiver's.
+out, trace = run(
+    """import board, lab, pulseio
+a = pulseio.PulseIn(board.GPIO6, maxlen=8)
+b = pulseio.PulseIn(board.IR_RX, maxlen=8)
+lab.panel("pulses GPIO6 100,200,0x12c", "pulses IR_RX 5")
+print("a", [a.popleft() for _ in range(len(a))], "b", [b[i] for i in range(len(b))])
+for line in ("pulses GPIO7 100", "pulses GPIO6 100,0", "pulses GPIO6"):
+    try:
+        lab.panel(line)
+    except ValueError as e:
+        print("refused:", e)
+print("done")
+""",
+    "",
+    "done",
+    '[pins]\nIR_RX = "GPIO20"\n[ir]\nIR_RX = ""\n',
+)
+check("pulses: the durations, in order, by pin or receiver", "a [100, 200, 300] b [5]" in out, out)
+check(
+    "pulses: no PulseIn there, a bad duration, none",
+    "refused: no PulseIn on GPIO7" in out and out.count("refused: pulses") == 2,
+    out,
+)
+check("pulses: traced", "PULSES GPIO6 3" in trace and "PULSES IR_RX 1" in trace, trace)
 print("DONE")

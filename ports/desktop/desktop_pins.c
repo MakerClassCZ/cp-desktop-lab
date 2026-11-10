@@ -17,6 +17,9 @@
 #include "spi_virtual.h"
 #include "desktop_port.h"
 #include "parts.h"
+#if CIRCUITPY_COUNTIO
+#include "common-hal/countio/Counter.h"
+#endif
 
 #define PIN(n) const mcu_pin_obj_t pin_GPIO##n = { .base = { .type = &mcu_pin_type }, .number = n }
 PIN(0);
@@ -210,16 +213,35 @@ void desktop_pin_backend_raise_if_lost(void) {
     }
 }
 
+// A level the panel put on a virtual pin changed: a counter there sees the edge.
+static void _level_changed(uint8_t number, bool before) {
+    #if CIRCUITPY_COUNTIO
+    bool level;
+    if (desktop_pin_backend == &desktop_virtual_backend && _virtual_read(number, &level) && level != before) {
+        countio_pin_level(number, level);
+    }
+    #else
+    (void)number;
+    (void)before;
+    #endif
+}
+
 void desktop_pin_drive(uint8_t number, bool level) {
     if (desktop_pin_backend->accepts_drive && number < DESKTOP_VIRTUAL_PIN_COUNT) {
+        bool before = false;
+        _virtual_read(number, &before);
         _pins[number].driven = true;
         _pins[number].driven_level = level;
+        _level_changed(number, before);
     }
 }
 
 void desktop_pin_release(uint8_t number) {
     if (number < DESKTOP_VIRTUAL_PIN_COUNT) {
+        bool before = false;
+        _virtual_read(number, &before);
         _pins[number].driven = false;
+        _level_changed(number, before);
     }
 }
 

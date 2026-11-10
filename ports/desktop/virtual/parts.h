@@ -144,6 +144,8 @@ static inline bool parts_on_pin(const part_t *part) {
 }
 // The name the board gives a pin: the first key whose value it is, else GPIOn.
 void parts_pin_name(uint8_t pin, char *name, size_t len);
+// A pin by any name the board has for it (D5, a board file's name, GPIO5); false for none.
+bool parts_pin_number(const char *name, uint8_t *pin);
 // A virtual pin the program wrote or reconfigured: an LED on it follows.
 void parts_pin_changed(uint8_t pin);
 // A shift register of the gamepad's buttons: keys names them in the order they shift out, a
@@ -156,6 +158,9 @@ bool parts_pin_level(uint8_t pin, bool *level);
 void parts_ir_send(part_t *part, const uint8_t code[4]);
 // "255,2,247,8" (decimal or 0x hex) into four bytes.
 bool parts_ir_code(const char *text, uint8_t code[4]);
+// "pulses NAME 9000,4500,560": the PulseIn on the pin (or IR receiver) named gets these
+// durations in microseconds, the first away from idle. False with why in err.
+bool parts_pulses(const char *name, const char *list, char *err, size_t errlen);
 // A PWMOut the program set: shown and traced; active false when it stops.
 void parts_pwm(part_t *part, uint16_t duty, uint32_t frequency, bool active);
 // A pulse's width in microseconds, rounded: duty / 65535 of a period.

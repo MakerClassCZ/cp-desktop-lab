@@ -380,6 +380,30 @@ void parts_pin_name(uint8_t pin, char *name, size_t len) {
     snprintf(name, len, "%s", number);
 }
 
+bool parts_pin_number(const char *name, uint8_t *pin) {
+    const mp_map_t *map = &board_module_globals.map;
+    for (size_t i = 0; i < map->used; i++) {
+        mp_obj_t key = map->table[i].key, value = map->table[i].value;
+        if (key == MP_OBJ_NULL || !mp_obj_is_type(value, &mcu_pin_type)) {
+            continue;
+        }
+        size_t n;
+        const char *s = mp_obj_is_qstr(key) ? (const char *)qstr_data(MP_OBJ_QSTR_VALUE(key), &n)
+            : mp_obj_str_get_data(key, &n);
+        if (n == strlen(name) && strncasecmp(s, name, n) == 0) {
+            *pin = ((const mcu_pin_obj_t *)MP_OBJ_TO_PTR(value))->number;
+            return true;
+        }
+    }
+    unsigned number;
+    char end;
+    if (sscanf(name, "GPIO%u%c", &number, &end) == 1 && desktop_pin_obj(number) != NULL) {
+        *pin = (uint8_t)number;
+        return true;
+    }
+    return false;
+}
+
 part_t *parts_for_pin(uint8_t pin, part_kind_t kind) {
     part_t *p = parts_find(pin, kind);
     if (p == NULL) {
@@ -689,6 +713,40 @@ void parts_ir_send(part_t *p, const uint8_t code[4]) {
     p->ir_sent = true;
     bus_trace_text("IR %s %u,%u,%u,%u", p->name, p->ir_code[0], p->ir_code[1], p->ir_code[2], p->ir_code[3]);
     panel_changed();
+}
+
+bool parts_pulses(const char *name, const char *list, char *err, size_t errlen) {
+    part_t *p = parts_by_name(name);
+    uint8_t pin;
+    if ((p == NULL || p->kind != PART_IR) && parts_pin_number(name, &pin)) {
+        p = parts_find(pin, PART_IR);
+    }
+    if (p == NULL || p->kind != PART_IR || p->pulsein == NULL) {
+        snprintf(err, errlen, "no PulseIn on %s", name);
+        return false;
+    }
+    uint16_t pulses[128];
+    size_t n = 0;
+    const char *at = list;
+    while (*at != '\0' && *at != '\r' && *at != '\n') {
+        char *end;
+        unsigned long us = strtoul(at, &end, 0);
+        if (end == at || us == 0 || us > 65535 || n == MP_ARRAY_SIZE(pulses) || (*end != ',' && *end != '\0'
+                                                                                 && *end != '\r' && *end != '\n')) {
+            snprintf(err, errlen, "pulses needs up to %u durations of 1 to 65535 us, as 9000,4500,560",
+                (unsigned)MP_ARRAY_SIZE(pulses));
+            return false;
+        }
+        pulses[n++] = (uint16_t)us;
+        at = *end == ',' ? end + 1 : end;
+    }
+    if (n == 0) {
+        snprintf(err, errlen, "pulses %s needs durations, as 9000,4500,560", name);
+        return false;
+    }
+    desktop_pulsein_push(p->pulsein, pulses, n);
+    bus_trace_text("PULSES %s %u", p->name, (unsigned)n);
+    return true;
 }
 
 // A shift register sees its latch and clock: an edge of the latch loads the buttons and starts
