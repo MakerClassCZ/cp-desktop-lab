@@ -14,7 +14,7 @@
 // A stream kept for the control API's readers (the console, the trace): the last bytes written,
 // addressed by an offset that only grows, so a reader asks for what came since its last read.
 
-typedef struct {
+typedef struct api_ring {
     pthread_mutex_t lock;
     pthread_cond_t grew;
     char *data;

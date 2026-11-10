@@ -70,6 +70,7 @@ SRC_C += \
 	host/debug_hook.c \
 	host/fault.c \
 	host/gamepad.c \
+	host/heap_walk.c \
 	host/host_net.c \
 	host/net_fault.c \
 	host/panel.c \

@@ -21,3 +21,5 @@ void after_run_report(const char *status, const char *detail);
 // "outside_heap": bytes, "outside_heap_change": bytes} of the last VM that ended; runs counts the VMs ended so far
 // (boot.py, code.py and the REPL each one), vm_running says whether one runs now.
 void after_run_json(api_buf_t *b);
+// ["D5", ...]: the pins claimed now, by the board's names.
+void after_run_claimed_json(api_buf_t *b);

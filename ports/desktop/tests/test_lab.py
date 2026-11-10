@@ -22,7 +22,8 @@ with launch('print("ready")\n') as b:
     check("board has none of the lab's names", "[]" in out.splitlines()[0], out)
     check(
         "lab has them",
-        "['attach', 'attached', 'detach', 'exit', 'fired', 'panel', 'parts', 'result']" in out,
+        "['attach', 'attached', 'audio', 'claimed', 'detach', 'exit', 'fired', 'heap', 'info', 'panel', "
+        "'parts', 'result', 'trace']" in out,
         out,
     )
     out = b.exec(
@@ -41,6 +42,45 @@ with launch('print("ready")\n') as b:
         "pressed True False" in out and "released True" in out,
         out,
     )
+    # What the program sees of the lab is what cpapi sees.
+    out = b.exec(
+        "import gc\n"
+        "mark = lab.trace()[1]\n"
+        "lab.panel('press B5', 'release B5')\n"
+        "text, after = lab.trace(mark)\n"
+        "print('trace', 'BUTTON B5 pressed' in text, 'BUTTON B5 released' in text, after > mark)\n"
+        "print('claimed', lab.claimed())\n"
+        "class Leak:\n    pass\n"
+        "kept = [Leak() for _ in range(50)]\n"
+        "gc.collect()\n"
+        "h = lab.heap()\n"
+        "print('heap', h['types']['Leak'], h['free'] > 0, h['largest_free'] <= h['free'], h['used'] > 0)\n"
+        "i = lab.info()\n"
+        "print('info', i['board'], i['profile'], i['pid'], i['machine'] != '')"
+    )
+    check(
+        "lab.trace(offset): the lines since, and the next offset",
+        "trace True True True" in out,
+        out,
+    )
+    claimed = b.claimed()
+    check(
+        "lab.claimed() is cpapi's claimed()",
+        "claimed %r" % claimed in out and len(claimed) == 1,
+        (out, claimed),
+    )
+    heap = b.heap()
+    check(
+        "lab.heap(): a class's instances counted under its name, as cpapi's heap()",
+        "heap [50, " in out and heap["types"]["Leak"][0] == 50,
+        (out, heap.get("types", {}).get("Leak")),
+    )
+    info = b.info()
+    check(
+        "lab.info() is cpapi's info()",
+        "info virtual None %d True" % info["pid"] in out and info["profile"] is None,
+        (out, info),
+    )
     out = b.exec(
         "try:\n    lab.panel('frobnicate B5')\nexcept ValueError as e:\n    print('err', e)"
     )
@@ -51,6 +91,21 @@ with launch('print("ready")\n') as b:
     )
     out = b.exec("try:\n    lab.result('maybe')\nexcept ValueError as e:\n    print('err', e)")
     check("lab.result: pass, fail or skip only", "err status is" in out, out)
+
+# The heap's sizes in bytes: used is gc.mem_alloc() (but for the global it went into), and the
+# largest free block, after a collect in a fresh heap, is more than a sixteenth of the heap (in
+# blocks of 16 bytes it never could be).
+with launch('print("ready")\n', args=["--profile", "rp2040"]) as b:
+    b.wait("Code done running.", timeout=15)
+    out = b.exec(
+        "import gc, lab\n"
+        "gc.collect()\n"
+        "used = gc.mem_alloc()\n"
+        "h = lab.heap()\n"
+        "print('sizes', 0 <= h['used'] - used < 1024, h['largest_free'] * 16 > h['total'],"
+        " h['largest_free'] <= h['free'] < h['total'])"
+    )
+    check("lab.heap(): used, free and largest_free in bytes", "sizes True True True" in out, out)
 
 # The result: the run's, from the run that reported it; gone in a run that does not.
 REPORT = """import lab, supervisor

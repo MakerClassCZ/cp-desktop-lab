@@ -123,6 +123,8 @@ want = {
     "ble_pair",
     "ble_bonds",
     "ble_erase_bonds",
+    "heap",
+    "claimed",
 }
 check(
     "tools/list names every tool, each with a schema",
@@ -218,6 +220,11 @@ check(
     r.get("isError") and "ZeroDivisionError" in text(r),
     r,
 )
+r = c.call("exec", code="import digitalio, board\nkept = digitalio.DigitalInOut(board.GPIO5)")
+r = c.call("claimed")
+check("claimed: the pins claimed now", not r.get("isError") and "GPIO5" in text(r), r)
+r = c.call("heap")
+check("heap: the heap by type", not r.get("isError") and '"DigitalInOut": [' in text(r), r)
 
 r = c.call("list_files")
 check(

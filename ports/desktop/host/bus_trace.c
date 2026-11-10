@@ -13,12 +13,15 @@
 #include "py/mperrno.h"
 #include "py/mphal.h"
 
-#include "control_api.h"
+#include "api_ring.h"
 
 #define SHOWN 64                // bytes of one transfer written out; the rest is counted
 
+#define KEPT (64 * 1024)
+
 static FILE *_out;
-static bool _api;               // the control API keeps the lines for its readers
+static api_ring_t _kept;
+static bool _keeping;           // set once _kept is ready, read on any thread
 
 bool bus_trace_open(const char *path) {
     // Appended: a reset starts the process again with the same options.
@@ -30,12 +33,22 @@ bool bus_trace_open(const char *path) {
     return true;
 }
 
-void bus_trace_to_api(void) {
-    _api = true;
+bool bus_trace_keep(void) {
+    if (!__atomic_load_n(&_keeping, __ATOMIC_ACQUIRE)) {
+        if (!api_ring_init(&_kept, KEPT)) {
+            return false;
+        }
+        __atomic_store_n(&_keeping, true, __ATOMIC_RELEASE);
+    }
+    return true;
+}
+
+api_ring_t *bus_trace_kept(void) {
+    return __atomic_load_n(&_keeping, __ATOMIC_ACQUIRE) ? &_kept : NULL;
 }
 
 bool bus_trace_on(void) {
-    return _out != NULL || _api;
+    return _out != NULL || bus_trace_kept() != NULL;
 }
 
 // The time, then the line, to the file and the API; the file flushed so that a reader sees it at
@@ -54,8 +67,8 @@ static void _line(const char *fmt, ...) {
         fputs(line, _out);
         fflush(_out);
     }
-    if (_api) {
-        control_api_trace(line, strlen(line));
+    if (bus_trace_kept() != NULL) {
+        api_ring_write(&_kept, line, strlen(line));
     }
 }
 

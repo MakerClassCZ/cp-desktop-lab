@@ -13,8 +13,12 @@
 // --trace-bus PATH: every busio transfer as one line, seconds since start first. "-" = stderr.
 bool bus_trace_open(const char *path);
 bool bus_trace_on(void);
-// The lines go to the control API's trace stream too (--api).
-void bus_trace_to_api(void);
+// The lines kept for readers (the control API's /api/trace, lab.trace): from the first call on,
+// the last 64 KB of them. False when there is no memory for them.
+bool bus_trace_keep(void);
+// The kept lines; NULL before bus_trace_keep.
+struct api_ring;
+struct api_ring *bus_trace_kept(void);
 
 // dir: 'W' write, 'R' read, 'P' probe. status: 0 or -MP_E*.
 void bus_trace_i2c(uint16_t address, char dir, const uint8_t *data, size_t len, bool stop, int status);

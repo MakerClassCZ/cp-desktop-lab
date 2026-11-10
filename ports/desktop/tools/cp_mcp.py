@@ -149,6 +149,18 @@ TOOLS = [
         _schema(),
     ),
     (
+        "heap",
+        "The running VM's heap by type: total, used, free, largest_free and types ({name: [count, "
+        "bytes]}, the largest first; 'bytes' for blocks that are no object). For a leak, compare it at "
+        "the same point of two runs; garbage not yet collected counts too.",
+        _schema(),
+    ),
+    (
+        "claimed",
+        "The pins claimed now, by the board's names.",
+        _schema(),
+    ),
+    (
         "state",
         "The virtual board's parts as JSON: LEDs, PWM (servo angles), sensors, analog pins, "
         "encoders, NeoPixels, displays and the gamepad buttons held.",
@@ -537,6 +549,12 @@ class Server:
 
     def t_after_run(self):
         return json.dumps(self._api(self._need().after_run), indent=1)
+
+    def t_heap(self):
+        return json.dumps(self._api(self._need().heap), indent=1)
+
+    def t_claimed(self):
+        return json.dumps(self._api(self._need().claimed))
 
     def t_state(self):
         return json.dumps(self._api(self._need().state), indent=1)

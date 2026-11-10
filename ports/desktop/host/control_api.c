@@ -38,6 +38,7 @@ typedef int sock_t;
 
 #include "after_run.h"
 #include "fault.h"
+#include "heap_walk.h"
 #include "audio_capture.h"
 #include "api_json.h"
 #include "api_ring.h"
@@ -85,7 +86,6 @@ static pthread_cond_t _slot_free = PTHREAD_COND_INITIALIZER;
 static bool _on;
 static api_ring_t _console;
 static uint64_t _console_served;   // the console's end as last sent to a reader; 0: no reader
-static api_ring_t _trace;
 // The supervisor's status, from the terminal title it writes: "code.py", "REPL", "Done" ...
 static char _status[64] = "starting";
 
@@ -119,12 +119,6 @@ static void _title(const char *title) {
         memcpy(_status, a, n);
         _status[n] = '\0';
         pthread_mutex_unlock(&_lock);
-    }
-}
-
-void control_api_trace(const char *line, size_t len) {
-    if (_on) {
-        api_ring_write(&_trace, line, len);
     }
 }
 
@@ -258,25 +252,34 @@ static const char *_u64(char out[24], uint64_t v) {
     return p;
 }
 
-static void _info(request_t *r) {
-    api_buf_t b = {0};
-    api_buf_add(&b, "{\"version\": ", 12);
-    api_buf_json_string(&b, MICROPY_GIT_TAG, strlen(MICROPY_GIT_TAG));
-    api_buf_add(&b, ", \"board\": ", 11);
-    api_buf_json_string(&b, desktop_options.board_name, strlen(desktop_options.board_name));
-    api_buf_add(&b, ", \"board_file\": ", 16);
+void control_api_info_json(api_buf_t *b) {
+    api_buf_add(b, "{\"version\": ", 12);
+    api_buf_json_string(b, MICROPY_GIT_TAG, strlen(MICROPY_GIT_TAG));
+    api_buf_printf(b, ", \"machine\": \"%s\", \"board\": ", MICROPY_HW_MCU_NAME);
+    api_buf_json_string(b, desktop_options.board_name, strlen(desktop_options.board_name));
+    api_buf_add(b, ", \"board_file\": ", 16);
     const char *board_file = desktop_options.board_file_count > 0 ? desktop_options.board_files[0] : NULL;
-    api_buf_json_string(&b, board_file, board_file ? strlen(board_file) : 0);
-    api_buf_add(&b, ", \"drive\": ", 11);
-    api_buf_json_string(&b, desktop_options.drive_path, strlen(desktop_options.drive_path));
+    api_buf_json_string(b, board_file, board_file ? strlen(board_file) : 0);
+    api_buf_add(b, ", \"profile\": ", 13);
+    const char *profile = desktop_options.profile;
+    api_buf_json_string(b, profile, profile ? strlen(profile) : 0);
+    api_buf_printf(b, ", \"heap_limit\": %lu, \"sockets\": %lu", (unsigned long)desktop_options.heap_limit,
+        (unsigned long)desktop_options.sockets);
+    api_buf_add(b, ", \"drive\": ", 11);
+    api_buf_json_string(b, desktop_options.drive_path, strlen(desktop_options.drive_path));
     char status[64];
     _get_status(status, sizeof(status));
     char skipped[24];
-    api_buf_printf(&b, ", \"fast_time\": %s, \"skipped_ms\": %s", desktop_options.fast_time ? "true" : "false",
+    api_buf_printf(b, ", \"fast_time\": %s, \"skipped_ms\": %s", desktop_options.fast_time ? "true" : "false",
         _u64(skipped, desktop_skipped_ns() / 1000000));
-    api_buf_printf(&b, ", \"pid\": %d, \"boot\": \"%s\", \"status\": ", (int)getpid(), _boot);
-    api_buf_json_string(&b, status, strlen(status));
-    api_buf_add(&b, "}", 1);
+    api_buf_printf(b, ", \"pid\": %d, \"boot\": \"%s\", \"status\": ", (int)getpid(), _boot);
+    api_buf_json_string(b, status, strlen(status));
+    api_buf_add(b, "}", 1);
+}
+
+static void _info(request_t *r) {
+    api_buf_t b = {0};
+    control_api_info_json(&b);
     _answer_json(r, 200, &b);
     api_buf_free(&b);
 }
@@ -679,6 +682,8 @@ typedef enum {
     VM_FAULTS,
     VM_AUDIO,                   // in: "start", "stop" or NULL for the list
     VM_AUDIO_WAV,               // in: the recording's index
+    VM_HEAP,
+    VM_CLAIMED,
 } vm_kind_t;
 
 // A request the VM runs: the server thread queues it and waits; whichever of the two is done
@@ -854,6 +859,10 @@ void control_api_vm_task(void) {
             after_run_json(&q->out);
         } else if (q->kind == VM_FAULTS) {
             fault_json(&q->out);
+        } else if (q->kind == VM_HEAP) {
+            heap_json(&q->out);
+        } else if (q->kind == VM_CLAIMED) {
+            after_run_claimed_json(&q->out);
         } else if (q->kind == VM_AUDIO) {
             if (q->in != NULL && strcmp(q->in, "start") == 0) {
                 audio_capture_start();
@@ -1474,7 +1483,7 @@ static void _route(request_t *r) {
     } else if (strcmp(r->path, "/api/console") == 0 && get) {
         _stream(r, &_console);
     } else if (strcmp(r->path, "/api/trace") == 0 && get) {
-        _stream(r, &_trace);
+        _stream(r, bus_trace_kept());
     } else if (strcmp(r->path, "/api/console") == 0 && post) {
         size_t written = desktop_serial_inject((const uint8_t *)r->body, r->body_len);
         api_buf_t b = {0};
@@ -1506,6 +1515,10 @@ static void _route(request_t *r) {
         _vm_call(r, VM_AFTER_RUN, NULL);
     } else if (strcmp(r->path, "/api/faults") == 0 && get) {
         _vm_call(r, VM_FAULTS, NULL);
+    } else if (strcmp(r->path, "/api/heap") == 0 && get) {
+        _vm_call(r, VM_HEAP, NULL);
+    } else if (strcmp(r->path, "/api/claimed") == 0 && get) {
+        _vm_call(r, VM_CLAIMED, NULL);
     } else if (strcmp(r->path, "/api/display") == 0 && get) {
         char name[32];
         if (!_param(r, "name", name, sizeof(name)) || name[0] == '\0') {
@@ -1748,12 +1761,11 @@ bool control_api_start(void) {
     }
     _hex(_boot, bytes, 4);
     snprintf(_host, sizeof(_host), "%s", host);
-    if (!api_ring_init(&_console, RING_SIZE) || !api_ring_init(&_trace, RING_SIZE)) {
+    if (!api_ring_init(&_console, RING_SIZE) || !bus_trace_keep()) {
         fprintf(stderr, "circuitpython: api: out of memory\n");
         return false;
     }
     _on = true;
-    bus_trace_to_api();
 
     // A process started by a reset takes the port the one before it had, also for --api 0.
     const char *again = getenv(RESTART_PORT_ENV);

@@ -845,7 +845,7 @@ naming another `Host`, or a browser's preflight, is refused, so a web page canno
 
 | endpoint | does |
 |---|---|
-| `GET /api/info` | version, board, drive, process id, `boot` (new after a reset), `status`: `code.py`, `REPL`, `Done` ...; `fast_time`, `skipped_ms` |
+| `GET /api/info` | version, `machine`, board, board file, `profile`, `heap_limit`, `sockets`, drive, process id, `boot` (new after a reset), `status`: `code.py`, `REPL`, `Done` ...; `fast_time`, `skipped_ms` |
 | `GET /api/console?since=N&wait=TEXT&timeout=MS` | the console's output from offset N; with `wait`, when TEXT has come (`matched`); `next` is where to read on |
 | `POST /api/console` | the body, as typed (Ctrl-C included) |
 | `POST /api/interrupt`, `POST /api/reload`, `POST /api/quit` | Ctrl-C; Ctrl-D (stopping code.py first); end the program |
@@ -855,8 +855,10 @@ naming another `Host`, or a browser's preflight, is refused, so a web page canno
 | `GET /api/display?name=NAME` | the window (`DISPLAY`), or a board file's display, as PNG |
 | `GET /api/trace?since=N&wait=TEXT&timeout=MS` | the bus trace, as the console; with or without `--trace-bus` |
 | `GET /api/faults` | the fault rules (`rule`, `inside`: set by the run, `hits`, `fired`) and the faults fired in this run |
+| `GET /api/claimed` | the pins claimed now, by the board's names |
+| `GET /api/heap` | the VM's heap by type: `total`, `used`, `free`, `largest_free`, `types` (`{name: [count, bytes]}`, the largest first; `bytes` for blocks that are no object); `{}` between runs |
 | `GET /api/after-run` | what the last run left behind once its VM ended: `result` (what it reported with `lab.result`, or null), `faults_fired`, `leaked_pins`, `outside_heap` and `outside_heap_change` (bytes), `runs` (VMs seen ending), `vm_running` |
-| `GET /api/audio`, `POST /api/audio/start`, `/stop` | the recordings of the audio outputs (`pin`, `rate`, `channels`, `frames`, `underruns`, `dropped`); start clears them and records from then on |
+| `GET /api/audio`, `POST /api/audio/start`, `/stop` | the recordings of the audio outputs (`pin`, `rate`, `channels`, `frames`, `underruns`, `dropped`, and the first channel's `peak`, `rms`, `frequency`, `silences`); start clears them and records from then on |
 | `GET /api/audio/wav?index=N` | a recording as a WAV file |
 | `GET /api/ble` | the Bluetooth controller (`virtual`, `serial`, `off`), what is advertised (`data`, `scan_response` in hex, `name`, `connectable`), the address, the connection, whether it is `scanning`; `links`: each connection's `handle`, `peer`, the program's `role` and whether it is `encrypted`; `encrypted` and `key_size` of the first encrypted one; `bonds`, their number for this controller; the BLE workflow's state (`workflow`: `off`, `discovery`, `reconnecting`, `connected`, `on`) and `bonded` |
 | `POST /api/ble/discover` | the BLE workflow's discovery mode: the lab resets, bonds erased, advertised as `CIRCUITPYxxxx` (409 when the workflow is off) |
@@ -973,6 +975,15 @@ lab's own things are here:
   later call replaces it. The after-run report has it (`b.result()` in `cpapi`), `cpapi.py run`
   exits 4 on a fail and `ab` counts it. A run that ends in an exception has failed whatever it
   reported.
+- `lab.trace(since=0)`: the bus trace from an offset, and the offset to read on from:
+  `(text, next)`. The lines are kept from the first call (from the start with `--api`), so a
+  program takes an offset first: `mark = lab.trace()[1]`, then `lab.trace(mark)`.
+- `lab.claimed()`, `lab.heap()`, `lab.audio()`, `lab.info()`: the pins claimed now, the heap by
+  type (`gc.collect()` first: `lab.heap()["types"]["Point"]` is `[count, bytes]`), the audio
+  recordings with their peak, rms, frequency and silences (`--audio-capture`), and the lab
+  (board, profile, limits, fast time). Each is the control API's answer (`/api/claimed`,
+  `/api/heap`, `/api/audio`, `/api/info`) read as JSON, so the program and `cpapi`
+  (`b.claimed()`, `b.heap()`, `b.audio()`, `b.info()`) see the same.
 - `lab.exit(status=0)`: ends the process.
 
 ```python

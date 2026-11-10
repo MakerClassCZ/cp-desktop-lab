@@ -4,15 +4,22 @@
 //
 // SPDX-License-Identifier: MIT
 
+#include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "py/obj.h"
 #include "py/runtime.h"
 
 #include "after_run.h"
+#include "api_ring.h"
+#include "audio_capture.h"
 #include "board_parts.h"
+#include "bus_trace.h"
+#include "control_api.h"
 #include "desktop_port.h"
 #include "fault.h"
+#include "heap_walk.h"
 #include "panel.h"
 
 //| """The lab, from the program
@@ -104,6 +111,91 @@ static mp_obj_t _lab_exit(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(_exit_obj, 0, 1, _lab_exit);
 
+// What the control API answers, read as json.loads reads it: the program and cpapi get the same.
+static mp_obj_t _as_api(void (*answer)(api_buf_t *)) {
+    api_buf_t b = {0};
+    answer(&b);
+    if (b.failed) {
+        api_buf_free(&b);
+        mp_raise_msg(&mp_type_MemoryError, NULL);
+    }
+    mp_obj_t text = mp_obj_new_str(b.data, b.len);
+    api_buf_free(&b);
+    mp_obj_t json = mp_import_name(MP_QSTR_json, mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
+    return mp_call_function_1(mp_load_attr(json, MP_QSTR_loads), text);
+}
+
+//| def trace(since: int = 0) -> tuple[str, int]:
+//|     """The bus trace's lines from offset since, and the offset to read on from. The lines are
+//|     kept from the first call (or from the start with ``--api``): call it once early for an
+//|     offset, then again with it."""
+//|     ...
+//|
+//|
+static mp_obj_t _trace(size_t n_args, const mp_obj_t *args) {
+    mp_int_t since = n_args > 0 ? mp_obj_get_int(args[0]) : 0;
+    if (!bus_trace_keep()) {
+        mp_raise_msg(&mp_type_MemoryError, NULL);
+    }
+    char *text = NULL;
+    api_ring_read_t info;
+    size_t n = api_ring_read(bus_trace_kept(), since < 0 ? 0 : (uint64_t)since, NULL, 0, SIZE_MAX, &text, &info);
+    // A character the ring's start cut in two is left out.
+    size_t cut = 0;
+    while (text != NULL && cut < n && ((unsigned char)text[cut] & 0xc0) == 0x80) {
+        cut++;
+    }
+    mp_obj_t got[2] = { mp_obj_new_str(text != NULL ? text + cut : "", n - cut), mp_obj_new_int_from_ull(info.next) };
+    free(text);
+    return mp_obj_new_tuple(2, got);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(_trace_obj, 0, 1, _trace);
+
+//| def claimed() -> list[str]:
+//|     """The pins claimed now, by the board's names (``cpapi``'s ``claimed()``)."""
+//|     ...
+//|
+//|
+static mp_obj_t _claimed(void) {
+    return _as_api(after_run_claimed_json);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(_claimed_obj, _claimed);
+
+//| def audio() -> list[dict]:
+//|     """What each audio output played since recording started (``--audio-capture``): pin, rate,
+//|     channels, frames, dropped, underruns, and the first channel's peak and rms (0 to 1),
+//|     frequency (Hz, None in silence) and silences (20 ms or more)."""
+//|     ...
+//|
+//|
+static mp_obj_t _audio(void) {
+    return mp_obj_subscr(_as_api(audio_capture_json), MP_OBJ_NEW_QSTR(MP_QSTR_recordings), MP_OBJ_SENTINEL);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(_audio_obj, _audio);
+
+//| def heap() -> dict:
+//|     """The heap by type: total, used, free, largest_free, and types: ``{name: [count, bytes]}``,
+//|     the largest first (``bytes`` for blocks that are no object: buffers, lists' items).
+//|     Collect first (``gc.collect()``) to count only what is alive."""
+//|     ...
+//|
+//|
+static mp_obj_t _heap(void) {
+    return _as_api(heap_json);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(_heap_obj, _heap);
+
+//| def info() -> dict:
+//|     """The lab: version, machine, board, board_file, profile, heap_limit, sockets, drive,
+//|     fast_time, skipped_ms, pid, as ``cpapi``'s ``info()``."""
+//|     ...
+//|
+//|
+static mp_obj_t _info(void) {
+    return _as_api(control_api_info_json);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(_info_obj, _info);
+
 static const mp_rom_map_elem_t lab_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_lab) },
     { MP_ROM_QSTR(MP_QSTR_parts), MP_ROM_PTR(&lab_parts_module) },
@@ -113,6 +205,11 @@ static const mp_rom_map_elem_t lab_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_fired), MP_ROM_PTR(&_fired_obj) },
     { MP_ROM_QSTR(MP_QSTR_result), MP_ROM_PTR(&_result_obj) },
     { MP_ROM_QSTR(MP_QSTR_exit), MP_ROM_PTR(&_exit_obj) },
+    { MP_ROM_QSTR(MP_QSTR_trace), MP_ROM_PTR(&_trace_obj) },
+    { MP_ROM_QSTR(MP_QSTR_claimed), MP_ROM_PTR(&_claimed_obj) },
+    { MP_ROM_QSTR(MP_QSTR_audio), MP_ROM_PTR(&_audio_obj) },
+    { MP_ROM_QSTR(MP_QSTR_heap), MP_ROM_PTR(&_heap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_info), MP_ROM_PTR(&_info_obj) },
     // lab.attached
     { MP_ROM_QSTR(MP_QSTR___getattr__), MP_ROM_PTR(&lab_getattr_obj) },
 };

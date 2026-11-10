@@ -668,6 +668,16 @@ class Board:
         """The faults fired in this run: [{"point", "action", "times"}]."""
         return self.faults()["fired"]
 
+    def claimed(self):
+        """The pins claimed now, by the board's names, as lab.claimed() gives them."""
+        return self.request("GET", "/api/claimed")
+
+    def heap(self):
+        """The VM's heap by type now, as lab.heap() gives it: total, used, free, largest_free and
+        types ({name: [count, bytes]}, the largest first; "bytes" for blocks that are no object).
+        Garbage not yet collected counts too; compare runs at the same point. {} between runs."""
+        return self.request("GET", "/api/heap")
+
     def interrupt(self):
         self.request("POST", "/api/interrupt")
 

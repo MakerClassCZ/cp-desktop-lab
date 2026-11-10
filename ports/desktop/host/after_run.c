@@ -143,6 +143,21 @@ static void _ended(void) {
     }
 }
 
+void after_run_claimed_json(api_buf_t *b) {
+    uint64_t pins = desktop_pins_claimed();
+    api_buf_add(b, "[", 1);
+    for (uint8_t n = 0, first = 1; n < 64; n++) {
+        if (pins & (1ull << n)) {
+            char name[32];
+            desktop_pin_name(n, name, sizeof(name));
+            api_buf_add(b, ", ", first ? 0 : 2);
+            api_buf_json_string(b, name, strlen(name));
+            first = 0;
+        }
+    }
+    api_buf_add(b, "]", 1);
+}
+
 void after_run_task(void) {
     bool up = gc_alloc_possible();
     if (up && !_vm_was_up) {

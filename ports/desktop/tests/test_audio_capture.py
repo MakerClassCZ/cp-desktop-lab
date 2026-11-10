@@ -7,7 +7,7 @@ it. audiocore.get_buffer() reads a sample's buffers from Python, as the unix cov
 
 from harness import check, launch
 
-TONE = """import array, audiocore, audioio, board, math, time
+TONE = """import array, audiocore, audioio, board, lab, math, time
 rate = 22050
 wave = array.array("h", [int(math.sin(2 * math.pi * i / 50) * 16000) for i in range(50)])
 sample = audiocore.RawSample(wave, sample_rate=rate)
@@ -15,6 +15,8 @@ out = audioio.AudioOut(board.SPEAKER)
 out.play(sample, loop=True)
 time.sleep(0.5)
 out.stop()
+for a in lab.audio():
+    print("in the program", a["pin"], a["rate"], a["frequency"], a["peak"], a["silences"])
 print("played")
 """
 
@@ -38,6 +40,15 @@ for fast in (False, True):
                 "%s: its level" % how,
                 0.45 < r.peak() < 0.5 and 0.3 < r.rms() < 0.37,
                 (r.peak(), r.rms()),
+            )
+            got = b.console(since=0)["data"].split("in the program ")[-1].split()
+            check(
+                "%s: lab.audio() in the program sums it up as cpapi does" % how,
+                got[:2] == [r.pin, "22050"]
+                and abs(float(got[2]) - f) < 0.1
+                and abs(float(got[3]) - r.peak()) < 0.001
+                and got[4] == "0",
+                (got[:5], r.pin, f, r.peak()),
             )
 
 with launch(TONE) as b:

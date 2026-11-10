@@ -64,7 +64,9 @@ with Board.launch("ports/desktop/build-linux/circuitpython", "/tmp/repro/CIRCUIT
 - In the program, `import lab` (none on a board): `lab.attach(lab.parts.LED(board.GPIO5))`,
   `lab.panel("press A")`, and `lab.result("fail", detail)` for a test that says itself whether
   it passed; `b.result()`, `cpapi.py run` (exit 4) and `ab` read it. `board` has only what a
-  board has.
+  board has. `lab.trace(mark)`, `lab.claimed()`, `lab.heap()` (by type, for leaks),
+  `lab.audio()` (peak, rms, frequency) and `lab.info()` give what `b.trace()`, `b.claimed()`,
+  `b.heap()`, `b.audio()` and `b.info()` give from outside.
 - Faults, for the bugs of what goes wrong: `lab.panel("fault sd.write error after=3 once")` in
   the program or `b.panel(...)` from outside; points `sd.read`, `sd.write` (`error`, `timeout`),
   `i2c` (`nack`, `hold`, `addr=`), `wifi.connect`, `wifi.link drop`, `net.dns`, `net.socket

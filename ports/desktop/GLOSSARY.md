@@ -24,7 +24,8 @@ keyboard, and lets a person work them.
 _Avoid_: GUI, board window
 
 **Panel line**:
-One command of the panel's language (set, press, release, tap, turn, send, down, up, dump, close),
+One command of the panel's language (set, press, release, tap, turn, send, pulses, count, down, up,
+touch, untouch, dump, close, fault),
 the same whether a person's tool, a test or an agent sends it.
 _Avoid_: panel command, key command
 

@@ -10,6 +10,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "api_json.h"
+
 // --api: a local HTTP interface to the running program for editors, tests and agents: the
 // console, the REPL, the board panel, the displays and the trace (README, "Controlling the
 // program"). The server runs on threads of its own; what needs the VM is queued for it.
@@ -23,10 +25,11 @@ void control_api_linger(void);
 // The requests that need the VM (the panel, the state, the displays), run on the VM thread from
 // the background task; returns at once when there are none.
 void control_api_vm_task(void);
+// /api/info's answer, for lab.info too: the version, the board, its profile and limits, fast
+// time, the process.
+void control_api_info_json(api_buf_t *b);
 // What the console prints, kept for the API's readers; nothing when the API is off.
 void control_api_console(const char *text, size_t len);
-// A line of the bus trace (bus_trace.c), kept the same way.
-void control_api_trace(const char *line, size_t len);
 
 // The console's input, as if typed (supervisor/serial.c); waits while the input buffer is full.
 // Returns how much went in (less when the VM stopped reading for 10 s).
