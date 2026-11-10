@@ -195,7 +195,7 @@ while True:
     time.sleep(0.01)
 """
 with launch(SERVICES) as b:
-    seen(b, "ready")
+    b.wait("ready", timeout=15)
     ad = b.ble.scan()
     check(
         "scan sees the name and the UART service", ad.name == "CP-lab" and NUS in ad.services, ad
@@ -427,7 +427,7 @@ while True:
 """
 for fast in (False, True):
     with launch(SLEEPER, fast_time=fast) as b:
-        seen(b, "ready")
+        b.wait("ready", timeout=15)
         p = b.ble.connect()
         p.write(0x1235, b"zzz")
         check(
@@ -466,7 +466,7 @@ except Exception as e:
     print("discover raised", repr(e))
 """
 with launch(DISCOVER) as b:
-    seen(b, "ready")
+    b.wait("ready", timeout=15)
     b.ble.connect().serve(2)  # the phone answers the program's requests
     ok = seen(b, "discovered ()")
     out = b.console(since=0)["data"][-300:]
@@ -488,7 +488,7 @@ while True:
     time.sleep(0.1)
 """
 with launch(ATT) as b:
-    seen(b, "ready")
+    b.wait("ready", timeout=15)
     b.request("POST", "/api/ble/connect")
     # A client's MTU under 23 is not one LE allows: the link stays at 23, the answer is the
     # server's own (Core Vol 3 Part F 3.4.2.2)
@@ -633,7 +633,7 @@ def att_error(f):
 
 
 with launch(SECURE) as b:
-    seen(b, "ready")
+    b.wait("ready", timeout=15)
     p = b.ble.connect(auto_pair=False)  # the bare refusals, not a phone that pairs on them
     found = [c.uuid for s in p.services() for c in s.characteristics]
     reads = {u: att_error(lambda u=u: p.read(u)) for u in (0x1241, 0x1242, 0x1243, 0x1244, 0x1245)}
@@ -728,7 +728,7 @@ while True:
     time.sleep(0.3)
 """
 with launch(INDICATING) as b:
-    seen(b, "ready")
+    b.wait("ready", timeout=15)
     p = b.ble.connect()
     c = p.characteristic(0x1251)
     p._request(b"\x12" + struct.pack("<HH", c.cccd, 2), 0x13)  # indications on
@@ -758,7 +758,7 @@ while True:
     time.sleep(0.1)
 """
 with launch(LONG_VALUE, env=dict(HEADLESS, CIRCUITPY_BLE_VIRTUAL_FAULT="small-buffers")) as b:
-    seen(b, "ready")
+    b.wait("ready", timeout=15)
     p = b.ble.connect()
     long_c, write_c = p.characteristic(0x1271), p.characteristic(0x1272)
     p._send(b"\x12" + struct.pack("<H", write_c.handle) + b"w")  # Write Request
