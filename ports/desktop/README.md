@@ -1016,6 +1016,37 @@ lab.panel("fault sd.write error after=3 once")
 print(lab.fired())           # [('sd.write', 'error', 1)]
 ```
 
+### The playbook
+
+`--playbook FILE` (`playbook=` in `cpapi`'s `launch` and the MCP `launch`, `--playbook` for
+`cpapi.py run` and `ab`) drives a run from outside without a line of Python: panel lines,
+faults among them, and four lines of its own.
+
+```
+# a comment
+sleep MS            the program's time
+wait "TEXT" [MS]    until the program prints TEXT (10 s of program time when no MS)
+expect "TEXT"       TEXT came since the last wait's match, else the playbook fails here
+expect-not "TEXT"   it did not
+```
+
+```
+wait "connected"
+fault i2c nack addr=0x44 once
+wait "Traceback" 5000
+expect "OSError"
+```
+
+It plays on the VM thread, on the program's clock: a line after a `wait` applies before the
+program's next statement, and `sleep` and `wait` mean the same with `--fast-time`, whose jumps
+stop at the playbook's times. It starts from its top at each `code.py` run, `ab`'s and
+`--runs`' reloads included, and its faults end with the run. Its outcome joins the run's
+result: `pass` when it reached its end, else `fail` with the line and why (`playbook line 4:
+"OSError" was not printed`; also when the run ended while it waited). Its fail outranks a pass
+the program reported with `lab.result`; its pass is the result when the program reported
+none. A program that hangs without sleeping never moves the program's clock, and its run ends
+as it does without a playbook: not in time.
+
 ### What a run leaves behind
 
 The objects free their pins themselves when a run ends (their finalizers), as on the boards'

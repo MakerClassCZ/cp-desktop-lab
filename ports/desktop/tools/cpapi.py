@@ -351,11 +351,14 @@ class Board:
         fast_time=False,
         code_file=None,
         audio_capture=False,
+        playbook=None,
     ):
         """Start program on drive with --api 0 and a token of its own; stderr is read for the port.
         fast_time: its sleeps return at once and move its clock on (--fast-time). code_file: a
         file on the drive run in place of code.py (--code). audio_capture: record what the audio
-        outputs play from the start, for audio() (--audio-capture)."""
+        outputs play from the start, for audio() (--audio-capture). playbook: a file of panel
+        lines, waits and checks played at each code.py run (--playbook); its outcome joins the
+        run's result()."""
         token = secrets.token_hex(16)
         e = dict(os.environ if env is None else env, CIRCUITPY_API_TOKEN=token)
         if headless:
@@ -376,6 +379,8 @@ class Board:
             command += ["--code", code_file]
         if audio_capture:
             command += ["--audio-capture"]
+        if playbook:
+            command += ["--playbook", os.path.abspath(playbook)]
         command += list(args)
         p = subprocess.Popen(
             command,
@@ -2250,6 +2255,7 @@ def run(argv):
     ap.add_argument("--colors", action="store_true", help="print the display's pixels per colour")
     ap.add_argument("--fast-time", action="store_true")
     ap.add_argument("--code", dest="code_file", help="a file on the drive run in place of code.py")
+    ap.add_argument("--playbook", help="panel lines, waits and checks played at each run")
     ap.add_argument(
         "--wav", help="record the audio outputs; save the first as this WAV after the last run"
     )
@@ -2278,6 +2284,7 @@ def run(argv):
         fast_time=a.fast_time,
         code_file=a.code_file,
         audio_capture=bool(a.wav),
+        playbook=a.playbook,
     ) as b:
         for i in range(a.runs):
             if i:
@@ -2392,6 +2399,7 @@ def _trials(program, code, a):
         board=a.board,
         fast_time=a.fast_time,
         code_file=a.code_file,
+        playbook=a.playbook,
     ) as b:
         for i in range(a.runs):
             if i:
@@ -2448,6 +2456,7 @@ def ab(argv):
     ap.add_argument("--timeout", type=float, default=30, help="seconds for each run (default 30)")
     ap.add_argument("--fast-time", action="store_true")
     ap.add_argument("--code", dest="code_file", help="a file on the drive run in place of code.py")
+    ap.add_argument("--playbook", help="panel lines, waits and checks played at each run")
     try:
         a = ap.parse_args(argv)
     except SystemExit as e:

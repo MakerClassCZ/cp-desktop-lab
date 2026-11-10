@@ -23,6 +23,7 @@
 
 #include "desktop_port.h"
 #include "midi_in.h"
+#include "playbook.h"
 
 // The adapter's source, read from beside the program: the VM's own filesystem is the drive.
 static char *read_adapter(size_t *len) {
@@ -51,6 +52,7 @@ static char *read_adapter(size_t *len) {
 void port_before_user_code(void) {
     // What was played while no program ran (after "Code done running") is not this run's.
     midi_in_reset();
+    playbook_start();
     if (desktop_options.debug_port <= 0) {
         return;
     }

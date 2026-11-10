@@ -20,6 +20,7 @@
 #include "control_api.h"
 #include "desktop_port.h"
 #include "platform.h"
+#include "playbook.h"
 
 #define RX_SIZE 1024
 #define CTRL_BACKSLASH 0x1c
@@ -96,6 +97,7 @@ void port_serial_init(void) {
 
 void port_serial_write_substring(const char *text, uint32_t len) {
     control_api_console(text, len);
+    playbook_output(text, len);
     platform_console_write(text, len);
 }
 

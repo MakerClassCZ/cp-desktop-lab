@@ -45,6 +45,8 @@ static bool _tick_enabled;
 static uint64_t _next_tick_ns;
 static uint64_t _wake_ns;
 static uint64_t _poll_ns;
+static uint64_t _at_ns;            // desktop_wake_at, in real time
+static uint64_t _fast_at_ns;       // desktop_wake_at, in fast time: a jump stops there
 
 // Set by whoever wakes the VM, cleared by the VM as it leaves idle.
 static pthread_mutex_t _wake_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -160,6 +162,11 @@ void desktop_wait_for_interrupt(int timeout_ms) {
 void port_idle_until_interrupt(void) {
     uint64_t deadline = _fast_deadline_ns;
     _fast_deadline_ns = 0;
+    // A time the lab itself waits for comes first, even when the program waits for nothing.
+    if (_fast_at_ns != 0 && (deadline == 0 || _fast_at_ns < deadline)) {
+        deadline = _fast_at_ns;
+        _fast_at_ns = 0;
+    }
     if (deadline != 0) {
         uint64_t now = desktop_program_ns();
         if (deadline > now) {
@@ -240,6 +247,7 @@ static void *_timer_main(void *arg) {
         }
         next = _due(&_wake_ns, now, &wake, next);
         next = _due(&_poll_ns, now, &poll, next);
+        next = _due(&_at_ns, now, &wake, next);
         if (tick || wake || poll) {
             pthread_mutex_unlock(&_timer_lock);
             if (tick) {
@@ -320,6 +328,17 @@ void port_interrupt_after_ticks(uint32_t ticks) {
         return;
     }
     _arm(&_wake_ns, ns);
+}
+
+void desktop_wake_at(uint64_t program_ns) {
+    uint64_t now = desktop_program_ns();
+    if (desktop_options.fast_time) {
+        if (_fast_at_ns == 0 || program_ns < _fast_at_ns) {
+            _fast_at_ns = program_ns;
+        }
+        return;
+    }
+    _arm(&_at_ns, program_ns > now ? program_ns - now : 0);
 }
 
 void desktop_request_workflow_poll(uint32_t ms) {

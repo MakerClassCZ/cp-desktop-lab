@@ -11,6 +11,7 @@
 #include "ble_host.h"
 #include "control_api.h"
 #include "epaper_virtual.h"
+#include "playbook.h"
 
 #if CIRCUITPY_SDL
 #include "sdl_host.h"
@@ -38,6 +39,7 @@ void port_background_task(void) {
     control_api_vm_task();
     airlift_vm_task();
     epaper_virtual_task();
+    playbook_task();
     ble_host_vm_task();
     #if CIRCUITPY_WATCHDOG
     desktop_watchdog_check();

@@ -78,6 +78,12 @@ TOOLS = [
                     "type": "boolean",
                     "description": "record what the audio outputs play from the start, for the audio tool",
                 },
+                "playbook": {
+                    "type": "string",
+                    "description": "a file of panel lines, 'sleep MS', 'wait \"TEXT\" [MS]', "
+                    "'expect \"TEXT\"' and 'expect-not \"TEXT\"', played at each code.py run on the "
+                    "program's clock; its outcome is the run's result in after_run",
+                },
                 "args": {
                     "type": "array",
                     "items": STRING,
@@ -393,6 +399,7 @@ class Server:
         fast_time=False,
         code_file=None,
         audio_capture=False,
+        playbook=None,
     ):
         if self.board is not None:
             if not self._ended():
@@ -410,6 +417,7 @@ class Server:
                 fast_time=bool(fast_time),
                 code_file=code_file,
                 audio_capture=bool(audio_capture),
+                playbook=os.path.abspath(playbook) if playbook else None,
             )
         except (OSError, RuntimeError) as e:
             raise ToolError("the program did not start: %s" % e)

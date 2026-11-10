@@ -93,6 +93,9 @@ uint64_t desktop_skipped_ns(void);
 void desktop_skip_ns(uint64_t ns);
 // The program's clock: the host's monotonic clock plus the skipped sleep, in ns.
 uint64_t desktop_program_ns(void);
+// The VM's background tasks run again at this program time (desktop_program_ns), however long the
+// program itself waits; in fast time the clock's jumps stop there.
+void desktop_wake_at(uint64_t program_ns);
 // The host's monotonic clock in ms, for what paces itself to a person watching.
 uint64_t desktop_host_ms(void);
 void desktop_host_sleep_ms(unsigned ms);

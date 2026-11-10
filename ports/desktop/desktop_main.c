@@ -25,6 +25,7 @@
 #include "py/runtime.h"
 
 #include "audio_capture.h"
+#include "playbook.h"
 #include "ble_host.h"
 #include "bus_trace.h"
 #include "control_api.h"
@@ -88,6 +89,7 @@ static void usage(const char *prog) {
         "  --api-host ADDR   listen on ADDR instead; needs CIRCUITPY_API_TOKEN\n"
         "  --fast-time       sleeps return at once and move the program's clock on (virtual board)\n"
         "  --audio-capture   record what the audio outputs play, for the API's /api/audio\n"
+        "  --playbook FILE   play FILE's panel lines, waits and checks at each code.py run\n"
         "Ctrl-\\ on the console powers off.\n", prog);
 }
 
@@ -250,6 +252,10 @@ int main(int argc, char **argv) {
             desktop_options.fast_time = true;
         } else if (strcmp(argv[i], "--audio-capture") == 0) {
             desktop_options.audio_capture = true;
+        } else if (strcmp(argv[i], "--playbook") == 0 && i + 1 < argc) {
+            if (!playbook_load(argv[++i])) {
+                return 2;
+            }
         } else {
             usage(argv[0]);
             return strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0 ? 0 : 2;

@@ -68,6 +68,9 @@ with Board.launch("ports/desktop/build-linux/circuitpython", "/tmp/repro/CIRCUIT
   the program or `b.panel(...)` from outside; points `sd.read`, `sd.write` (`error`, `timeout`),
   `i2c` (`nack`, `hold`, `addr=`); `set SD present 0`, `set EPD busy stuck`. `lab.fired()`,
   `b.fired()`, `faults_fired` in `b.after_run()`, a row in `ab`. README.md, Faults.
+- A repro to attach: `code.py` plus a playbook, `cpapi.py ab MAIN FIX code.py --playbook
+  x.txt`: `wait "TEXT"`, a fault or a press, `expect "TEXT"`; it plays on the program's clock
+  at each run and its outcome is the run's result. README.md, The playbook.
 - `fast_time=True`: sleeps return at once and move the clock on, for code that waits long.
 - `b.after_run()` once `code.py` has ended: `leaked_pins`, the pins objects left claimed (as
   on the boards' ports, a run frees nothing in bulk: the next run gets "in use"), and

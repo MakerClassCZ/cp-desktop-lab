@@ -73,6 +73,7 @@ SRC_C += \
 	host/host_net.c \
 	host/panel.c \
 	host/panel_control.c \
+	host/playbook.c \
 	host/png_write.c \
 	virtual/airlift.c \
 	virtual/airlift_net.c \

@@ -22,6 +22,7 @@
 #include "desktop_pins.h"
 #include "desktop_port.h"
 #include "fault.h"
+#include "playbook.h"
 
 static bool _vm_was_up;
 static uint64_t _claimed_at_start;
@@ -119,6 +120,14 @@ static void _ended(void) {
     _last.outside_change = _last.runs == 1 ? 0 : (long)outside - (long)_outside_at_end;
     _outside_at_end = outside;
     _last.result = _reported;
+    const char *status, *detail;
+    if (playbook_run_ended(&status, &detail)
+        && (strcmp(status, "fail") == 0 ? strcmp(_reported.status, "fail") != 0 : _reported.status[0] == '\0')) {
+        // A playbook's fail outranks what the program reported but its fail; its pass is the
+        // result only when the program reported none.
+        snprintf(_last.result.status, sizeof(_last.result.status), "%s", status);
+        snprintf(_last.result.detail, sizeof(_last.result.detail), "%s", detail);
+    }
     fault_run_ended();
     _reported = (result_t) {0};
     if (leaked != 0) {
