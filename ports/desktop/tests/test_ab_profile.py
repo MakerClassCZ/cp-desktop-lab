@@ -7,18 +7,24 @@ lets the heap grow only as far as a board's: as many 4 KB buffers fit as at that
 import os, subprocess, sys
 from harness import BIN, T, check, launch
 
-CPAPI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cpapi.py")
+# Beside the tests when they are copied out, else in the port's tools/
+CPAPI = os.path.join(T, "cpapi.py")
+if not os.path.exists(CPAPI):
+    CPAPI = os.path.join(T, "..", "tools", "cpapi.py")
 
 
 def ab(code, *args):
     path = os.path.join(T, "ab_code.py")
     open(path, "w").write(code)
-    r = subprocess.run(
-        [sys.executable, CPAPI, "ab", BIN, BIN, path, "--names", "one,two"] + list(args),
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
+    try:
+        r = subprocess.run(
+            [sys.executable, CPAPI, "ab", BIN, BIN, path, "--names", "one,two"] + list(args),
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    finally:
+        os.remove(path)
     return r.returncode, r.stdout + r.stderr[-800:]
 
 

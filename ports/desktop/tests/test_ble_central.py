@@ -6,7 +6,7 @@ CLUE) through cpapi.Air's relay.
 """
 
 import os, threading, time
-from harness import BIN, HEADLESS, check, cpapi, drive, lib_files, seen
+from harness import BIN, HEADLESS, T, check, cpapi, drive, lib_files, seen
 
 # The REPL holds the program's variables from one exec to the next, so a test drives the program
 # step by step while the Air's threads play the devices.
@@ -828,7 +828,10 @@ check(
 
 # ---- MCP: an agent tests a central program ----
 
-SERVER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "cp_mcp.py")
+# Beside the tests when they are copied out, else in the port's tools/
+SERVER = os.path.join(T, "cp_mcp.py")
+if not os.path.exists(SERVER):
+    SERVER = os.path.join(T, "..", "tools", "cp_mcp.py")
 
 
 class Mcp:
@@ -958,7 +961,7 @@ labs = [
     )
     for code, name, port in ((ADVERTISE, "HANDA", ports[0]), (IDLE, "HANDB", ports[1]))
 ]
-CPAPI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "cpapi.py")
+CPAPI = os.path.join(os.path.dirname(os.path.abspath(SERVER)), "cpapi.py")
 relay = None
 try:
     A, B = (cpapi.Board.attach("http://127.0.0.1:%d/" % p, TOKEN) for p in ports)

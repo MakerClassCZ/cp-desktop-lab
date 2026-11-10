@@ -17,6 +17,9 @@ TIMEOUT=$(command -v timeout || command -v gtimeout)
 export PYTHONIOENCODING=utf-8      # the console text has emoji; Windows would write cp1252
 WORK=$(mktemp -d)
 cp "$HERE"/tests/*.py "$HERE/tools/cpapi.py" "$HERE/tools/cp_mcp.py" "$WORK/"
+# test_airlift's certificates and the libraries its programs import
+cp "$HERE"/tests/*.pem "$HERE"/tests/*.key "$WORK/"
+cp -r "$HERE/tests/airlift_lib" "$WORK/"
 mkdir "$WORK/board_files" && cp "$HERE"/boards/files/*.toml "$WORK/board_files/"
 # adafruit_ble from its frozen submodule, when fetched, for test_ble's BLERadio() program
 # (git submodule update --init frozen/Adafruit_CircuitPython_BLE); a CIRCUITPY_LIB set wins.
