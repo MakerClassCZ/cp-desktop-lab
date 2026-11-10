@@ -381,12 +381,12 @@ class Driver:
         self.device = I2CDevice(i2c, address)
 """
 with launch(
-    """import board, busio
+    """import board, lab, busio
 import adafruit_mcp9808, adafruit_pca9685
 i2c = busio.I2C(board.SCL, board.SDA)
 adafruit_mcp9808.Driver(i2c, 0x18)
 adafruit_pca9685.Driver(i2c, 0x60)
-print("attached", sorted(board.attached))
+print("attached", sorted(lab.attached))
 """,
     files={"lib/adafruit_mcp9808.py": DRIVER, "lib/adafruit_pca9685.py": DRIVER},
 ) as b:
@@ -481,10 +481,10 @@ check(
 
 # A seesaw at an address no model has is a rotary encoder, as most seesaws are
 with launch(
-    """import board, busio
+    """import board, lab, busio
 import adafruit_seesaw.seesaw
 adafruit_seesaw.seesaw.Driver(busio.I2C(board.SCL, board.SDA), 0x4a)
-print("attached", sorted(board.attached))
+print("attached", sorted(lab.attached))
 """,
     files={"lib/adafruit_seesaw/__init__.py": "", "lib/adafruit_seesaw/seesaw.py": DRIVER},
 ) as b:

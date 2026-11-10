@@ -6,7 +6,7 @@ shows its temperature, humidity and pressure sliders; moving one changes what th
 
     circuitpython --drive examples/bme280/CIRCUITPY
 
-The REPL reaches the sensor too: `board.attached["BME280"].temp = 35`.
+The REPL reaches the sensor too: `import lab`, then `lab.attached["BME280"].temp = 35`.
 
 `graph.py` is the same sensor on the display: the temperature in large digits and the last minute
 as bars, blue to red. Copy it over `code.py` while the program runs and it reloads into the graph:

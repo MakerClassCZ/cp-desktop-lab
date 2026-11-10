@@ -81,9 +81,6 @@ uint64_t desktop_pins_claimed(void);
 // A pin's first name in board, else GPIOn; safe outside a VM.
 void desktop_pin_name(uint8_t number, char *out, size_t cap);
 
-// board.exit(status=0): the way out of code or the REPL on a host, on every board (desktop_board.c).
-extern const mp_obj_fun_builtin_var_t desktop_board_exit_obj;
-
 // A host button sets the level a virtual pin reads.
 void desktop_pin_drive(uint8_t number, bool level);
 // And lets it go: the pin reads its pull again.

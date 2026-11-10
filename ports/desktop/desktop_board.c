@@ -123,11 +123,6 @@ void desktop_board_list(void) {
     }
 }
 
-static mp_obj_t _board_exit(size_t n_args, const mp_obj_t *args) {
-    desktop_power_off(n_args > 0 ? mp_obj_get_int(args[0]) : 0);
-}
-MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(desktop_board_exit_obj, 0, 1, _board_exit);
-
 const char *desktop_uart_path(void) {
     if (desktop_options.uart_path != NULL) {
         return desktop_options.uart_path;

@@ -639,13 +639,19 @@ class Board:
         leaked_pins (claimed by objects that did not release them; a board keeps them claimed
         too), outside_heap and outside_heap_change (bytes allocated outside the VM's heap, and the
         change since the VM before), runs (the VMs ended so far: boot.py, code.py and the REPL each
-        count) and vm_running (true when it did not end in time)."""
+        count), result (what the program reported with lab.result: {"status", "detail"}, or
+        None) and vm_running (true when it did not end in time)."""
         end = time.time() + timeout
         while True:
             r = self.request("GET", "/api/after-run")
             if not r["vm_running"] or time.time() > end:
                 return r
             time.sleep(0.05)
+
+    def result(self, timeout=5):
+        """What the last run reported with lab.result: {"status": "pass", "fail" or "skip",
+        "detail"}, or None. A run that ended in an exception has failed whatever it reported."""
+        return self.after_run(timeout)["result"]
 
     def interrupt(self):
         self.request("POST", "/api/interrupt")
@@ -2215,7 +2221,8 @@ def run(argv):
     """cpapi.py run PROGRAM CODE: CODE (a .py file as code.py, or a directory as the drive) run
     headless until code.py ends or --wait's text comes; its console printed, and the display if
     asked. Exit status 0; 1 when it did not end in time, or the program ended; 2 after a hard
-    fault; 3 when code.py ended in an exception; 64 for wrong arguments."""
+    fault; 3 when code.py ended in an exception; 4 when it reported a fail (lab.result); 64 for
+    wrong arguments."""
     import argparse
     import shutil
     import tempfile
@@ -2283,6 +2290,11 @@ def run(argv):
                 status = 3
             if not a.wait:
                 left = b.after_run()
+                reported = left["result"]
+                if reported:
+                    print("--- result: " + ": ".join(x for x in reported.values() if x))
+                    if reported["status"] == "fail" and status == 0:
+                        status = 4
                 if left["leaked_pins"]:
                     print("--- still claimed after the run: " + ", ".join(left["leaked_pins"]))
                 # The first run's change is against boot.py's VM, so it counts from the second.
@@ -2330,6 +2342,10 @@ def _code_output(out):
     return text.split("Code done running.", 1)[0].strip()
 
 
+# A run's outcome when it ended well and reported a result with lab.result.
+REPORTED = {"pass": "passed", "fail": "failed", "skip": "skipped"}
+
+
 def _trials(program, code, a):
     """Each run of code on program: {"outcome", "detail", "last", "leaked"}."""
     import shutil
@@ -2369,7 +2385,12 @@ def _trials(program, code, a):
                 r["outcome"] = "exception"
                 r["detail"] = r["last"]
             if r["outcome"] in ("ok", "exception") and not a.wait:
-                r["leaked"] = b.after_run()["leaked_pins"]
+                left = b.after_run()
+                r["leaked"] = left["leaked_pins"]
+                # What the program reported, unless it ended in an exception.
+                if r["outcome"] == "ok" and left["result"]:
+                    r["outcome"] = REPORTED[left["result"]["status"]]
+                    r["detail"] = left["result"]["detail"]
             results.append(r)
             if r["outcome"] in ("hard fault", "program ended"):
                 break
@@ -2417,7 +2438,8 @@ def ab(argv):
         return "%d/%d" % (len(hits), len(results)) + (" `%s`" % detail if detail else "")
 
     rows = [("runs", [str(len(c)) for c in columns])]
-    for outcome in ("ok", "exception", "hard fault", "not ended in time", "program ended"):
+    outcomes = ("ok",) + tuple(REPORTED.values())
+    for outcome in outcomes + ("exception", "hard fault", "not ended in time", "program ended"):
         if outcome == "ok" or any(r["outcome"] == outcome for c in columns for r in c):
             rows.append((outcome, [counted(c, outcome) for c in columns]))
     if any(r["leaked"] for c in columns for r in c):

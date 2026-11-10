@@ -10,8 +10,8 @@
 
 #include "parts.h"
 
-// Parts from Python on the virtual board: board.parts is the catalogue of kinds, a kind called
-// describes a part, board.attach puts it on the board, and an attached part object is a handle
+// Parts from Python on the virtual board: lab.parts is the catalogue of kinds, a kind called
+// describes a part, lab.attach puts it on the board, and an attached part object is a handle
 // to the live part (parts.c, i2c_virtual.c, neopixel_emu.c), found by its place on each access.
 
 typedef enum {
@@ -44,8 +44,8 @@ typedef struct {
     char options[64];
 } board_part_obj_t;
 
-extern const mp_obj_module_t board_parts_module;
-MP_DECLARE_CONST_FUN_OBJ_1(board_attach_obj);
-MP_DECLARE_CONST_FUN_OBJ_1(board_detach_obj);
-// The board module's __getattr__: board.attached.
-MP_DECLARE_CONST_FUN_OBJ_1(board_getattr_obj);
+extern const mp_obj_module_t lab_parts_module;
+MP_DECLARE_CONST_FUN_OBJ_1(lab_attach_obj);
+MP_DECLARE_CONST_FUN_OBJ_1(lab_detach_obj);
+// The lab module's __getattr__: lab.attached.
+MP_DECLARE_CONST_FUN_OBJ_1(lab_getattr_obj);

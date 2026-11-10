@@ -35,7 +35,7 @@ typedef enum {
     MIC_HOST,           // the computer's microphone
 } mic_source_t;
 
-// The values an option takes, as its errors and board.parts's repr say them.
+// The values an option takes, as its errors and lab.parts's repr say them.
 #define PARTS_COLOURS "red, green, blue, yellow, orange, white, amber or #rrggbb"
 #define PARTS_BUTTON_LEVELS "\"low\" or \"high\", then key=KEY"
 #define PARTS_MIC_SOURCES "\"tone 440\", \"noise\" or \"mic\""
@@ -48,10 +48,10 @@ typedef struct {
     part_kind_t kind;
     uint8_t pin;
     char name[24];
-    // Pulled out (board.detach, or replaced at its place): the slot stays, so what common-hal
+    // Pulled out (lab.detach, or replaced at its place): the slot stays, so what common-hal
     // holds stays valid and works again when a part of this kind is attached here.
     bool detached;
-    bool automatic;     // added by parts_for_pin, not by a board file or board.attach
+    bool automatic;     // added by parts_for_pin, not by a board file or lab.attach
     // options
     bool active_high;   // a button: pressed reads high
     int32_t key;        // a button: the SDL key that presses it, 0 for none
@@ -98,7 +98,7 @@ typedef struct {
 
 #define PARTS_MAX 48
 
-// A part from the board file or board.attach: options as written there; NULL with *why set when
+// A part from the board file or lab.attach: options as written there; NULL with *why set when
 // they are wrong. The last wins: an attached part of another kind at the pin, or of the same name
 // elsewhere, is detached; one of the same kind at the pin is reused with its state.
 part_t *parts_add(part_kind_t kind, uint8_t pin, const char *name, const char *options, const char **why);

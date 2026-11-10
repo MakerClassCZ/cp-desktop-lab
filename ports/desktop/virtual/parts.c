@@ -290,7 +290,7 @@ static bool _emptied(uint8_t pin) {
     return any;
 }
 
-// The kinds as board.parts names them, for the line an automatic part prints.
+// The kinds as lab.parts names them, for the line an automatic part prints.
 static const char *_kind_name(part_kind_t kind) {
     static const char *const names[] = {
         [PART_BUTTON] = "Button", [PART_SWITCH] = "Switch", [PART_LED] = "LED", [PART_ANALOG] = "Potentiometer",

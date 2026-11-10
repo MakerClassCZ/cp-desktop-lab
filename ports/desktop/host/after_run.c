@@ -25,11 +25,17 @@
 static bool _vm_was_up;
 static uint64_t _claimed_at_start;
 static size_t _outside_at_end;
+typedef struct {
+    char status[8];             // "" when the run reported none
+    char detail[200];
+} result_t;
+static result_t _reported;     // by the VM running now
 static struct {
     unsigned runs;
     uint64_t leaked;
     size_t outside;
     long outside_change;
+    result_t result;
 } _last;
 
 #if CIRCUITPY_DISPLAYIO
@@ -111,6 +117,8 @@ static void _ended(void) {
     _last.outside = outside;
     _last.outside_change = _last.runs == 1 ? 0 : (long)outside - (long)_outside_at_end;
     _outside_at_end = outside;
+    _last.result = _reported;
+    _reported = (result_t) {0};
     if (leaked != 0) {
         fprintf(stderr, "circuitpython: still claimed after the run:");
         for (uint8_t n = 0; n < 64; n++) {
@@ -134,9 +142,24 @@ void after_run_task(void) {
     _vm_was_up = up;
 }
 
+void after_run_report(const char *status, const char *detail) {
+    snprintf(_reported.status, sizeof(_reported.status), "%s", status);
+    snprintf(_reported.detail, sizeof(_reported.detail), "%s", detail);
+}
+
 void after_run_json(api_buf_t *b) {
-    api_buf_printf(b, "{\"vm_running\": %s, \"runs\": %u, \"leaked_pins\": [", gc_alloc_possible() ? "true" : "false",
+    api_buf_printf(b, "{\"vm_running\": %s, \"runs\": %u, \"result\": ", gc_alloc_possible() ? "true" : "false",
         _last.runs);
+    if (_last.result.status[0] == '\0') {
+        api_buf_add(b, "null", 4);
+    } else {
+        api_buf_add(b, "{\"status\": ", 11);
+        api_buf_json_string(b, _last.result.status, strlen(_last.result.status));
+        api_buf_add(b, ", \"detail\": ", 12);
+        api_buf_json_string(b, _last.result.detail, strlen(_last.result.detail));
+        api_buf_add(b, "}", 1);
+    }
+    api_buf_add(b, ", \"leaked_pins\": [", 18);
     bool first = true;
     for (uint8_t n = 0; n < 64; n++) {
         if (_last.leaked & (1ull << n)) {

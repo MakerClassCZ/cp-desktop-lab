@@ -53,23 +53,23 @@ check(
 check("microcontroller.pin GPIO0-27", "mcu pins True False" in console, console)
 check("sys.platform", "platform " + ("win32" if os.name == "nt" else "linux") in console, console)
 
-# board.exit() ends the program with its status, from code.py and from the REPL
-status, out = refused(code='import board\nprint("leaving")\nboard.exit(3)\nprint("still here")\n')
+# lab.exit() ends the program with its status, from code.py and from the REPL
+status, out = refused(code='import lab\nprint("leaving")\nlab.exit(3)\nprint("still here")\n')
 check(
-    "board.exit(3) from code.py",
+    "lab.exit(3) from code.py",
     status == 3 and "leaving" in out and "still here" not in out,
     "status %r %s" % (status, out),
 )
 r = Run(["--drive", drive('print("to the repl")\n')], stdin=subprocess.PIPE)
 r.wait_for("Press any key")
-r.p.stdin.write(b"\r\nimport board\r\nboard.exit()\r\n")
+r.p.stdin.write(b"\r\nimport lab\r\nlab.exit()\r\n")
 r.p.stdin.flush()
 try:
     status = r.p.wait(timeout=10)
 except subprocess.TimeoutExpired:
     status = None
 r.stop()
-check("board.exit() from the REPL", status == 0, "status %r %s" % (status, r.text()[-300:]))
+check("lab.exit() from the REPL", status == 0, "status %r %s" % (status, r.text()[-300:]))
 
 # Tab in the REPL completes a pin name that only the board file gives
 with launch('print("to the repl")\n', board='[pins]\nZQ_LAMP = "GPIO5"\n') as b:

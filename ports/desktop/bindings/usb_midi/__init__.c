@@ -17,7 +17,7 @@
 //|
 //| The port is no USB device: ``usb_midi.ports`` is a board's, so ``adafruit_midi`` code runs.
 //| What comes in is what the board panel's MIDI keyboard and CC sliders play (a board file's
-//| ``[midi]`` section, or ``board.attach``), traced as ``MIDI IN 90 3c 64``; what goes out is traced
+//| ``[midi]`` section, or ``lab.attach``), traced as ``MIDI IN 90 3c 64``; what goes out is traced
 //| as ``MIDI OUT 90 3c 64``."""
 
 typedef struct {

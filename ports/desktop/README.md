@@ -90,7 +90,7 @@ on it, as a board keeps it in flash outside CIRCUITPY: `CIRCUITPY.nvm` for `CIRC
 the file when it returns, so the next process, a reset or another run of the same drive reads it.
 
 The console works as on a board: Ctrl-C interrupts, Ctrl-D reloads, any key enters the REPL.
-Ctrl-\, closing the window or `board.exit()` (from code or the REPL, with an optional exit
+Ctrl-\, closing the window or `lab.exit()` (from code or the REPL, with an optional exit
 status) ends the program. `microcontroller.reset()` restarts the process, and a
 crash restarts it in safe mode with a backtrace on stderr; `addr2line -f -e
 build-linux/circuitpython 0x...` turns its `circuitpython(+0x...)` lines into function names. A
@@ -383,7 +383,7 @@ code.circuitpython.org choose Bluetooth, pick `CIRCUITPYxxxx` and pair when aske
 On the virtual board the program's parts appear in a window, "CircuitPython board": NeoPixels
 on top, then a row per part with its name, its control and its exact value. A part appears when
 the program uses it (and says so on stderr), ahead of the program from a board file, or from
-Python with `board.attach` (see [Plugging parts in from Python](#plugging-parts-in-from-python)).
+Python with `lab.attach` (see [Plugging parts in from Python](#plugging-parts-in-from-python)).
 
 | part | in the program | on the panel |
 |---|---|---|
@@ -480,8 +480,8 @@ gamepad gives up Z, X, A, S, Q and W and keeps its other keys. A slider sends it
 it moves (the wheel 8, Shift+wheel 1), and each slider's value comes first on a run's first read.
 Each run starts with nothing queued. Everything that comes in is traced as `MIDI IN 90 3c 64`.
 
-From Python, `board.attach(board.parts.Keyboard(low="C2"))` and
-`board.attach(board.parts.CC(74, name="CUTOFF", value=64))`; a CC slider's `value` moves it, a
+From Python, `lab.attach(lab.parts.Keyboard(low="C2"))` and
+`lab.attach(lab.parts.CC(74, name="CUTOFF", value=64))`; a CC slider's `value` moves it, a
 keyboard's `held` lists the notes held. The key script and the control API play them:
 `tap KEYS C4`, `press KEYS C4`, `release KEYS 60`, `set CUTOFF 100`; `/api/state` has
 `"midi": {"keyboard": "KEYS", "low": "C3", "high": "C5", "channel": 1, "held": [...]}`.
@@ -640,22 +640,22 @@ first use and kept from one run to the next, as a card is.
 ### Plugging parts in from Python
 
 On the virtual board parts are plugged in and pulled out from `code.py` or the REPL, as on a
-breadboard. `board.parts` is the catalogue (Tab lists it): `Button`, `Switch`, `LED`,
+breadboard, with the `lab` module (see [The lab module](#the-lab-module)). `lab.parts` is the catalogue (Tab lists it): `Button`, `Switch`, `LED`,
 `Potentiometer`, `Lamp`, `Servo`, `Touch`, `Speaker`, `Mic`, `Encoder`, `IR`, `NeoPixel` and a
 kind per I2C sensor model, in capitals (`BME280`, `LIS3DH` ...). Calling a kind describes a part;
-`board.attach(part)` puts it on the board and returns it; `board.detach(part)` or
-`board.detach("NAME")` takes it off; `board.attached` is a dict, name to part, of everything on
+`lab.attach(part)` puts it on the board and returns it; `lab.detach(part)` or
+`lab.detach("NAME")` takes it off; `lab.attached` is a dict, name to part, of everything on
 the board, wherever it came from.
 
 ```python
->>> import board
->>> env = board.attach(board.parts.BME280(address=0x76, name="ENV"))
+>>> import board, lab
+>>> env = lab.attach(lab.parts.BME280(address=0x76, name="ENV"))
 >>> env.temp = 35            # the panel's slider moves; the library reads 35
->>> led = board.attach(board.parts.LED(board.GPIO16, color="green"))
+>>> led = lab.attach(lab.parts.LED(board.GPIO16, color="green"))
 >>> led
 <LED LED1 on GPIO16: off>
->>> board.detach("ENV")      # the library's next read raises, as with the wire pulled
->>> sorted(board.attached)
+>>> lab.detach("ENV")        # the library's next read raises, as with the wire pulled
+>>> sorted(lab.attached)
 ['LED1']
 ```
 
@@ -847,7 +847,7 @@ naming another `Host`, or a browser's preflight, is refused, so a web page canno
 | `POST /api/panel` | key script lines (`set ENV.temp 24.5`, `press A`, `turn ENC 2`, `send IR_RX`, `down Z`), applied before the answer |
 | `GET /api/display?name=NAME` | the window (`DISPLAY`), or a board file's display, as PNG |
 | `GET /api/trace?since=N&wait=TEXT&timeout=MS` | the bus trace, as the console; with or without `--trace-bus` |
-| `GET /api/after-run` | what the last run left behind once its VM ended: `leaked_pins`, `outside_heap` and `outside_heap_change` (bytes), `runs` (VMs seen ending), `vm_running` |
+| `GET /api/after-run` | what the last run left behind once its VM ended: `result` (what it reported with `lab.result`, or null), `leaked_pins`, `outside_heap` and `outside_heap_change` (bytes), `runs` (VMs seen ending), `vm_running` |
 | `GET /api/audio`, `POST /api/audio/start`, `/stop` | the recordings of the audio outputs (`pin`, `rate`, `channels`, `frames`, `underruns`, `dropped`); start clears them and records from then on |
 | `GET /api/audio/wav?index=N` | a recording as a WAV file |
 | `GET /api/ble` | the Bluetooth controller (`virtual`, `serial`, `off`), what is advertised (`data`, `scan_response` in hex, `name`, `connectable`), the address, the connection, whether it is `scanning`; `links`: each connection's `handle`, `peer`, the program's `role` and whether it is `encrypted`; `encrypted` and `key_size` of the first encrypted one; `bonds`, their number for this controller; the BLE workflow's state (`workflow`: `off`, `discovery`, `reconnecting`, `connected`, `on`) and `bonded` |
@@ -904,12 +904,13 @@ N times in one process (Ctrl-D between), `--code FILE` runs a file of a drive di
 place of `code.py`, and `--board-file`, `--board`, `--display`, `--fast-time` and `--timeout` are
 as above. The exit status is 0; 1 when it did not end in time
 or the program ended; 2 after a hard fault, whose backtrace comes last; 3 when `code.py` ended in
-an exception; 64 for wrong arguments.
+an exception; 4 when it reported a fail with `lab.result`; 64 for wrong arguments.
 
 `python3 tools/cpapi.py ab PROGRAM_A PROGRAM_B CODE` runs CODE `--runs` times (5) on each of two
 programs and prints a Markdown table for an issue or a PR: how many runs ended well, in an
 exception (the most common one), a hard fault or not in time, the pins left claimed, each run's
-outcome and the last line printed. `--names main,fix` names the columns; `--board-file`,
+outcome and the last line printed. A run that ended well and reported a result with
+`lab.result` counts as `passed`, `failed` or `skipped`, with the detail it gave. `--names main,fix` names the columns; `--board-file`,
 `--board`, `--wait`, `--timeout`, `--fast-time` and `--code` are as for `run`.
 `tools/build-variant.sh NAME CHANGE...` builds the second program: a temporary worktree of
 HEAD with the submodules of this checkout linked in, each CHANGE (a commit, a range `A..B`, or
@@ -948,6 +949,32 @@ a time; it runs headless unless `launch` asks for the window. `stop`, or the ser
 board it launched; one it attached to keeps running. Console text comes without escape sequences,
 at most its last 20000 characters, and a call waits at most 60 s. `tests/test_mcp.py` drives it
 as a host would. `--code` is `code_file` in `cpapi`'s `Board.launch` and the MCP `launch`.
+
+### The lab module
+
+`import lab` is the program's own view of the lab; on a board there is no `lab`, so code for
+both imports it in a `try`. `board` has what a board has (pins, buses, `DISPLAY`), and the
+lab's own things are here:
+
+- `lab.parts`, `lab.attach`, `lab.detach`, `lab.attached`: parts on the virtual board (see
+  [Plugging parts in from Python](#plugging-parts-in-from-python)).
+- `lab.panel(*lines)`: panel lines, as `POST /api/panel` and `b.panel()` take them
+  (`press A`, `set ENV.temp 30`); a line that is not one raises `ValueError`.
+- `lab.result(status, detail="")`: the run's result, `"pass"`, `"fail"` or `"skip"`; a
+  later call replaces it. The after-run report has it (`b.result()` in `cpapi`), `cpapi.py run`
+  exits 4 on a fail and `ab` counts it. A run that ends in an exception has failed whatever it
+  reported.
+- `lab.exit(status=0)`: ends the process.
+
+```python
+try:
+    import lab
+except ImportError:
+    lab = None
+...
+if lab:
+    lab.result("pass" if ok else "fail", detail)
+```
 
 ### What a run leaves behind
 

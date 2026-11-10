@@ -55,7 +55,7 @@ typedef struct i2c_virtual_device {
     const i2c_virtual_model_t *model;
     char name[12];
     uint8_t address;
-    // Pulled out (board.detach, or replaced at its address): it answers nothing, the slot stays.
+    // Pulled out (lab.detach, or replaced at its address): it answers nothing, the slot stays.
     bool present;
     bool automatic;             // added by i2c_virtual_attach_default
     bool nack;                  // the write just made is not acknowledged (a chip resetting)
@@ -85,7 +85,7 @@ typedef struct i2c_virtual_device {
 
 extern const desktop_i2c_ops_t i2c_virtual_ops;
 
-// A board file line or board.attach: false with *why set when the model is unknown. The last
+// A board file line or lab.attach: false with *why set when the model is unknown. The last
 // wins: another model at the address, or a device of the same name, is detached; the same model
 // at the address is attached again with its values.
 bool i2c_virtual_add(const char *name, const char *spec, const char **why);

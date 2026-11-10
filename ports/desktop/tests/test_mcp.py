@@ -271,7 +271,7 @@ check("stop", not r.get("isError"), r)
 r = c.call("info")
 check("after stop: an error saying to launch", r.get("isError") and "launch" in text(r), r)
 
-r = c.call("launch", drive=drive('import board\nprint("dying")\nboard.exit(3)\n'))
+r = c.call("launch", drive=drive('import lab\nprint("dying")\nlab.exit(3)\n'))
 time.sleep(1)
 r = c.call("exec", code="1")
 check("a program that ended: an error that says so", r.get("isError") and "ended" in text(r), r)

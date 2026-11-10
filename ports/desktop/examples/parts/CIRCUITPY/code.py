@@ -1,13 +1,13 @@
-# Parts plugged in from the program: a button, an LED and a BME280 sensor (board.parts).
+# Parts plugged in from the program: a button, an LED and a BME280 sensor (lab.parts).
 import time
 
-import board
+import board, lab
 import digitalio
 from microcontroller import pin
 
-board.attach(board.parts.Button(pin.GPIO16, name="BUTTON"))
-board.attach(board.parts.LED(pin.GPIO17, color="green", name="LAMP"))
-env = board.attach(board.parts.BME280(name="ENV"))
+lab.attach(lab.parts.Button(pin.GPIO16, name="BUTTON"))
+lab.attach(lab.parts.LED(pin.GPIO17, color="green", name="LAMP"))
+env = lab.attach(lab.parts.BME280(name="ENV"))
 
 key = digitalio.DigitalInOut(pin.GPIO16)
 key.pull = digitalio.Pull.UP

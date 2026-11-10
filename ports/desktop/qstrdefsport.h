@@ -6,7 +6,7 @@
 
 // Do not use #pragma once; this file is included by the qstr tooling several times.
 
-// The virtual I2C devices' channels, attributes of board.parts sensors (virtual/board_parts.c).
+// The virtual I2C devices' channels, attributes of lab.parts sensors (virtual/board_parts.c).
 Q(temp)
 Q(hum)
 Q(press)

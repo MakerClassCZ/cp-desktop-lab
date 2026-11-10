@@ -17,6 +17,7 @@
 #include "py/runtime.h"
 #include "shared-bindings/microcontroller/Pin.h"
 
+#include "desktop_pins.h"
 #include "i2c_virtual.h"
 #include "midi_in.h"
 #include "neopixel_emu.h"
@@ -137,7 +138,7 @@ static const mp_rom_map_elem_t _parts_globals_table[] = {
 };
 static MP_DEFINE_CONST_DICT(_parts_globals, _parts_globals_table);
 
-const mp_obj_module_t board_parts_module = {
+const mp_obj_module_t lab_parts_module = {
     .base = { &mp_type_module },
     .globals = (mp_obj_dict_t *)&_parts_globals,
 };
@@ -689,7 +690,7 @@ static mp_obj_t _kind_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const m
     return MP_OBJ_FROM_PTR(self);
 }
 
-// ---- board.attach, board.detach ----
+// ---- lab.attach, lab.detach ----
 
 // An attached pin part at a pin, or NULL.
 static part_t *_attached_at(uint8_t pin) {
@@ -703,6 +704,10 @@ static part_t *_attached_at(uint8_t pin) {
 }
 
 static mp_obj_t _attach(mp_obj_t part_in) {
+    if (desktop_pin_backend != &desktop_virtual_backend) {
+        // An adapter's pins are wires to real parts.
+        mp_raise_RuntimeError(MP_ERROR_TEXT("parts go on the virtual board"));
+    }
     board_part_obj_t *self = MP_OBJ_TO_PTR(mp_arg_validate_type(part_in, &board_part_type, MP_QSTR_part));
     const board_part_kind_t *kind = self->kind;
     const char *why = NULL;
@@ -746,7 +751,7 @@ static mp_obj_t _attach(mp_obj_t part_in) {
     self->attached = true;
     return part_in;
 }
-MP_DEFINE_CONST_FUN_OBJ_1(board_attach_obj, _attach);
+MP_DEFINE_CONST_FUN_OBJ_1(lab_attach_obj, _attach);
 
 // A part object, or the name of an attached part (a sensor by its device's name).
 static mp_obj_t _detach(mp_obj_t part_in) {
@@ -792,9 +797,9 @@ static mp_obj_t _detach(mp_obj_t part_in) {
     }
     return mp_const_none;
 }
-MP_DEFINE_CONST_FUN_OBJ_1(board_detach_obj, _detach);
+MP_DEFINE_CONST_FUN_OBJ_1(lab_detach_obj, _detach);
 
-// ---- board.attached ----
+// ---- lab.attached ----
 
 // The catalogue's kind of a live part: by its category and part kind, or a sensor by its model.
 static const board_part_kind_t *_kind_of(uint8_t category, const part_t *p, const i2c_virtual_model_t *model) {
@@ -863,7 +868,7 @@ static void _options_of(const part_t *p, char *buf, size_t len) {
     }
 }
 
-// board.attached, made anew on each read: name -> part object of every part on the board.
+// lab.attached, made anew on each read: name -> part object of every part on the board.
 static mp_obj_t _getattr(mp_obj_t attr) {
     if (mp_obj_str_get_qstr(attr) != MP_QSTR_attached) {
         // Not found, as the module's own lookup says it: an AttributeError where one is due, and
@@ -913,4 +918,4 @@ static mp_obj_t _getattr(mp_obj_t attr) {
     }
     return dict;
 }
-MP_DEFINE_CONST_FUN_OBJ_1(board_getattr_obj, _getattr);
+MP_DEFINE_CONST_FUN_OBJ_1(lab_getattr_obj, _getattr);

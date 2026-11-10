@@ -16,9 +16,9 @@ clue.toml, feather.toml, magtag.toml, ...), so code written for one runs with it
     ./circuitpython --board-file boards/files/pybadge.toml --drive ~/path/to/project
     ./circuitpython --drive examples/panel/CIRCUITPY --board-file examples/panel/board.toml
 
-Parts from Python: on the virtual board board.parts lists what can be plugged in, board.attach
-and board.detach plug parts in and out from code.py or the REPL, and board.attached is what is
-on the board (board.attached["BME280"].temp = 30); examples/parts shows a button, an LED and a
+Parts from Python (import lab): on the virtual board lab.parts lists what can be plugged in, lab.attach
+and lab.detach plug parts in and out from code.py or the REPL, and lab.attached is what is
+on the board (lab.attached["BME280"].temp = 30); examples/parts shows a button, an LED and a
 sensor:
 
     ./circuitpython --drive examples/parts/CIRCUITPY

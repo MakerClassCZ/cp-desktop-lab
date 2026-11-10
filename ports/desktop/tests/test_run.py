@@ -44,7 +44,7 @@ check(
     (rc, out[-300:]),
 )
 
-rc, out = run('import board\nprint("leaving")\nboard.exit(3)\n')
+rc, out = run('import lab\nprint("leaving")\nlab.exit(3)\n')
 check(
     "a program that ends itself: status 1, its exit status, no traceback of run's",
     rc == 1 and "leaving" in out and "the program ended" in out and "Traceback" not in out,

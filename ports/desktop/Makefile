@@ -43,6 +43,7 @@ INC += \
 
 SRC_C += \
 	background.c \
+	bindings/lab/__init__.c \
 	bindings/usb_hid/__init__.c \
 	bindings/usb_midi/__init__.c \
 	board_file.c \
