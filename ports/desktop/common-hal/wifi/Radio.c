@@ -17,7 +17,9 @@
 #include "supervisor/shared/settings.h"
 
 #include "bus_trace.h"
+#include "fault.h"
 #include "host_net.h"
+#include "net_fault.h"
 
 // A board with CIRCUITPY_WIFI_SSID in settings.toml is online when the program starts.
 static void _autoconnect(wifi_radio_obj_t *self) {
@@ -39,7 +41,7 @@ static void _autoconnect(wifi_radio_obj_t *self) {
 // The computer's interface, when the radio is on a network.
 static bool _info(wifi_radio_obj_t *self, host_net_info_t *info) {
     _autoconnect(self);
-    return self->connected && host_net_info(info);
+    return self->connected && net_link_up() && host_net_info(info);
 }
 
 static mp_obj_t _address(uint32_t address) {
@@ -192,14 +194,22 @@ wifi_radio_error_t common_hal_wifi_radio_connect(wifi_radio_obj_t *self, uint8_t
     memcpy(self->ssid, ssid, n);
     self->ssid[n] = '\0';
     self->secured = password_len > 0;
+    // "fault wifi.connect": what a board's radio reports, raised as the board raises it.
+    fault_t f = fault_check("wifi.connect", self->ssid, -1);
+    if (f.fired) {
+        self->connected = false;
+        return strcmp(f.action, "auth") == 0 ? WIFI_RADIO_ERROR_AUTH_FAIL
+            : strcmp(f.action, "noap") == 0 ? WIFI_RADIO_ERROR_NO_AP_FOUND : WIFI_RADIO_ERROR_CONNECTION_FAIL;
+    }
     self->connected = true;
+    net_link_restore();
     bus_trace_text("WIFI connect %s", self->ssid);
     return WIFI_RADIO_ERROR_NONE;
 }
 
 bool common_hal_wifi_radio_get_connected(wifi_radio_obj_t *self) {
     _autoconnect(self);
-    return self->connected;
+    return self->connected && net_link_up();
 }
 
 mp_obj_t common_hal_wifi_radio_get_ap_info(wifi_radio_obj_t *self) {

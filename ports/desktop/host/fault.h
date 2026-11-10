@@ -11,15 +11,9 @@
 
 #include "api_json.h"
 
-// Faults: named points in the virtual devices where a call can fail, on a count. A rule is a
-// panel line, "fault POINT ACTION [ARG] [FILTER=VALUE ...] [after=N] [count=N|once]"; the first
-// rule that matches a call decides. All on the VM thread.
-
-// What a point knows of the call, for the rules' filters; -1 where it has none.
-typedef struct {
-    long block;
-    long addr;
-} fault_ctx_t;
+// Faults: named points in the virtual devices and the network where a call can fail, on a count.
+// A rule is a panel line, "fault POINT ACTION [ARG] [FILTER=VALUE ...] [after=N] [count=N|once]";
+// the first rule that matches a call decides. All on the VM thread.
 
 typedef struct {
     bool fired;
@@ -28,8 +22,9 @@ typedef struct {
 } fault_t;
 
 // The rule that decides this call of the point, if one fires: counted, and traced as
-// "FAULT point action ...".
-fault_t fault_check(const char *point, const fault_ctx_t *ctx);
+// "FAULT point [where]: action". What the call is about, for the point's filters: text (a host,
+// an SSID; NULL for none) and number (a block, an address, a port; -1 for none).
+fault_t fault_check(const char *point, const char *text, long number);
 
 // A "fault ..." line. inside: from the run (the program, a playbook), its rules end with it;
 // else from outside (the API, the key script), they stay. False with why in err.

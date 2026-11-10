@@ -26,6 +26,7 @@
 #include <string.h>
 
 #include "host_socket.h"
+#include "net_fault.h"
 
 void common_hal_socketpool_socketpool_construct(socketpool_socketpool_obj_t *self, mp_obj_t network_interface) {
     bool is_wifi = false;
@@ -141,6 +142,9 @@ mp_obj_t common_hal_socketpool_getaddrinfo_raise(socketpool_socketpool_obj_t *se
         .ai_socktype = type,
     };
 
+    if (!net_dns(host)) {
+        common_hal_socketpool_socketpool_raise_gaierror_noname();
+    }
     struct addrinfo *res = NULL;
     int err = socketpool_getaddrinfo_common(host, port, &hints, &res);
     if (err != 0 || res == NULL) {

@@ -15,11 +15,13 @@
 #include <string.h>
 
 #include "py/mpconfig.h"
+#include "py/mperrno.h"
 #include "py/mphal.h"
 #include "py/mpprint.h"
 
 #include "bus_trace.h"
 #include "host_net.h"
+#include "net_fault.h"
 
 #if CIRCUITPY_SSL_MBEDTLS
 #include "mbedtls/ssl.h"
@@ -45,6 +47,7 @@ typedef struct {
     uint8_t tx[TX_MAX];         // a UDP packet being put together
     size_t tx_len;
     char host[256];
+    net_conn_t conn;            // its faults (a TCP or TLS connection)
     #if CIRCUITPY_SSL_MBEDTLS
     bool tls;
     mbedtls_ssl_context ssl;
@@ -85,6 +88,8 @@ static struct {
     bool waiting, queued;
     job_t job;
     uint8_t sock, mode;
+    bool failed;            // a fault decided it: it fails at fail_at, the worker not asked
+    uint32_t fail_at;
 } _want;
 
 static int _handshaking = -1;
@@ -255,6 +260,12 @@ static void _try_queue(void) {
     pthread_mutex_unlock(&_w.lock);
 }
 
+// The command waiting fails, after ms of the program's time, without asking the worker.
+static void _fail(uint32_t ms) {
+    _want.waiting = _want.failed = true;
+    _want.fail_at = mp_hal_ticks_ms() + ms;
+}
+
 static void _ask(kind_t kind, const char *host, uint32_t ip, uint16_t port, bool stream, uint8_t ttl) {
     memset(&_want.job, 0, sizeof(_want.job));
     _want.job.kind = kind;
@@ -264,7 +275,7 @@ static void _ask(kind_t kind, const char *host, uint32_t ip, uint16_t port, bool
     _want.job.stream = stream;
     _want.job.ttl = ttl;
     _want.waiting = true;
-    _want.queued = false;
+    _want.queued = _want.failed = false;
     _try_queue();
 }
 
@@ -400,6 +411,7 @@ static int _done(int result, int fd, uint32_t address) {
     }
     s->mode = _want.mode;
     s->was_connected = _want.mode != AIRLIFT_UDP;
+    net_conn_open(&s->conn, name, job->port);
     bus_trace_text("AIRLIFT socket %u %s %s:%u", n, _mode_name(_want.mode), name, job->port);
     return 1;
 }
@@ -422,12 +434,22 @@ bool airlift_net_poll(int *result) {
         }
         s->mode = AIRLIFT_TLS;
         s->was_connected = true;
-        bus_trace_text("AIRLIFT socket %u TLS %s:%u", n, s->host[0] ? s->host : _ip_text(s->remote_ip), s->remote_port);
+        net_conn_open(&s->conn, s->host[0] ? s->host : _ip_text(s->remote_ip), s->remote_port);
+        bus_trace_text("AIRLIFT socket %u TLS %s:%u", n, s->conn.host, s->remote_port);
         *result = 1;
         return true;
     }
     #endif
     if (!_want.waiting) {
+        *result = 0;
+        return true;
+    }
+    if (_want.failed) {
+        if ((int32_t)(mp_hal_ticks_ms() - _want.fail_at) < 0) {
+            return false;
+        }
+        _want.waiting = _want.failed = false;
+        _resolved = 0;
         *result = 0;
         return true;
     }
@@ -471,13 +493,16 @@ void airlift_net_reset(void) {
         _w.state = FREE;
     }
     pthread_mutex_unlock(&_w.lock);
-    _want.waiting = false;
+    _want.waiting = _want.failed = false;
     _handshaking = -1;
     _resolved = 0;
 }
 
 uint8_t airlift_net_get_socket(void) {
     _init();
+    if (!net_socket(0, 0)) {
+        return AIRLIFT_NO_SOCKET;
+    }
     for (uint8_t i = 0; i < AIRLIFT_SOCKETS; i++) {
         if (_socks[i].mode < 0 && !(_want.waiting && _want.sock == i)) {
             return i;
@@ -497,11 +522,22 @@ bool airlift_net_start(uint8_t n, const char *host, uint32_t ip, uint16_t port, 
     #endif
     _want.sock = n;
     _want.mode = mode;
+    int err = host[0] != '\0' && !net_dns(host) ? MP_EHOSTUNREACH
+        : mode != AIRLIFT_UDP ? net_connect(host[0] != '\0' ? host : _ip_text(ip), port) : 0;
+    if (err != 0) {
+        _fail(err == MP_ETIMEDOUT ? CONNECT_MS : 0);
+        bus_trace_text("AIRLIFT socket %u %s %s:%u failed", n, _mode_name(mode), host[0] ? host : _ip_text(ip), port);
+        return true;
+    }
     _ask(JOB_CONNECT, host, ip, port, mode != AIRLIFT_UDP, 0);
     return true;
 }
 
 void airlift_net_resolve(const char *host) {
+    if (!net_dns(host)) {
+        _fail(0);
+        return;
+    }
     _ask(JOB_RESOLVE, host, 0, 0, false, 0);
 }
 
@@ -539,6 +575,13 @@ static void _fill(sock_t *s) {
         s->rx_start = 0;
     }
     while (!s->eof && s->rx_end < RX_MAX) {
+        // The faults: a reset, or a cut that has given its bytes, ends the stream; while it
+        // stalls nothing comes in.
+        int check = net_recv_check(&s->conn);
+        if (check != 0) {
+            s->eof = check != NET_STALL;
+            return;
+        }
         int r;
         #if CIRCUITPY_SSL_MBEDTLS
         if (s->mode == AIRLIFT_TLS) {
@@ -550,17 +593,16 @@ static void _fill(sock_t *s) {
                 s->eof = true;
                 return;
             }
-            s->rx_end += (size_t)r;
-            continue;
-        }
+        } else
         #endif
-        r = (int)recv(s->fd, HOST_SOCK_BUF(s->rx + s->rx_end), RX_MAX - s->rx_end, 0);
-        if (r > 0) {
-            s->rx_end += (size_t)r;
-        } else {
-            s->eof = r == 0 || host_sock_errno() != EAGAIN;
-            return;
+        {
+            r = (int)recv(s->fd, HOST_SOCK_BUF(s->rx + s->rx_end), RX_MAX - s->rx_end, 0);
+            if (r <= 0) {
+                s->eof = r == 0 || host_sock_errno() != EAGAIN;
+                return;
+            }
         }
+        s->rx_end += net_recv(&s->conn, (size_t)r);
     }
 }
 
@@ -601,6 +643,7 @@ static uint16_t _accept(uint8_t n) {
             c->was_connected = true;
             c->remote_ip = from.sin_addr.s_addr;
             c->remote_port = ntohs(from.sin_port);
+            net_conn_open(&c->conn, _ip_text(c->remote_ip), c->remote_port);
             bus_trace_text("AIRLIFT socket %u from %s:%u", i, _ip_text(c->remote_ip), c->remote_port);
             return i;
         }
@@ -647,6 +690,12 @@ uint16_t airlift_net_write(uint8_t n, const uint8_t *buf, uint16_t len) {
     if (s == NULL || s->fd < 0 || s->listening || (s->mode != AIRLIFT_TCP && s->mode != AIRLIFT_TLS)) {
         return 0;
     }
+    long go = net_send(&s->conn, len);
+    if (go < 0) {
+        s->eof = go == -MP_ECONNRESET;  // nina-fw reports nothing sent; a reset ends the stream
+        return 0;
+    }
+    len = (uint16_t)go;
     uint32_t start = mp_hal_ticks_ms();
     size_t done = 0;
     while (done < len && mp_hal_ticks_ms() - start < WRITE_MS) {
@@ -677,6 +726,9 @@ uint16_t airlift_net_write(uint8_t n, const uint8_t *buf, uint16_t len) {
         }
         struct pollfd p = { .fd = s->fd, .events = events };
         host_poll(&p, 1, 100);
+    }
+    if (s->conn.reset) {
+        shutdown(s->fd, 2);     // a cut has sent its bytes: the peer sees the end
     }
     return (uint16_t)done;
 }

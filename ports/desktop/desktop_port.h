@@ -19,6 +19,7 @@ typedef struct {
     size_t ram_size;            // bytes of RAM for the port heap
     size_t heap_limit;          // --profile: what the VM's heap may grow to, 0 = no limit
     const char *profile;        // --profile: its name
+    size_t sockets;             // --sockets, --profile: how many the program may open, 0 = no limit
     int debug_port;             // --debug: the debug adapter's TCP port, 0 = none
     const char *exe_dir;        // the program's own directory, where debugadapter.py lives
     const char *board_name;     // --board: "virtual" (default), "ft232h", "mcp2221" or "gpiochip"

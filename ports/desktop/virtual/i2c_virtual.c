@@ -269,7 +269,7 @@ static void _deinit(void) {
 // "fault i2c nack": the address is not acknowledged, as with no device there; "hold": SDA held
 // low, every transfer times out.
 static int _fault(uint16_t address) {
-    fault_t f = fault_check("i2c", &(fault_ctx_t) { .block = -1, .addr = address });
+    fault_t f = fault_check("i2c", NULL, address);
     return !f.fired ? 0 : strcmp(f.action, "nack") == 0 ? -MP_ENODEV : -MP_ETIMEDOUT;
 }
 

@@ -195,7 +195,7 @@ static void _r1(card_t *c, uint8_t r1) {
 }
 
 static void _block_out(card_t *c, uint32_t block) {
-    fault_t f = fault_check("sd.read", &(fault_ctx_t) { .block = block, .addr = -1 });
+    fault_t f = fault_check("sd.read", NULL, block);
     if (f.fired) {
         c->mode = COMMAND;  // a multi-block read stops there
         if (strcmp(f.action, "error") == 0) {
@@ -328,7 +328,7 @@ static void _byte_in(card_t *c, uint8_t b) {
         case WRITE_DATA:
             c->data[c->data_len++] = b;
             if (c->data_len == BLOCK + 2) {
-                fault_t f = fault_check("sd.write", &(fault_ctx_t) { .block = c->block, .addr = -1 });
+                fault_t f = fault_check("sd.write", NULL, c->block);
                 if (f.fired && strcmp(f.action, "timeout") == 0) {
                     c->stuck = true;    // accepted, then busy for good
                     _send1(c, 0xe5);

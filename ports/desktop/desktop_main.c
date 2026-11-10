@@ -83,7 +83,9 @@ static void usage(const char *prog) {
         "  --nvm PATH        microcontroller.nvm's file (default the drive's path + .nvm, beside it)\n"
         "  --ram MB          heap for CircuitPython (default 16)\n"
         "  --heap KB         the VM's heap grows to KB at most (default: as far as --ram allows)\n"
-        "  --profile NAME    the VM's heap as large as a board's: rp2040, samd51, esp32s3, rp2350\n"
+        "  --profile NAME    the VM's heap as large as a board's, and as many sockets: rp2040,\n"
+        "                    samd51, esp32s3, rp2350\n"
+        "  --sockets N       the program may open N sockets at once (default: no limit)\n"
         "  --debug [PORT]    wait for a debugger (VS Code) on 127.0.0.1:PORT before code.py (default 5678)\n"
         "  --api [PORT]      the control API on 127.0.0.1:PORT (default 8765, 0 = any free port)\n"
         "  --api-host ADDR   listen on ADDR instead; needs CIRCUITPY_API_TOKEN\n"
@@ -141,15 +143,18 @@ static bool fast_time_allowed(void) {
 // The VM's heap limit at which as many 4 KB bytearrays fit in this (64-bit) program as at a
 // board's REPL with nothing else running: 37, 30, 526 and 2014 of them (measured 2026-11-10 on a
 // PicoPad, a PyBadge (SAMD51J19), a Feather ESP32-S3 TFT (2 MB PSRAM) and a Fruit Jam (RP2350B,
-// 8 MB PSRAM), CircuitPython 10 and 11 alpha).
+// 8 MB PSRAM), CircuitPython 10 and 11 alpha). The sockets: CONFIG_LWIP_MAX_SOCKETS in
+// ports/espressif's sdkconfig.defaults, MAX_SOCKETS in ports/raspberrypi's Socket.c (a Pico W, a
+// Pico 2 W); a SAMD51 has none of its own (an AirLift brings its ten).
 static const struct {
     const char *name;
     size_t heap;
+    size_t sockets;
 } _profiles[] = {
-    { "rp2040", 169 * 1024 },
-    { "samd51", 141 * 1024 },
-    { "esp32s3", 2170 * 1024 },
-    { "rp2350", 8266 * 1024 },
+    { "rp2040", 169 * 1024, 8 },
+    { "samd51", 141 * 1024, 0 },
+    { "esp32s3", 2170 * 1024, 8 },
+    { "rp2350", 8266 * 1024, 8 },
 };
 
 static size_t parse_mib(const char *s, const char *prog) {
@@ -237,6 +242,7 @@ int main(int argc, char **argv) {
             for (size_t k = 0; k < MP_ARRAY_SIZE(_profiles); k++) {
                 if (strcmp(name, _profiles[k].name) == 0) {
                     desktop_options.heap_limit = _profiles[k].heap;
+                    desktop_options.sockets = _profiles[k].sockets;
                     desktop_options.profile = _profiles[k].name;
                 }
             }
@@ -248,6 +254,14 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "circuitpython: profile %s on a 64-bit program: buffers fit as on the board, "
                     "small objects (lists, dicts, instances) take up to twice the room\n", name);
             }
+        } else if (strcmp(argv[i], "--sockets") == 0 && i + 1 < argc) {
+            char *end;
+            unsigned long n = strtoul(argv[++i], &end, 10);
+            if (*end != '\0' || n == 0 || n > 1024) {
+                usage(argv[0]);
+                return 2;
+            }
+            desktop_options.sockets = n;
         } else if (strcmp(argv[i], "--fast-time") == 0) {
             desktop_options.fast_time = true;
         } else if (strcmp(argv[i], "--audio-capture") == 0) {

@@ -71,6 +71,7 @@ SRC_C += \
 	host/fault.c \
 	host/gamepad.c \
 	host/host_net.c \
+	host/net_fault.c \
 	host/panel.c \
 	host/panel_control.c \
 	host/playbook.c \

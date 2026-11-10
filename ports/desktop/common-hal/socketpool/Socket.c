@@ -30,6 +30,9 @@
 
 #include "host_socket.h"
 
+// After Winsock: on Windows it brings windows.h in.
+#include "py/mphal.h"
+
 #define SOCKETPOOL_IP_STR_LEN 48
 
 static mp_obj_t _format_address(const struct sockaddr *addr, int family) {
@@ -101,7 +104,23 @@ static void socketpool_resolve_host_or_throw(int family, int type, const char *h
 }
 
 static void resolve_host_or_throw(socketpool_socket_obj_t *self, const char *hostname, struct sockaddr_storage *addr, int port) {
+    if (self->user && !net_dns(hostname)) {
+        common_hal_socketpool_socketpool_raise_gaierror_noname();
+    }
     socketpool_resolve_host_or_throw(self->family, self->type, hostname, addr, port);
+}
+
+// The program's sockets open now, against the board's limit (--sockets, --profile).
+static size_t _open;
+
+// The faults reach the program's stream sockets; the web workflow's and the API's are the lab's.
+static bool _faults(socketpool_socket_obj_t *self) {
+    return self->user && self->type == SOCK_STREAM;
+}
+
+static void _out_of_sockets(void) {
+    // As the espressif and raspberrypi ports say it.
+    mp_raise_RuntimeError(MP_ERROR_TEXT("Out of sockets"));
 }
 
 // How long to wait between checks for a socket to connect.
@@ -205,6 +224,9 @@ socketpool_socket_obj_t *common_hal_socketpool_socket(socketpool_socketpool_obj_
         default:
             mp_raise_NotImplementedError(MP_ERROR_TEXT("Unsupported socket type"));
     }
+    if (!net_socket(_open, desktop_options.sockets)) {
+        _out_of_sockets();
+    }
 
     socketpool_socket_obj_t *sock = mp_obj_malloc_with_finaliser(socketpool_socket_obj_t, &socketpool_socket_type);
 
@@ -215,6 +237,8 @@ socketpool_socket_obj_t *common_hal_socketpool_socket(socketpool_socketpool_obj_
         mp_raise_OSError(host_sock_errno());
     }
     sock->user = true;
+    net_conn_open(&sock->conn, "", -1);
+    _open++;
     return sock;
 }
 
@@ -286,12 +310,26 @@ socketpool_socket_obj_t *common_hal_socketpool_socket_accept(socketpool_socket_o
     int newsoc = socketpool_socket_accept(self, peer_out, NULL);
 
     if (newsoc > 0) {
+        if (self->user && !net_socket(_open, desktop_options.sockets)) {
+            host_sock_close(newsoc);
+            _out_of_sockets();
+        }
         // Create the socket
         sock->base.type = &socketpool_socket_type;
         sock->num = newsoc;
         sock->pool = self->pool;
         sock->connected = true;
         sock->type = self->type;
+        sock->user = self->user;
+        if (sock->user) {
+            size_t n = 0;
+            mp_obj_t *peer = NULL;
+            if (peer_out != NULL) {
+                mp_obj_get_array(*peer_out, &n, &peer);
+            }
+            net_conn_open(&sock->conn, n >= 2 ? mp_obj_str_get_str(peer[0]) : "", n >= 2 ? mp_obj_get_int(peer[1]) : -1);
+            _open++;
+        }
 
         return sock;
     } else {
@@ -371,6 +409,9 @@ void socketpool_socket_close(socketpool_socket_obj_t *self) {
     int fd = self->num;
     if (fd >= 0) {
         host_sock_close(fd);
+        if (self->user && _open > 0) {
+            _open--;
+        }
     }
     self->num = -1;
 }
@@ -384,6 +425,18 @@ void common_hal_socketpool_socket_connect(socketpool_socket_obj_t *self,
     (void)hostlen;
     struct sockaddr_storage addr;
     resolve_host_or_throw(self, host, &addr, port);
+
+    if (_faults(self)) {
+        int err = net_connect(host, port);
+        if (err == MP_ETIMEDOUT) {
+            // The socket's timeout runs out on the program's clock: 10 s for one without.
+            mp_hal_delay_ms(self->timeout_ms == (uint)-1 ? 10000 : self->timeout_ms);
+        }
+        if (err != 0) {
+            mp_raise_OSError(err);
+        }
+        net_conn_open(&self->conn, host, port);
+    }
 
     int result = connect(self->num, (struct sockaddr *)&addr, _sockaddr_len(&addr));
 
@@ -516,6 +569,42 @@ mp_uint_t common_hal_socketpool_socket_recvfrom_into(socketpool_socket_obj_t *se
     return received;
 }
 
+// The faults before a receive: -1 and its error, 0 for the end, 1 to read.
+static int _recv_check(socketpool_socket_obj_t *self, int *err) {
+    int check = net_recv_check(&self->conn);
+    *err = 0;
+    if (check == NET_STALL) {
+        mp_hal_delay_ms(10);    // nothing comes: the wait runs on the program's clock
+        *err = EAGAIN;
+        return -1;
+    }
+    if (check < 0 && check != NET_END) {
+        self->connected = false;
+        *err = -check;
+        return -1;
+    }
+    return check == NET_END ? 0 : 1;
+}
+
+// One receive from the computer, through the network's faults when they reach this socket.
+static int _recv(socketpool_socket_obj_t *self, const uint8_t *buf, uint32_t len, int *err) {
+    if (_faults(self)) {
+        int go = _recv_check(self, err);
+        if (go <= 0) {
+            return go;
+        }
+    }
+    int received = recv(self->num, HOST_SOCK_BUF(buf), len, MSG_DONTWAIT);
+    *err = host_sock_errno();
+    if (received > 0 && _faults(self)) {
+        received = (int)net_recv(&self->conn, (size_t)received);
+        if (received == 0) {
+            return _recv_check(self, err);   // dropped: reset or stalled there
+        }
+    }
+    return received;
+}
+
 int socketpool_socket_recv_into(socketpool_socket_obj_t *self,
     const uint8_t *buf, uint32_t len) {
     int received = 0;
@@ -530,8 +619,8 @@ int socketpool_socket_recv_into(socketpool_socket_obj_t *self,
                 timed_out = supervisor_ticks_ms64() - start_ticks >= self->timeout_ms;
             }
             RUN_BACKGROUND_TASKS;
-            received = recv(self->num, HOST_SOCK_BUF(buf), len, MSG_DONTWAIT);
-            int err = host_sock_errno();
+            int err;
+            received = _recv(self, buf, len, &err);
             if (received < 0 && err != EAGAIN && err != EWOULDBLOCK) {
                 return -err;
             }
@@ -578,9 +667,20 @@ mp_uint_t common_hal_socketpool_socket_recv_into(socketpool_socket_obj_t *self, 
 }
 
 int socketpool_socket_send(socketpool_socket_obj_t *self, const uint8_t *buf, uint32_t len) {
+    if (self->num != -1 && _faults(self)) {
+        long go = net_send(&self->conn, len);
+        if (go < 0) {
+            self->connected = go != -MP_ECONNRESET && self->connected;
+            return (int)go;
+        }
+        len = (uint32_t)go;
+    }
     int sent = -1;
     if (self->num != -1) {
         sent = send(self->num, HOST_SOCK_CBUF(buf), len, MSG_NOSIGNAL);
+        if (_faults(self) && self->conn.reset) {
+            shutdown(self->num, 2);     // a cut has sent its bytes: the peer sees the end
+        }
     } else {
         sent = -MP_EBADF;
     }

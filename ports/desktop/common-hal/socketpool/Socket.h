@@ -12,6 +12,8 @@
 
 #include "common-hal/socketpool/SocketPool.h"
 
+#include "net_fault.h"
+
 typedef struct ssl_sslsocket_obj ssl_sslsocket_obj_t;
 
 typedef struct {
@@ -25,6 +27,7 @@ typedef struct {
     ssl_sslsocket_obj_t *ssl_socket;
     mp_uint_t timeout_ms;
     bool user;                  // the program's, not the web workflow's
+    net_conn_t conn;            // its faults (the program's stream sockets)
 } socketpool_socket_obj_t;
 
 void socket_user_reset(void);

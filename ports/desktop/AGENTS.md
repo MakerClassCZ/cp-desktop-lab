@@ -66,7 +66,9 @@ with Board.launch("ports/desktop/build-linux/circuitpython", "/tmp/repro/CIRCUIT
   board has.
 - Faults, for the bugs of what goes wrong: `lab.panel("fault sd.write error after=3 once")` in
   the program or `b.panel(...)` from outside; points `sd.read`, `sd.write` (`error`, `timeout`),
-  `i2c` (`nack`, `hold`, `addr=`); `set SD present 0`, `set EPD busy stuck`. `lab.fired()`,
+  `i2c` (`nack`, `hold`, `addr=`), `wifi.connect`, `wifi.link drop`, `net.dns`, `net.socket
+  full`, `net.connect`, `net.send`/`net.recv` (`cut N`, `reset`, `stall`; `host=`, `port=`), on
+  wifi's sockets and an AirLift's; `set SD present 0`, `set EPD busy stuck`. `lab.fired()`,
   `b.fired()`, `faults_fired` in `b.after_run()`, a row in `ab`. README.md, Faults.
 - A repro to attach: `code.py` plus a playbook, `cpapi.py ab MAIN FIX code.py --playbook
   x.txt`: `wait "TEXT"`, a fault or a press, `expect "TEXT"`; it plays on the program's clock
@@ -117,7 +119,8 @@ with Board.launch("ports/desktop/build-linux/circuitpython", "/tmp/repro/CIRCUIT
   KB). A wild pointer often crashes here too, but not always.
 - A board's memory: the heap may grow to 16 MB; `--profile rp2040` (`samd51`, `esp32s3`,
   `rp2350`; `args=["--profile", "rp2040"]`) stops it where that board's stops, so
-  `MemoryError` comes where it would there; small objects still take more room here.
+  `MemoryError` comes where it would there; small objects still take more room here. A profile
+  also allows 8 sockets (`--sockets N` any number), then `RuntimeError: Out of sockets`.
 - 64-bit sizes: use the i386 program when `size_t`, pointers or `mp_int_t` may matter.
 - The nRF port's own `_bleio`: BLE here is the HCI host stack the AirLift boards use
   (`devices/ble_hci`), as a peripheral and as a central, at an MTU of 23; it pairs (LE Legacy,

@@ -13,7 +13,9 @@
 #include "airlift_net.h"
 #include "bus_trace.h"
 #include "desktop_pins.h"
+#include "fault.h"
 #include "host_net.h"
+#include "net_fault.h"
 
 #define START 0xe0
 #define END 0xee
@@ -46,6 +48,7 @@ static struct {
     size_t reply_len, reply_pos;
     uint8_t working;            // the command a job answers
     bool connected;
+    uint8_t failed;             // the status a failed connect left: 1 no SSID, 4 failed
     char ssid[33];
     bool said[256];             // unknown commands said on stderr
 } _a = { .cs = -1, .busy = -1, .reset = -1, .gpio0 = -1 };
@@ -145,7 +148,14 @@ static void _connect(const uint8_t *ssid, size_t len) {
     len = len < sizeof(_a.ssid) - 1 ? len : sizeof(_a.ssid) - 1;
     memcpy(_a.ssid, ssid, len);
     _a.ssid[len] = '\0';
-    _a.connected = true;
+    // "fault wifi.connect": the status nina-fw reports, raised as the library raises it.
+    fault_t f = fault_check("wifi.connect", _a.ssid, -1);
+    _a.connected = !f.fired;
+    _a.failed = !f.fired ? 0 : strcmp(f.action, "noap") == 0 ? 1 : 4;
+    if (f.fired) {
+        return;
+    }
+    net_link_restore();
     bus_trace_text("AIRLIFT connect %s", _a.ssid);
 }
 
@@ -214,7 +224,8 @@ static void _handle(void) {
             _byte(command, 1);
             break;
         case 0x20:      // GET_CONN_STATUS
-            _byte(command, _a.connected ? 3 : 6);
+            // Connected, the link lost (a fault dropped it), a connect that failed, or none.
+            _byte(command, _a.connected ? (net_link_up() ? 3 : 5) : _a.failed ? _a.failed : 6);
             break;
         case 0x21: {    // GET_IPADDR
             host_net_info_t info = { 0 };
@@ -476,6 +487,7 @@ static void _restart(void) {
     _a.command_len = 0;
     _a.reply_len = 0;
     _a.connected = false;
+    _a.failed = 0;
     airlift_net_reset();
 }
 

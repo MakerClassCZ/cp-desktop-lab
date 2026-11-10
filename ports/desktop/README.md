@@ -55,6 +55,10 @@ only as large as a board's, so a program runs out of memory where it would there
 Pointers are 8 bytes here, so small objects (lists, dicts, instances) take up to twice the room;
 the i386 program has the board's object sizes. `--heap KB` sets the limit directly.
 
+A profile limits the sockets too: `rp2040`, `esp32s3` and `rp2350` let the program open 8 at
+once, as their ports do, and the ninth raises `RuntimeError: Out of sockets`; `--sockets N` sets
+the limit directly. Without either the program opens as many as it likes.
+
 CIRCUITPY is a directory, `./CIRCUITPY` by default. A missing directory is created on first start
 with what a blank board has: `code.py`, `settings.toml` and `lib/`. Edit the files with any editor
 or copy a project in, and `code.py` reloads after each change, as when a computer saves to a
@@ -985,19 +989,33 @@ A fault is a panel line: at a named point a call fails, on a count, never at ran
 repeats exactly and `ab` compares two programs on the same failure.
 
 ```
-fault POINT ACTION [block=N] [addr=N] [after=N] [count=N|once]
+fault POINT ACTION [ARG] [FILTER=VALUE] [after=N] [count=N|once]
 fault clear [POINT]
 ```
 
-| point | actions | what the program sees |
-|---|---|---|
-| `sd.read` | `error`, `timeout` | the card's error token, or no data token: sdcardio's `OSError` |
-| `sd.write` | `error`, `timeout` | the write refused, or the card busy for good (until a new `SDCard` resets it) |
-| `i2c` | `nack`, `hold` | the address not acknowledged (`ENODEV`), or SDA held low (`ETIMEDOUT`) |
+| point | actions | filters | what the program sees |
+|---|---|---|---|
+| `sd.read` | `error`, `timeout` | `block=` | the card's error token, or no data token: sdcardio's `OSError` |
+| `sd.write` | `error`, `timeout` | `block=` | the write refused, or the card busy for good (until a new `SDCard` resets it) |
+| `i2c` | `nack`, `hold` | `addr=` | the address not acknowledged (`ENODEV`), or SDA held low (`ETIMEDOUT`) |
+| `wifi.connect` | `fail`, `auth`, `noap` | `ssid=` | `ConnectionError`: `Unknown failure 205` (as a Pico W says it), `Authentication failure`, `No network with that ssid` |
+| `wifi.link` | `drop` | | the link gone at the next network call: `wifi.radio.connected` false, open connections reset, lookups fail, until `wifi.radio.connect()` |
+| `net.dns` | `fail` | `host=` | `gaierror`, `Name or service not known` |
+| `net.socket` | `full` | | `RuntimeError: Out of sockets` |
+| `net.connect` | `refuse`, `timeout` | `host=`, `port=` | `OSError` `ECONNREFUSED`; `ETIMEDOUT` after the socket's timeout (10 s without one) |
+| `net.send` | `error`, `cut N` | `host=`, `port=` | `OSError` `EIO`; the peer gets N more bytes and then the end, the program `ECONNRESET` |
+| `net.recv` | `reset`, `cut N`, `stall` | `host=`, `port=` | `OSError` `ECONNRESET`; N more bytes, then the end (`0`); nothing comes, as from a silent peer, until the socket's timeout |
 
 `after=N` lets the first N matching calls through, `count=N` fires N times (`once`: one),
-without either every time; `block=` and `addr=` narrow a rule to a block or an address. Rules are
-checked in the order given, and the first that fires decides. Rules from the program
+without either every time; a filter narrows a rule to a block, an address, a network, a host or
+a port (the host as the program named it). Rules are checked in the order given, and the first
+that fires decides. `net.recv` counts the receives that bring data, the other points their
+calls. The waits run on the program's clock, so `--fast-time` takes no real time for them.
+
+The network's points act on both of the lab's networks: `wifi` and `socketpool` on the
+computer's, and an AirLift's, where nina-fw's answers (a status, a failed start, no socket)
+reach the program as `adafruit_esp32spi` raises them. Only the program's TCP sockets meet
+`net.send` and `net.recv`; UDP and the web workflow's sockets do not. Rules from the program
 (`lab.panel`) end with its run and its `fault clear` clears only those; rules from the API or
 the key script stay, counting on across reloads, until a `fault clear` from outside. Each
 firing is in the trace (`FAULT i2c 0x18: nack`), `lab.fired()` and `b.fired()` list this

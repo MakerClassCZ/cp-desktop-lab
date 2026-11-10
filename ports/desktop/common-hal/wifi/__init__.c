@@ -9,6 +9,7 @@
 #include "shared-bindings/wifi/__init__.h"
 
 #include "host_net.h"
+#include "net_fault.h"
 
 wifi_radio_obj_t common_hal_wifi_radio_obj = {
     .base = { &wifi_radio_type },
@@ -22,9 +23,11 @@ void common_hal_wifi_init(bool user_initiated) {
     common_hal_wifi_radio_obj.base.type = &wifi_radio_type;
 }
 
-// After a program: a scan ends; the computer stays online, so the connection does too.
+// After a program: a scan ends; the computer stays online, so the connection does too, and a
+// link a fault dropped is back.
 void wifi_user_reset(void) {
     common_hal_wifi_radio_obj.current_scan = NULL;
+    net_link_restore();
 }
 
 void common_hal_wifi_gc_collect(void) {
