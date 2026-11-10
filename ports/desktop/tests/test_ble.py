@@ -729,7 +729,12 @@ while True:
 """
 with launch(INDICATING) as b:
     b.wait("ready", timeout=15)
-    p = b.ble.connect()
+    try:
+        p = b.ble.connect()
+    except cpapi.ApiError:
+        print("the program:", b.console(since=0)["data"][-1500:])
+        print("BLE:", b.request("GET", "/api/ble"))
+        raise
     c = p.characteristic(0x1251)
     p._request(b"\x12" + struct.pack("<HH", c.cccd, 2), 0x13)  # indications on
     end = time.time() + 4
