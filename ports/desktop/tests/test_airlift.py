@@ -82,7 +82,9 @@ ECHO = serve(socketserver.ThreadingTCPServer(("127.0.0.1", 0), Echo))
 UDP = serve(socketserver.ThreadingUDPServer(("127.0.0.1", 0), UdpEcho))
 tls_server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Pages)
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-context.load_cert_chain(os.path.join(T, "airlift_server.pem"), os.path.join(T, "airlift_server.key"))
+context.load_cert_chain(
+    os.path.join(T, "airlift_server.pem"), os.path.join(T, "airlift_server.key")
+)
 tls_server.socket = context.wrap_socket(tls_server.socket, server_side=True)
 HTTPS = serve(tls_server)
 CLOSED = free_port()
@@ -94,6 +96,7 @@ TRACED = ["--trace-bus", TRACE]
 def traced():
     """The bus trace so far, all of it (the API keeps only its end)."""
     return open(TRACE, encoding="utf8", errors="replace").read()
+
 
 START = """import board, time, wifi
 from digitalio import DigitalInOut
@@ -192,19 +195,39 @@ with launch(PROGRAM, PYPORTAL, FILES, args=TRACED) as b:
     ok = seen(b, "listening", 30)
     out = b.console(since=0)["data"]
     check("firmware version 3.3.0", "fw 3.3.0" in out, out[-600:])
-    check("not connected (6), then connected (3)", re.search(r"status 6\r?\nstatus 3", out) is not None, out[-600:])
+    check(
+        "not connected (6), then connected (3)",
+        re.search(r"status 6\r?\nstatus 3", out) is not None,
+        out[-600:],
+    )
     check("its address is the computer's", "ip same True" in out, out[-600:])
     check("a MAC of six bytes", "mac 6" in out, out[-600:])
     check("the scan finds the network it is on", "scan True" in out, out[-600:])
     check("the time is the computer's", "time True" in out, out[-600:])
-    check("an unknown command is refused (BrokenPipeError)", out.count("unknown BrokenPipeError") == 2, out[-600:])
+    check(
+        "an unknown command is refused (BrokenPipeError)",
+        out.count("unknown BrokenPipeError") == 2,
+        out[-600:],
+    )
     said = "".join(b.stderr)
-    check("and said once on stderr", said.count("nina-fw command 0x5f is not modelled") == 1, said[-400:])
+    check(
+        "and said once on stderr",
+        said.count("nina-fw command 0x5f is not modelled") == 1,
+        said[-400:],
+    )
     check("DNS: localhost", "dns 127.0.0.1" in out, out[-600:])
     check("DNS: a name that is not there fails", "bad name refused" in out, out[-600:])
-    check("HTTP through adafruit_requests: 20480 bytes, all of them", "http 200 20480 True" in out, out[-600:])
+    check(
+        "HTTP through adafruit_requests: 20480 bytes, all of them",
+        "http 200 20480 True" in out,
+        out[-600:],
+    )
     check("TCP echo", "echo b'ping'" in out, out[-600:])
-    check("a closed port fails as nina-fw does (an OSError)", "closed port refused BrokenPipeError" in out, out[-600:])
+    check(
+        "a closed port fails as nina-fw does (an OSError)",
+        "closed port refused BrokenPipeError" in out,
+        out[-600:],
+    )
     check("UDP echo", "udp b'hello'" in out, out[-600:])
     if ok:
         c = socket.create_connection(("127.0.0.1", SERVER), timeout=10)
@@ -213,18 +236,29 @@ with launch(PROGRAM, PYPORTAL, FILES, args=TRACED) as b:
         c.close()
     else:
         back = None
-    check("a server: the program accepts the computer's connection", seen(b, "got b'abc' from 127.0.0.1", 15), b.console(since=0)["data"][-400:])
+    check(
+        "a server: the program accepts the computer's connection",
+        seen(b, "got b'abc' from 127.0.0.1", 15),
+        b.console(since=0)["data"][-400:],
+    )
     check("a server: and answers", back == b"abc", back)
     seen(b, "done", 15)
     out = b.console(since=0)["data"]
-    check("a reset closes its sockets and forgets the network", "before reset 4" in out and "after reset 0 6" in out, out[-400:])
+    check(
+        "a reset closes its sockets and forgets the network",
+        "before reset 4" in out and "after reset 0 6" in out,
+        out[-400:],
+    )
     trace = traced()
     for name, pattern in (
         ("connect", r"AIRLIFT connect Lab"),
         ("the ESP32's own pins", r"AIRLIFT pin 25 mode 1.*AIRLIFT pin 25 pwm 127"),
         ("a socket to the HTTP server", r"AIRLIFT socket \d TCP 127\.0\.0\.1:%d" % HTTP),
         ("UDP", r"AIRLIFT socket \d UDP 127\.0\.0\.1:%d" % UDP),
-        ("a server", r"AIRLIFT socket \d listen %d.*AIRLIFT socket \d from 127\.0\.0\.1:" % SERVER),
+        (
+            "a server",
+            r"AIRLIFT socket \d listen %d.*AIRLIFT socket \d from 127\.0\.0\.1:" % SERVER,
+        ),
         ("closed", r"AIRLIFT socket \d closed"),
         ("reset", r"AIRLIFT reset"),
     ):
@@ -250,7 +284,11 @@ with launch(TLS, PYPORTAL, FILES, env=ca, args=TRACED) as b:
     out = b.console(since=0)["data"]
     check("HTTPS to a server the CA signed: all of it", "https 200 True" in out, out[-600:])
     trace = traced()
-    check("trace: TLS", re.search(r"AIRLIFT socket \d TLS localhost:%d" % HTTPS, trace) is not None, trace[-400:])
+    check(
+        "trace: TLS",
+        re.search(r"AIRLIFT socket \d TLS localhost:%d" % HTTPS, trace) is not None,
+        trace[-400:],
+    )
 # TLS again after a soft reload: its memory (and the root bundle's) went with the VM heap.
 FETCH = (
     START
@@ -264,15 +302,23 @@ r.close()
 )
 RELOAD = dict(FILES)
 RELOAD["second.py"] = FETCH % dict(https=HTTPS) + 'print("second over")\n'
-FIRST = FETCH % dict(https=HTTPS) + 'supervisor.set_next_code_file("second.py")\nsupervisor.reload()\n'
+FIRST = (
+    FETCH % dict(https=HTTPS) + 'supervisor.set_next_code_file("second.py")\nsupervisor.reload()\n'
+)
 with launch(FIRST, PYPORTAL, RELOAD, env=ca) as b:
     seen(b, "second over", 60)
     out = b.console(since=0)["data"]
-    check("HTTPS before and after a soft reload", "code.py 200 True" in out and "second.py 200 True" in out, out[-600:])
+    check(
+        "HTTPS before and after a soft reload",
+        "code.py 200 True" in out and "second.py 200 True" in out,
+        out[-600:],
+    )
 with launch(TLS, PYPORTAL, FILES, args=TRACED) as b:
     seen(b, "done", 40)
     out = b.console(since=0)["data"]
-    check("the same server is not trusted with the bundle alone", "https failed" in out, out[-600:])
+    check(
+        "the same server is not trusted with the bundle alone", "https failed" in out, out[-600:]
+    )
     trace = traced()
     check("trace: why", "certificate not trusted" in trace, trace[-400:])
 
@@ -302,8 +348,14 @@ else:
 FEATHER = open(os.path.join(BOARDS, "feather.toml")).read()
 WING = os.path.join(BOARDS, "airlift_featherwing.toml")
 if os.path.exists(WING):
-    with launch(START + 'print("fw", esp.firmware_version)\n', FEATHER, FILES, args=["--board-file", WING]) as b:
-        check("a Feather with an AirLift FeatherWing", seen(b, "fw 3.3.0", 20), b.console(since=0)["data"][-400:])
+    with launch(
+        START + 'print("fw", esp.firmware_version)\n', FEATHER, FILES, args=["--board-file", WING]
+    ) as b:
+        check(
+            "a Feather with an AirLift FeatherWing",
+            seen(b, "fw 3.3.0", 20),
+            b.console(since=0)["data"][-400:],
+        )
 
 status, said = refused(board='[spi]\nESP = "airlift cs=GPIO1"\n')
 check("an AirLift needs its ready and reset pins", "busy=" in said, said)

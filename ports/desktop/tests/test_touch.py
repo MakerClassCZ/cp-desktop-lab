@@ -76,7 +76,11 @@ with launch(RESISTIVE, open(PYPORTAL).read()) as b:
         rx, ry = (int(v) for v in line.split(")")[0].split(","))
         # The library truncates its mapped value: a pixel short on either axis is the same touch.
         results[(x, y)] = (rx, ry) if abs(rx - x) > 1 or abs(ry - y) > 1 else True
-    check("resistive: the corners and points in between read where they were touched", all(r is True for r in results.values()), results)
+    check(
+        "resistive: the corners and points in between read where they were touched",
+        all(r is True for r in results.values()),
+        results,
+    )
     state = [d for d in b.state()["displays"] if d["name"] == "DISPLAY"][0]
     check(
         "resistive: the panel's state has the touch",
@@ -135,7 +139,11 @@ FT_BOARD = '[pins]\nD9 = "GPIO18"\nD10 = "GPIO19"\n[spi]\nTFT = "st7789 240x320 
 with launch(TFT + REGS % ("0x38", "0xa1", 8), FT_BOARD) as b:
     seen(b, "ready")
     out = b.console(since=0)["data"]
-    check("ft6206: library version, chip 0x06, vendor 0x11", "ids 3003060000100011" in out, out[-300:])
+    check(
+        "ft6206: library version, chip 0x06, vendor 0x11",
+        "ids 3003060000100011" in out,
+        out[-300:],
+    )
     check("ft6206: untouched, no touches", seen(b, "touches 0"), out[-300:])
     b.panel("touch TFT 300 10")
     check(
@@ -147,8 +155,14 @@ with launch(TFT + REGS % ("0x38", "0xa1", 8), FT_BOARD) as b:
     check("ft6206: dragged on", seen(b, "touches 1 at 39,20"), b.console(since=0)["data"][-300:])
     b.panel("untouch TFT")
     check("ft6206: lifted", seen(b, "touches 0"), b.console(since=0)["data"][-300:])
-    sliders = {p["name"]: p.get("value") for p in b.state()["parts"] if p["name"].startswith("CTP")}
-    check("ft6206: its channels on the panel", "CTP.x" in sliders and "CTP.touched" in sliders, sliders)
+    sliders = {
+        p["name"]: p.get("value") for p in b.state()["parts"] if p["name"].startswith("CTP")
+    }
+    check(
+        "ft6206: its channels on the panel",
+        "CTP.x" in sliders and "CTP.touched" in sliders,
+        sliders,
+    )
 
 # A CST816 on the main window, with the panel's own swap.
 with launch(REGS % ("0x15", "0xa6", 6), '[i2c]\nCTP = "cst816 swap"\n') as b:
@@ -156,7 +170,9 @@ with launch(REGS % ("0x15", "0xa6", 6), '[i2c]\nCTP = "cst816 swap"\n') as b:
     out = b.console(since=0)["data"]
     check("cst816: chip 0xb5 at 0xa7", "ids 01b50101b5" in out, out[-300:])
     b.panel("touch DISPLAY 10 20")
-    check("cst816: swapped, 20,10", seen(b, "touches 1 at 20,10"), b.console(since=0)["data"][-300:])
+    check(
+        "cst816: swapped, 20,10", seen(b, "touches 1 at 20,10"), b.console(since=0)["data"][-300:]
+    )
 
 # A TSC2007 follows a touch on the main window: raw 0-4095 over it, the pressure while down.
 TSC = """import board, time
@@ -180,14 +196,22 @@ with launch(TSC, '[i2c]\nTS = "tsc2007"\n') as b:
     seen(b, "ready")
     w = [d for d in b.state()["displays"] if d["name"] == "DISPLAY"][0]["width"]
     b.panel("touch DISPLAY %d 0" % (w - 1))
-    check("tsc2007: the right edge reads 4095, pressed", seen(b, "tsc 4095 0 1000"), b.console(since=0)["data"][-300:])
+    check(
+        "tsc2007: the right edge reads 4095, pressed",
+        seen(b, "tsc 4095 0 1000"),
+        b.console(since=0)["data"][-300:],
+    )
     b.panel("untouch DISPLAY")
-    check("tsc2007: lifted, no pressure", seen(b, "tsc 4095 0 0"), b.console(since=0)["data"][-300:])
+    check(
+        "tsc2007: lifted, no pressure", seen(b, "tsc 4095 0 0"), b.console(since=0)["data"][-300:]
+    )
 
 # What is refused
 status, said = refused(board='[touchscreen]\nT = "resistive GPIO0 GPIO1"\n')
 check("a resistive panel needs four pins", "a [touchscreen] is" in said, said)
-status, said = refused(board='[touchscreen]\nT = "resistive GPIO0 GPIO1 GPIO2 GPIO3 calibration=1,1,2,3"\n')
+status, said = refused(
+    board='[touchscreen]\nT = "resistive GPIO0 GPIO1 GPIO2 GPIO3 calibration=1,1,2,3"\n'
+)
 check("a calibration needs two different readings per axis", "calibration=" in said, said)
 with launch('print("ready")\nwhile True: pass\n') as b:
     seen(b, "ready")
